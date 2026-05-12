@@ -25,6 +25,12 @@ export interface Config {
   /** RSocket TCP port (7000 is the RSocket convention) */
   port: number;
 
+  /**
+   * Bearer-style secret sent on every RSocket frame metadata (JSON: `{ "auth": "..." }`).
+   * Part 6 server must validate this token.
+   */
+  authToken: string;
+
   /** Ollama model name for the advisor role e.g. "gemma3:27b" */
   advisorModel: string;
 
@@ -59,6 +65,9 @@ const DEFAULT_CONFIG: Config = {
   // RSocket TCP connection — not HTTP
   server: "localhost",
   port: 7000,
+
+  // Set via /config or editing config.json when server requires auth
+  authToken: "",
 
   // Sensible defaults so first run works without manual setup
   advisorModel: "gemma3:27b",
@@ -241,6 +250,70 @@ export const saveConfig = (config: Config): void => {
 export const updateConfig = (patch: Partial<Config>): Config => {
   const config = loadConfig();
   Object.assign(config, patch);
+  saveConfig(config);
+  return config;
+};
+
+/**
+ * <Summary>
+ * What it does:
+ *   Reads a single field from the merged on-disk config using the same
+ *   merge rules as loadConfig (DEFAULT_CONFIG spread under disk values).
+ *
+ * How it does it (step by step):
+ *   1. Calls loadConfig to get the full merged config object.
+ *   2. Returns the value at the requested key.
+ *
+ * Parameters:
+ *   @param {K} key — A key of the Config interface e.g. "server", "advisorModel".
+ *
+ * Returns:
+ *   @returns {Config[K]} — The value for that key, typed to match the field.
+ *
+ * Dependencies:
+ *   - loadConfig — reads and merges config from disk.
+ *
+ * Dependants:
+ *   None (utility accessor, available for any caller that needs one field).
+ * </Summary>
+ */
+export const getConfig = <K extends keyof Config>(key: K): Config[K] => {
+  return loadConfig()[key];
+};
+
+/**
+ * <Summary>
+ * What it does:
+ *   Updates exactly one config field, saves immediately to disk, and returns
+ *   the full updated config object.
+ *
+ * How it does it (step by step):
+ *   1. Loads the current config from disk via loadConfig.
+ *   2. Merges the single key-value pair into the loaded object.
+ *   3. Saves the merged config back to disk via saveConfig.
+ *   4. Returns the updated config.
+ *
+ * Parameters:
+ *   @param {K} key — The config field to update.
+ *   @param {Config[K]} value — The new value for that field.
+ *
+ * Returns:
+ *   @returns {Config} — The full updated configuration after saving.
+ *
+ * Dependencies:
+ *   - loadConfig — reads current config from disk.
+ *   - saveConfig — writes updated config back to disk.
+ *
+ * Dependants:
+ *   None (utility accessor, available for any caller that needs to set one field).
+ * </Summary>
+ */
+export const setConfig = <K extends keyof Config>(
+  key: K,
+  value: Config[K],
+): Config => {
+  const config = loadConfig();
+  Object.assign(config, { [key]: value } as Partial<Config>);
   saveConfig(config);
   return config;
 };

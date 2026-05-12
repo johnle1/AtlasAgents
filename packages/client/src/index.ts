@@ -5,7 +5,13 @@ import * as fs from 'node:fs'
 import { loadConfig, HISTORY_FILE, ensureDirs } from './config.js'
 import { Connection } from './connection.js'
 import { CommandHandler } from './commands.js'
-import { printBanner, printToken, printStreamEnd, printError } from './renderer.js'
+import {
+  printBanner,
+  printToken,
+  printStreamEnd,
+  printError,
+  printConnectionStatus,
+} from './renderer.js'
 
 /**
  * Maximum number of history lines to keep in ~/.agent-cli/.history.
@@ -91,19 +97,23 @@ const saveHistory = (lines: string[]): void => {
  * How it does it (step by step):
  *   1. Loads config from ~/.agent-cli/config.json.
  *   2. Creates Connection instance with loaded config.
- *   3. Prints branded banner.
- *   4. Loads history from disk for arrow-key recall.
- *   5. Creates readline interface with prompt and history.
- *   6. Creates CommandHandler to route slash commands.
- *   7. Sets up SIGINT handler (Ctrl+C):
+ *   3. Subscribes to connection status changes via onConnectionStatus so
+ *      the CLI prints a dim status line when state transitions occur.
+ *   4. Awaits conn.connect() to open the RSocket TCP session — fails
+ *      loudly on startup if the server is unreachable.
+ *   5. Prints branded banner.
+ *   6. Loads history from disk for arrow-key recall.
+ *   7. Creates readline interface with prompt and history.
+ *   8. Creates CommandHandler to route slash commands.
+ *   9. Sets up SIGINT handler (Ctrl+C):
  *      - During streaming: aborts stream and continues.
  *      - When idle: first press warns, second press exits.
- *   8. Sets up line handler:
- *      - Passes to CommandHandler if starts with "/".
- *      - Otherwise sends to Connection.sendTask as streaming task.
- *   9. Sets up close handler (Ctrl+D):
- *      - Saves history and exits cleanly.
- *   10. Displays prompt and waits for input.
+ *   10. Sets up line handler:
+ *       - Passes to CommandHandler if starts with "/".
+ *       - Otherwise sends to Connection.sendTask as streaming task.
+ *   11. Sets up close handler (Ctrl+D):
+ *       - Saves history and exits cleanly.
+ *   12. Displays prompt and waits for input.
  *
  * Parameters:
  *   None.
@@ -113,9 +123,11 @@ const saveHistory = (lines: string[]): void => {
  *
  * Dependencies:
  *   - config.loadConfig — loads config on startup.
- *   - Connection — sends tasks to server.
+ *   - Connection — opens RSocket TCP session and sends tasks to server.
+ *   - Connection.onConnectionStatus — subscribes to status changes.
  *   - CommandHandler — handles slash commands.
- *   - renderer.printBanner, printToken, printStreamEnd, printError — display output.
+ *   - renderer.printBanner, printToken, printStreamEnd, printError,
+ *     printConnectionStatus — display output.
  *   - loadHistory, saveHistory — persist command history.
  *   - readline.createInterface — creates REPL.
  *
@@ -126,6 +138,12 @@ const saveHistory = (lines: string[]): void => {
 const main = async (): Promise<void> => {
   const config = loadConfig()
   const conn = new Connection(config)
+
+  conn.onConnectionStatus((status) => {
+    printConnectionStatus(status)
+  })
+
+  await conn.connect()
 
   printBanner()
 

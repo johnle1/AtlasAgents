@@ -1,5 +1,5 @@
 import type { Config } from './config.js'
-import type { MemoryEntry } from './connection.js'
+import type { ConnectionStatus, MemoryEntry } from './connection.js'
 
 /**
  * ANSI escape codes for terminal styling.
@@ -187,12 +187,80 @@ export const printSuccess = (msg: string): void => {
 /**
  * <Summary>
  * What it does:
+ *   Formats an auth token for safe display in the terminal, masking all
+ *   but the last 4 characters to prevent accidental exposure.
+ *
+ * How it does it (step by step):
+ *   1. Trims whitespace from the token.
+ *   2. If empty, returns dim "(not set)".
+ *   3. If 4 characters or shorter, returns dim "****" (too short to reveal any).
+ *   4. Otherwise returns a dim ellipsis followed by the last 4 characters.
+ *
+ * Parameters:
+ *   @param {string} token — The raw auth token string from config.
+ *
+ * Returns:
+ *   @returns {string} — ANSI-styled masked representation of the token.
+ *
+ * Dependencies:
+ *   None.
+ *
+ * Dependants:
+ *   - printConfig — uses this to display the authToken row safely.
+ * </Summary>
+ */
+const formatAuthTokenDisplay = (token: string): string => {
+  const t = token.trim()
+  if (!t) return `${DIM}(not set)${RESET}`
+  if (t.length <= 4) return `${DIM}****${RESET}`
+  return `${DIM}…${RESET}${t.slice(-4)}`
+}
+
+/**
+ * <Summary>
+ * What it does:
+ *   Prints a one-line dim status label showing the current RSocket
+ *   connection state so the user knows whether the CLI is online.
+ *
+ * How it does it (step by step):
+ *   1. Maps the ConnectionStatus value to a human-readable label.
+ *   2. Prints the label in dim gray wrapped in square brackets.
+ *
+ * Parameters:
+ *   @param {ConnectionStatus} status — The current connection state.
+ *
+ * Returns:
+ *   void — called for side effects only.
+ *
+ * Dependencies:
+ *   None (uses console.log).
+ *
+ * Dependants:
+ *   - index.ts main() — subscribed via Connection.onConnectionStatus.
+ * </Summary>
+ */
+export const printConnectionStatus = (status: ConnectionStatus): void => {
+  const label =
+    status === 'connected'
+      ? 'connected'
+      : status === 'connecting'
+        ? 'connecting…'
+        : status === 'reconnecting'
+          ? 'reconnecting…'
+          : 'disconnected'
+  console.log(`${DIM}  [rsocket: ${label}]${RESET}`)
+}
+
+/**
+ * <Summary>
+ * What it does:
  *   Prints the current CLI configuration in a formatted table.
  *
  * How it does it (step by step):
  *   1. Prints "Current Configuration" header in bold.
  *   2. Prints a horizontal line.
- *   3. Prints each config field with cyan labels and dim "(not set)" for empty strings.
+ *   3. Prints server, port, and masked auth token.
+ *   4. Prints model names (dim "(not set)" for empty), temps, and retries.
  *
  * Parameters:
  *   @param {Config} config — The configuration object to display.
@@ -212,6 +280,10 @@ export const printConfig = (config: Config): void => {
   console.log(`${BOLD}  Current Configuration${RESET}`)
   console.log(`${DIM}  ${'─'.repeat(34)}${RESET}`)
   console.log(`  ${CYAN}server${RESET}         ${config.server}`)
+  console.log(`  ${CYAN}port${RESET}           ${config.port}`)
+  console.log(
+    `  ${CYAN}auth token${RESET}     ${formatAuthTokenDisplay(config.authToken)}`,
+  )
   console.log(`  ${CYAN}advisor model${RESET}  ${config.advisorModel || DIM + '(not set)' + RESET}`)
   console.log(`  ${CYAN}agent model${RESET}    ${config.agentModel || DIM + '(not set)' + RESET}`)
   console.log(`  ${CYAN}advisor temp${RESET}   ${config.advisorTemp}`)

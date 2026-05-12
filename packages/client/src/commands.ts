@@ -219,7 +219,7 @@ export class CommandHandler {
     const selected = models[choice]
     const key = role === 'advisor' ? 'advisorModel' : 'agentModel'
     const config = updateConfig({ [key]: selected })
-    this.conn.reload(config)
+    await this.conn.reload(config)
     printSuccess(`${role} model set to ${selected}`)
   }
 
