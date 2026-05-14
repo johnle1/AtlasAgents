@@ -1,22 +1,22 @@
-import type { Config } from './config.js'
-import type { ConnectionStatus, MemoryEntry } from './connection.js'
+import type { Config } from "./config.js";
+import type { ConnectionStatus, MemoryEntry } from "./connection.js";
 
 /**
  * ANSI escape codes for terminal styling.
  */
-const RESET = '\x1b[0m'
-const BOLD = '\x1b[1m'
-const DIM = '\x1b[2m'
-const CYAN = '\x1b[36m'
-const GREEN = '\x1b[32m'
-const YELLOW = '\x1b[33m'
-const RED = '\x1b[31m'
-const MAGENTA = '\x1b[35m'
+const RESET = "\x1b[0m";
+const BOLD = "\x1b[1m";
+const DIM = "\x1b[2m";
+const CYAN = "\x1b[36m";
+const GREEN = "\x1b[32m";
+const YELLOW = "\x1b[33m";
+const RED = "\x1b[31m";
+const MAGENTA = "\x1b[35m";
 
 /**
  * CLI version number displayed in the banner.
  */
-const VERSION = '0.1.0'
+const VERSION = "0.1.0";
 
 /**
  * <Summary>
@@ -41,15 +41,21 @@ const VERSION = '0.1.0'
  * </Summary>
  */
 export const printBanner = (): void => {
-  console.log()
-  console.log(`${BOLD}${CYAN}  ╭──────────────────────────────────╮${RESET}`)
-  console.log(`${BOLD}${CYAN}  │        LoopyCode CLI v${VERSION}       │${RESET}`)
-  console.log(`${BOLD}${CYAN}  ╰──────────────────────────────────╯${RESET}`)
-  console.log()
-  console.log(`${DIM}  Type a task to send to the server, or use /commands.${RESET}`)
-  console.log(`${DIM}  /config to see settings · /exit to quit${RESET}`)
-  console.log()
-}
+  console.log();
+  console.log(`${BOLD}${CYAN}  ╭──────────────────────────────────╮${RESET}`);
+  console.log(
+    `${BOLD}${CYAN}  │        LoopyCode CLI v${VERSION}       │${RESET}`,
+  );
+  console.log(`${BOLD}${CYAN}  ╰──────────────────────────────────╯${RESET}`);
+  console.log();
+  console.log(
+    `${DIM}  Type a task to send to the server, or use /commands.${RESET}`,
+  );
+  console.log(
+    `${DIM}  /config to see settings · /exit, Ctrl+C, or Ctrl+L to quit${RESET}`,
+  );
+  console.log();
+};
 
 /**
  * <Summary>
@@ -74,8 +80,8 @@ export const printBanner = (): void => {
  * </Summary>
  */
 export const printToken = (token: string): void => {
-  process.stdout.write(token)
-}
+  process.stdout.write(token);
+};
 
 /**
  * <Summary>
@@ -100,9 +106,9 @@ export const printToken = (token: string): void => {
  * </Summary>
  */
 export const printStreamEnd = (): void => {
-  console.log()
-  console.log()
-}
+  console.log();
+  console.log();
+};
 
 /**
  * <Summary>
@@ -126,8 +132,8 @@ export const printStreamEnd = (): void => {
  * </Summary>
  */
 export const printLine = (text: string): void => {
-  console.log(text)
-}
+  console.log(text);
+};
 
 /**
  * <Summary>
@@ -153,8 +159,8 @@ export const printLine = (text: string): void => {
  * </Summary>
  */
 export const printError = (msg: string): void => {
-  console.error(`${RED}  error:${RESET} ${msg}`)
-}
+  console.error(`${RED}  error:${RESET} ${msg}`);
+};
 
 /**
  * <Summary>
@@ -181,40 +187,40 @@ export const printError = (msg: string): void => {
  * </Summary>
  */
 export const printSuccess = (msg: string): void => {
-  console.log(`${GREEN}  ✓${RESET} ${msg}`)
-}
+  console.log(`${GREEN}  ✓${RESET} ${msg}`);
+};
 
 /**
  * <Summary>
  * What it does:
- *   Formats an auth token for safe display in the terminal, masking all
+ *   Formats a secret string for safe display in the terminal, masking all
  *   but the last 4 characters to prevent accidental exposure.
  *
  * How it does it (step by step):
- *   1. Trims whitespace from the token.
+ *   1. Trims whitespace from the secret.
  *   2. If empty, returns dim "(not set)".
  *   3. If 4 characters or shorter, returns dim "****" (too short to reveal any).
  *   4. Otherwise returns a dim ellipsis followed by the last 4 characters.
  *
  * Parameters:
- *   @param {string} token — The raw auth token string from config.
+ *   @param {string} secret — The raw password string from config.
  *
  * Returns:
- *   @returns {string} — ANSI-styled masked representation of the token.
+ *   @returns {string} — ANSI-styled masked representation of the secret.
  *
  * Dependencies:
  *   None.
  *
  * Dependants:
- *   - printConfig — uses this to display the authToken row safely.
+ *   - printConfig — uses this to display the password row safely.
  * </Summary>
  */
-const formatAuthTokenDisplay = (token: string): string => {
-  const t = token.trim()
-  if (!t) return `${DIM}(not set)${RESET}`
-  if (t.length <= 4) return `${DIM}****${RESET}`
-  return `${DIM}…${RESET}${t.slice(-4)}`
-}
+const formatSecretDisplay = (secret: string): string => {
+  const t = secret.trim();
+  if (!t) return `${DIM}(not set)${RESET}`;
+  if (t.length <= 4) return `${DIM}****${RESET}`;
+  return `${DIM}…${RESET}${t.slice(-4)}`;
+};
 
 /**
  * <Summary>
@@ -241,15 +247,15 @@ const formatAuthTokenDisplay = (token: string): string => {
  */
 export const printConnectionStatus = (status: ConnectionStatus): void => {
   const label =
-    status === 'connected'
-      ? 'connected'
-      : status === 'connecting'
-        ? 'connecting…'
-        : status === 'reconnecting'
-          ? 'reconnecting…'
-          : 'disconnected'
-  console.log(`${DIM}  [rsocket: ${label}]${RESET}`)
-}
+    status === "connected"
+      ? "connected"
+      : status === "connecting"
+        ? "connecting…"
+        : status === "reconnecting"
+          ? "reconnecting…"
+          : "disconnected";
+  console.log(`${DIM}  [rsocket: ${label}]${RESET}`);
+};
 
 /**
  * <Summary>
@@ -259,7 +265,7 @@ export const printConnectionStatus = (status: ConnectionStatus): void => {
  * How it does it (step by step):
  *   1. Prints "Current Configuration" header in bold.
  *   2. Prints a horizontal line.
- *   3. Prints server, port, and masked auth token.
+ *   3. Prints server, port, and masked password.
  *   4. Prints model names (dim "(not set)" for empty), temps, and retries.
  *
  * Parameters:
@@ -276,21 +282,25 @@ export const printConnectionStatus = (status: ConnectionStatus): void => {
  * </Summary>
  */
 export const printConfig = (config: Config): void => {
-  console.log()
-  console.log(`${BOLD}  Current Configuration${RESET}`)
-  console.log(`${DIM}  ${'─'.repeat(34)}${RESET}`)
-  console.log(`  ${CYAN}server${RESET}         ${config.server}`)
-  console.log(`  ${CYAN}port${RESET}           ${config.port}`)
+  console.log();
+  console.log(`${BOLD}  Current Configuration${RESET}`);
+  console.log(`${DIM}  ${"─".repeat(34)}${RESET}`);
+  console.log(`  ${CYAN}server${RESET}         ${config.server}`);
+  console.log(`  ${CYAN}port${RESET}           ${config.port}`);
   console.log(
-    `  ${CYAN}auth token${RESET}     ${formatAuthTokenDisplay(config.authToken)}`,
-  )
-  console.log(`  ${CYAN}advisor model${RESET}  ${config.advisorModel || DIM + '(not set)' + RESET}`)
-  console.log(`  ${CYAN}agent model${RESET}    ${config.agentModel || DIM + '(not set)' + RESET}`)
-  console.log(`  ${CYAN}advisor temp${RESET}   ${config.advisorTemp}`)
-  console.log(`  ${CYAN}agent temp${RESET}     ${config.agentTemp}`)
-  console.log(`  ${CYAN}retries${RESET}        ${config.retries}`)
-  console.log()
-}
+    `  ${CYAN}password${RESET}       ${formatSecretDisplay(config.password)}`,
+  );
+  console.log(
+    `  ${CYAN}advisor model${RESET}  ${config.advisorModel || DIM + "(not set)" + RESET}`,
+  );
+  console.log(
+    `  ${CYAN}agent model${RESET}    ${config.agentModel || DIM + "(not set)" + RESET}`,
+  );
+  console.log(`  ${CYAN}advisor temp${RESET}   ${config.advisorTemp}`);
+  console.log(`  ${CYAN}agent temp${RESET}     ${config.agentTemp}`);
+  console.log(`  ${CYAN}retries${RESET}        ${config.retries}`);
+  console.log();
+};
 
 /**
  * <Summary>
@@ -316,14 +326,16 @@ export const printConfig = (config: Config): void => {
  * </Summary>
  */
 export const printModels = (models: string[], label: string): void => {
-  console.log()
-  console.log(`${BOLD}  Available models for ${label}:${RESET}`)
-  console.log()
+  console.log();
+  console.log(`${BOLD}  Available models for ${label}:${RESET}`);
+  console.log();
   for (let i = 0; i < models.length; i++) {
-    console.log(`  ${YELLOW}${String(i + 1).padStart(3)}${RESET}  ${models[i]}`)
+    console.log(
+      `  ${YELLOW}${String(i + 1).padStart(3)}${RESET}  ${models[i]}`,
+    );
   }
-  console.log()
-}
+  console.log();
+};
 
 /**
  * <Summary>
@@ -348,18 +360,20 @@ export const printModels = (models: string[], label: string): void => {
  * </Summary>
  */
 export const printSkills = (names: string[]): void => {
-  console.log()
+  console.log();
   if (names.length === 0) {
-    console.log(`${DIM}  No skills found. Use /skills add <name> to create one.${RESET}`)
+    console.log(
+      `${DIM}  No skills found. Use /skills add <name> to create one.${RESET}`,
+    );
   } else {
-    console.log(`${BOLD}  Skills (${names.length}):${RESET}`)
-    console.log()
+    console.log(`${BOLD}  Skills (${names.length}):${RESET}`);
+    console.log();
     for (const name of names) {
-      console.log(`  ${MAGENTA}•${RESET} ${name}`)
+      console.log(`  ${MAGENTA}•${RESET} ${name}`);
     }
   }
-  console.log()
-}
+  console.log();
+};
 
 /**
  * <Summary>
@@ -385,21 +399,21 @@ export const printSkills = (names: string[]): void => {
  * </Summary>
  */
 export const printMemory = (entries: MemoryEntry[]): void => {
-  console.log()
+  console.log();
   if (entries.length === 0) {
-    console.log(`${DIM}  No memories stored.${RESET}`)
+    console.log(`${DIM}  No memories stored.${RESET}`);
   } else {
-    console.log(`${BOLD}  Stored Memories (${entries.length} topics):${RESET}`)
-    console.log()
+    console.log(`${BOLD}  Stored Memories (${entries.length} topics):${RESET}`);
+    console.log();
     for (const entry of entries) {
-      console.log(`  ${CYAN}${entry.topic}${RESET}`)
+      console.log(`  ${CYAN}${entry.topic}${RESET}`);
       for (const rule of entry.rules) {
-        console.log(`    ${DIM}→${RESET} ${rule}`)
+        console.log(`    ${DIM}→${RESET} ${rule}`);
       }
     }
   }
-  console.log()
-}
+  console.log();
+};
 
 /**
  * <Summary>
@@ -424,19 +438,34 @@ export const printMemory = (entries: MemoryEntry[]): void => {
  * </Summary>
  */
 export const printHelp = (): void => {
-  console.log()
-  console.log(`${BOLD}  Commands:${RESET}`)
-  console.log()
-  console.log(`  ${GREEN}/set advisor${RESET}         Choose advisor model`)
-  console.log(`  ${GREEN}/set agent${RESET}           Choose agent model`)
-  console.log(`  ${GREEN}/config${RESET}              Show current configuration`)
-  console.log(`  ${GREEN}/skills list${RESET}         List local skill files`)
-  console.log(`  ${GREEN}/skills add <name>${RESET}   Create a new skill file`)
-  console.log(`  ${GREEN}/skills sync${RESET}         Sync skills to server`)
-  console.log(`  ${GREEN}/memory show${RESET}         Show stored preferences`)
-  console.log(`  ${GREEN}/memory forget <t>${RESET}   Forget a topic`)
-  console.log(`  ${GREEN}/memory clear${RESET}        Clear all memories`)
-  console.log(`  ${GREEN}/help${RESET}                Show this help`)
-  console.log(`  ${GREEN}/exit${RESET}                Quit`)
-  console.log()
-}
+  console.log();
+  console.log(`${BOLD}  Commands:${RESET}`);
+  console.log();
+  console.log(
+    `  ${GREEN}/set password [value]${RESET}  Set server password (prompt if omitted)`,
+  );
+  console.log(
+    `  ${GREEN}/set server [host]${RESET}     Set server host (prompt if omitted)`,
+  );
+  console.log(
+    `  ${GREEN}/set port [n]${RESET}          Set server port (prompt if omitted)`,
+  );
+  console.log(`  ${GREEN}/set advisor${RESET}         Choose advisor model`);
+  console.log(`  ${GREEN}/set agent${RESET}           Choose agent model`);
+  console.log(
+    `  ${GREEN}/config${RESET}              Show current configuration`,
+  );
+  console.log(`  ${GREEN}/skills list${RESET}         List local skill files`);
+  console.log(`  ${GREEN}/skills add <name>${RESET}   Create a new skill file`);
+  console.log(`  ${GREEN}/skills sync${RESET}         Sync skills to server`);
+  console.log(`  ${GREEN}/memory show${RESET}         Show stored preferences`);
+  console.log(`  ${GREEN}/memory forget <t>${RESET}   Forget a topic`);
+  console.log(`  ${GREEN}/memory clear${RESET}        Clear all memories`);
+  console.log(`  ${GREEN}/help${RESET}                Show this help`);
+  console.log(`  ${GREEN}/exit${RESET}                Quit (Ctrl+C when idle; Ctrl+L; during a stream use Ctrl+C twice)`);
+  console.log();
+  console.log(
+    `${DIM}  Editing ~/.agent-cli/config.json by hand requires restarting the CLI unless you use /set.${RESET}`,
+  );
+  console.log();
+};

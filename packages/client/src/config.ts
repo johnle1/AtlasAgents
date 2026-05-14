@@ -1,3 +1,4 @@
+// Persisted CLI settings (~/.agent-cli/config.json) and related paths (history, skills).
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -11,7 +12,7 @@ import * as os from "node:os";
  *   - loadConfig — returns objects of this shape from ~/.agent-cli/config.json.
  *   - saveConfig — writes objects of this shape to disk.
  *   - updateConfig — merges partial updates into existing config.
- *   - Connection — reads server URL, model names, and temperatures.
+ *   - Connection — reads server URL, password, model names, and temperatures.
  *   - CommandHandler — displays config and updates model selections.
  *
  * Produced by:
@@ -26,10 +27,10 @@ export interface Config {
   port: number;
 
   /**
-   * Bearer-style secret sent on every RSocket frame metadata (JSON: `{ "auth": "..." }`).
-   * Part 6 server must validate this token.
+   * Shared server password sent on every RSocket frame metadata (JSON: `{ "password": "..." }`).
+   * Must match the password the server operator entered at startup (empty allowed).
    */
-  authToken: string;
+  password: string;
 
   /** Ollama model name for the advisor role e.g. "gemma3:27b" */
   advisorModel: string;
@@ -61,13 +62,14 @@ export interface Config {
  * Values here are chosen for the loopycode use case specifically —
  * see comments on each field for reasoning.
  */
+// Template used when the file is missing and as the base layer when merging disk JSON.
 const DEFAULT_CONFIG: Config = {
   // RSocket TCP connection — not HTTP
   server: "localhost",
   port: 7000,
 
-  // Set via /config or editing config.json when server requires auth
-  authToken: "",
+  // Set on first run, /set password, or editing config.json
+  password: "",
 
   // Sensible defaults so first run works without manual setup
   advisorModel: "gemma3:27b",
@@ -86,19 +88,25 @@ const DEFAULT_CONFIG: Config = {
   // Caps how much of the context window memory injection can consume
   maxContextBudget: 0.2,
 
-  // Empty until user runs `loopy init` or `/workspace set <path>`
+  // Empty until set via `/workspace set <path>` or editing config.json
   workspace: "",
 };
 
-/**
- * Directory where all CLI state is stored: config, history, and skill files.
- */
+/** e.g. ~/.agent-cli — config, .history, and skills/ live here. */
 const CONFIG_DIR = path.join(os.homedir(), ".agent-cli");
 
-/**
- * Path to the JSON config file persisted across CLI sessions.
- */
+/** Full path to the JSON file Connection and /config read from. */
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
+
+/**
+ * Whether `config.json` is already on disk.
+ * `index.ts` uses this before `loadConfig()`: otherwise `loadConfig` would create the file
+ * and the first-run prompts would never run.
+ */
+export const hasConfigFile = (): boolean => fs.existsSync(CONFIG_FILE);
+
+/** Deep-safe copy of defaults for first-run `saveConfig({ ...defaults, ...answers })`. */
+export const getDefaultConfig = (): Config => ({ ...DEFAULT_CONFIG });
 
 /**
  * Path to the readline history file for arrow-key command recall.
@@ -115,11 +123,10 @@ export const SKILLS_DIR = path.join(CONFIG_DIR, "skills");
 /**
  * <Summary>
  * What it does:
- *   Creates ~/.agent-cli/ and ~/.agent-cli/skills/ if they don't exist yet.
+ *   Creates ~/.agent-cli/ if it does not exist yet (config and history live here).
  *
  * How it does it (step by step):
  *   1. Calls fs.mkdirSync with recursive: true to create CONFIG_DIR and parents.
- *   2. Calls fs.mkdirSync again for SKILLS_DIR with recursive: true.
  *
  * Parameters:
  *   None.
@@ -133,12 +140,13 @@ export const SKILLS_DIR = path.join(CONFIG_DIR, "skills");
  * Dependants:
  *   - loadConfig — calls this before reading config.json.
  *   - saveConfig — calls this before writing config.json.
- *   - skills.ts (listSkills, addSkill, readAllSkills) — ensures SKILLS_DIR exists.
+ *   - index.ts saveHistory — ensures HISTORY_FILE parent exists.
+ *   - skills.ts ensureSkillsDir — uses CONFIG_DIR parent; skills dir is separate.
  * </Summary>
  */
 export const ensureDirs = (): void => {
+  // recursive: true — no error if ~/.agent-cli already exists
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.mkdirSync(SKILLS_DIR, { recursive: true });
 };
 
 /**
@@ -176,13 +184,17 @@ export const ensureDirs = (): void => {
 export const loadConfig = (): Config => {
   ensureDirs();
   if (!fs.existsSync(CONFIG_FILE)) {
+    // No file yet: write defaults so the path always has a valid JSON, then return them.
     saveConfig(DEFAULT_CONFIG);
     return { ...DEFAULT_CONFIG };
   }
   try {
     const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
-    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+    // Merge: start from defaults, then overlay keys from disk. Later spread wins on conflicts.
+    // `as Config` tells TypeScript the shape; it does not validate JSON at runtime.
+    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) } as Config;
   } catch {
+    // Bad JSON or unreadable file — fail soft so the CLI can still start.
     return { ...DEFAULT_CONFIG };
   }
 };
@@ -216,6 +228,7 @@ export const saveConfig = (config: Config): void => {
   ensureDirs();
   fs.writeFileSync(
     CONFIG_FILE,
+    // null, 2 → pretty-print with 2-space indent (easier for users to edit by hand).
     JSON.stringify(config, null, 2) + "\n",
     "utf-8",
   );
@@ -248,8 +261,8 @@ export const saveConfig = (config: Config): void => {
  * </Summary>
  */
 export const updateConfig = (patch: Partial<Config>): Config => {
-  const config = loadConfig();
-  Object.assign(config, patch);
+  const config = loadConfig(); // full merged object from disk + defaults
+  Object.assign(config, patch); // shallow merge: only keys in `patch` change
   saveConfig(config);
   return config;
 };
@@ -278,7 +291,7 @@ export const updateConfig = (patch: Partial<Config>): Config => {
  * </Summary>
  */
 export const getConfig = <K extends keyof Config>(key: K): Config[K] => {
-  return loadConfig()[key];
+  return loadConfig()[key]; // re-reads file each call — fine for rare lookups
 };
 
 /**
@@ -313,7 +326,7 @@ export const setConfig = <K extends keyof Config>(
   value: Config[K],
 ): Config => {
   const config = loadConfig();
-  Object.assign(config, { [key]: value } as Partial<Config>);
+  Object.assign(config, { [key]: value } as Partial<Config>); // single-field update
   saveConfig(config);
   return config;
 };

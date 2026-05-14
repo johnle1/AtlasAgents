@@ -1,7 +1,7 @@
 import * as readline from 'node:readline'
 import { loadConfig, updateConfig, type Config } from './config.js'
 import type { Connection } from './connection.js'
-import { listSkills, addSkill, readAllSkills } from './skills.js'
+import { listSkills, addSkill, readAllSkills, type SkillManager } from './skills.js'
 import {
   printConfig,
   printModels,
@@ -15,29 +15,107 @@ import {
 /**
  * <Summary>
  * What it does:
- *   Prompts the user to enter a number between 1 and max, then returns
- *   the 0-based array index corresponding to their choice.
+ *   Holds the ANSI escape sequence for dim (secondary) terminal text.
+ *
+ * Used by:
+ *   - CommandHandler.handleSet — dim hint before a visible password question.
+ * </Summary>
+ */
+const DIM = '\x1b[2m'
+
+/**
+ * <Summary>
+ * What it does:
+ *   Resets ANSI styles so text after a dim hint returns to normal brightness.
+ *
+ * Used by:
+ *   - CommandHandler.handleSet — paired with DIM after the hint line.
+ * </Summary>
+ */
+const RESET = '\x1b[0m'
+
+/**
+ * @async
+ * <Summary>
+ * What it does:
+ *   Asks one readline question and resolves with the user’s answer as a string.
  *
  * How it does it (step by step):
- *   1. Calls rl.question with the prompt string.
- *   2. Parses the answer as an integer.
- *   3. Checks if it's in the valid range [1, max].
- *   4. Returns (n - 1) to convert to 0-based index.
- *   5. Returns -1 if input is invalid or out of range.
+ *   1. Wraps rl.question in a Promise that resolves with the answered line.
  *
  * Parameters:
- *   @param {readline.Interface} rl — Readline interface for user input.
- *   @param {string} prompt — Prompt text to display.
- *   @param {number} max — Maximum valid number (1-indexed).
+ *   @param {readline.Interface} rl — Active REPL readline instance.
+ *   @param {string} q — Prompt string shown before the cursor.
  *
  * Returns:
- *   @returns {Promise<number>} — 0-based index or -1 for invalid input.
+ *   @returns {Promise<string>} — Raw line from the user (caller may trim).
  *
- * Dependencies:
- *   - readline.Interface.question — Node.js readline API.
+ * Dependencies (classes/modules this method calls):
+ *   - readline.Interface.question — collects one line of input.
  *
- * Dependants:
- *   - CommandHandler.handleSet — uses this to let user pick a model.
+ * Dependants (classes/modules that call this method):
+ *   - CommandHandler.handleSet — when /set omits password, server host, or port inline.
+ * </Summary>
+ */
+const promptLine = (rl: readline.Interface, q: string): Promise<string> => {
+  return new Promise((resolve) => {
+    rl.question(q, (line) => resolve(line))
+  })
+}
+
+/**
+ * <Summary>
+ * What it does:
+ *   Parses a TCP port from user text for /set port validation.
+ *
+ * How it does it (step by step):
+ *   1. Trims the string and parses base-10 integer.
+ *   2. Returns null if NaN or outside inclusive range 1–65535.
+ *   3. Otherwise returns the port number.
+ *
+ * Parameters:
+ *   @param {string} s — User-supplied or prompted port text.
+ *
+ * Returns:
+ *   @returns {number | null} — Valid port, or null if unusable.
+ *
+ * Dependencies (classes/modules this method calls):
+ *   - None (parseInt and Number helpers only).
+ *
+ * Dependants (classes/modules that call this method):
+ *   - CommandHandler.handleSet — /set port branch.
+ * </Summary>
+ */
+const parsePort = (s: string): number | null => {
+  const n = parseInt(s.trim(), 10)
+  if (Number.isNaN(n) || n < 1 || n > 65_535) return null
+  return n
+}
+
+/**
+ * @async
+ * <Summary>
+ * What it does:
+ *   Prompts for a 1-based index in [1, max] and returns the matching 0-based list index.
+ *
+ * How it does it (step by step):
+ *   1. Shows the prompt via readline.
+ *   2. Parses the answer as an integer.
+ *   3. Returns n - 1 when in range, otherwise -1.
+ *
+ * Parameters:
+ *   @param {readline.Interface} rl — Readline instance for the question.
+ *   @param {string} prompt — Prompt text (often includes the valid range).
+ *   @param {number} max — Upper bound of the allowed 1-based choice.
+ *
+ * Returns:
+ *   @returns {Promise<number>} — Zero-based index into the caller’s array, or -1 if invalid.
+ *
+ * Dependencies (classes/modules this method calls):
+ *   - readline.Interface.question — collects one line of input.
+ *
+ * Dependants (classes/modules that call this method):
+ *   - CommandHandler.handleSetModel — model picker after /set advisor or /set agent.
  * </Summary>
  */
 const promptChoice = (
@@ -60,32 +138,49 @@ const promptChoice = (
 /**
  * <Summary>
  * What it does:
- *   Handles all slash commands locally without hitting the server, routing
- *   each command to the appropriate handler method.
+ *   Parses leading-slash input and runs the matching local command handler without treating it as a task line.
  *
  * How it fits in the system:
- *   Sits between the CLI input loop (index.ts) and the server connection.
- *   Decides whether input is a command (starts with /) or a task (plain text).
- *   Commands are handled here; tasks are passed to Connection.sendTask.
+ *   Sits between index.ts readline and Connection: slash lines stop here; plain text is sent as tasks from index.
  *
- * Dependencies:
- *   - Connection — calls listModels, syncSkills, getMemory, forgetMemory, clearMemory.
- *   - config module — loads and updates config.json.
- *   - skills module — lists, creates, and reads skill files.
- *   - renderer module — displays formatted output for each command.
+ * Dependencies (classes this class imports):
+ *   - Connection — listModels, syncSkills, getMemory, forgetMemory, clearMemory, reload.
+ *   - config — loadConfig, updateConfig.
+ *   - skills — listSkills, addSkill, readAllSkills, SkillManager.
+ *   - renderer — printConfig, printModels, printSkills, printMemory, printError, printSuccess, printHelp.
  *
- * Dependants:
- *   - index.ts rl.on('line') — creates a CommandHandler and calls handle() for each line.
+ * Dependants (classes that instantiate or import this class):
+ *   - index.ts — constructs one CommandHandler per session after connect.
  * </Summary>
  */
 export class CommandHandler {
   /**
-   * @param {Connection} conn — Connection instance for server requests.
-   * @param {readline.Interface} rl — Readline interface for user prompts.
+   * <Summary>
+   * What it does:
+   *   Captures the RSocket connection, readline instance, and optional SkillManager used by all command handlers.
+   *
+   * How it does it (step by step):
+   *   1. Stores conn, rl, and optional skills on the instance for handler methods.
+   *
+   * Parameters:
+   *   @param {Connection} conn — Live RSocket client for server-backed commands.
+   *   @param {readline.Interface} rl — REPL readline used for prompts (e.g. /set, model pick).
+   *   @param {SkillManager | undefined} skills — When set, /skills uses SkillManager; otherwise falls back to module functions.
+   *
+   * Returns:
+   *   void — constructor side effects only.
+   *
+   * Dependencies (classes/modules this method calls):
+   *   None (field assignment only).
+   *
+   * Dependants (classes/modules that call this method):
+   *   - index.ts — constructs CommandHandler after Connection.connect.
+   * </Summary>
    */
   constructor(
     private conn: Connection,
     private rl: readline.Interface,
+    private readonly skills?: SkillManager,
   ) {}
 
   /**
@@ -108,11 +203,11 @@ export class CommandHandler {
    * Returns:
    *   @returns {Promise<boolean>} — true if command was handled, false if plain text.
    *
-   * Dependencies:
+   * Dependencies (classes/modules this method calls):
    *   - handleSet, handleConfig, handleSkills, handleMemory, handleExit — private handlers.
    *   - renderer.printHelp, printError — for /help and unknown commands.
    *
-   * Dependants:
+   * Dependants (classes/modules that call this method):
    *   - index.ts rl.on('line') — calls this to route each line of input.
    * </Summary>
    */
@@ -126,7 +221,7 @@ export class CommandHandler {
 
     switch (cmd) {
       case 'set':
-        await this.handleSet(sub)
+        await this.handleSet(sub, arg)
         break
       case 'config':
         this.handleConfig()
@@ -155,41 +250,126 @@ export class CommandHandler {
    * @async
    * <Summary>
    * What it does:
-   *   Handles "/set advisor" and "/set agent" by fetching models from the
-   *   server, showing a numbered list, and updating config with user's pick.
+   *   Handles `/set` for password, server, port (updates disk config and reloads the socket) or advisor/agent (model list picker).
    *
    * How it does it (step by step):
-   *   1. Validates role is "advisor" or "agent" — prints error if not.
-   *   2. Calls Connection.listModels to fetch available models.
-   *   3. Prints numbered model list via renderer.printModels.
-   *   4. Prompts user to pick a number via promptChoice.
-   *   5. Updates config with selected model.
-   *   6. Reloads Connection with updated config.
-   *   7. Prints success message.
+   *   1. Shows usage when `sub` is empty.
+   *   2. For password/server/port: uses inline `arg` or prompts, then updateConfig and Connection.reload.
+   *   3. For advisor/agent: calls handleSetModel.
+   *   4. Otherwise prints an unknown-subcommand error.
    *
    * Parameters:
-   *   @param {string} role — "advisor" or "agent".
+   *   @param {string} sub — First word after `/set`.
+   *   @param {string} arg — Everything after the first two words (`parts.slice(2).join(' ')`), often empty.
    *
    * Returns:
    *   void — called for side effects only.
    *
-   * Dependencies:
-   *   - Connection.listModels — fetches models from server.
-   *   - promptChoice — prompts user for selection.
-   *   - updateConfig — saves selected model to config.json.
-   *   - Connection.reload — updates connection's config reference.
-   *   - renderer.printModels, printError, printSuccess — display output.
+   * Dependencies (classes/modules this method calls):
+   *   - updateConfig, Connection.reload — persist and apply connection fields.
+   *   - promptLine, parsePort, DIM, RESET — prompts and port validation.
+   *   - renderer.printError, printSuccess — feedback.
+   *   - CommandHandler.handleSetModel — advisor and agent branches.
    *
-   * Dependants:
-   *   - CommandHandler.handle — calls this for /set commands.
+   * Dependants (classes/modules that call this method):
+   *   - CommandHandler.handle — `/set` routing.
    * </Summary>
    */
-  private handleSet = async (role: string): Promise<void> => {
-    if (role !== 'advisor' && role !== 'agent') {
-      printError('Usage: /set advisor  or  /set agent')
+  private handleSet = async (sub: string, arg: string): Promise<void> => {
+    if (!sub) {
+      printError(
+        'Usage: /set password [value] | /set server [host] | /set port [n] | /set advisor | /set agent',
+      )
       return
     }
 
+    switch (sub) {
+      case 'password': {
+        let value = arg.trim().length > 0 ? arg.trim() : ''
+        if (!value) {
+          console.log(
+            `${DIM}  Password echo is visible in the REPL (masked input needs no readline).${RESET}`,
+          )
+          value = (await promptLine(this.rl, '  New password: ')).trimEnd()
+        }
+        const config = updateConfig({ password: value })
+        await this.conn.reload(config)
+        printSuccess('Password updated.')
+        break
+      }
+      case 'server': {
+        let host = arg.trim()
+        if (!host) {
+          const line = await promptLine(
+            this.rl,
+            '  Enter server address (default localhost): ',
+          )
+          host = line.trim() || 'localhost'
+        }
+        const config = updateConfig({ server: host })
+        await this.conn.reload(config)
+        printSuccess(`Server set to ${host}`)
+        break
+      }
+      case 'port': {
+        let port: number | null = null
+        const inline = arg.trim()
+        if (inline.length > 0) {
+          port = parsePort(inline)
+        } else {
+          const line = await promptLine(this.rl, '  Enter port (default 7000): ')
+          const t = line.trim()
+          port = t.length === 0 ? 7000 : parsePort(t)
+        }
+        if (port === null) {
+          printError('Port must be an integer between 1 and 65535.')
+          return
+        }
+        const config = updateConfig({ port })
+        await this.conn.reload(config)
+        printSuccess(`Port set to ${port}`)
+        break
+      }
+      case 'advisor':
+      case 'agent':
+        await this.handleSetModel(sub)
+        break
+      default:
+        printError(
+          'Unknown /set subcommand. Use: password, server, port, advisor, or agent.',
+        )
+        break
+    }
+  }
+
+  /**
+   * @async
+   * <Summary>
+   * What it does:
+   *   Lets the user pick the advisor or agent model from the server’s model list and saves it to config.
+   *
+   * How it does it (step by step):
+   *   1. Fetches model names via Connection.listModels.
+   *   2. Prints a numbered list and promptChoice for a 1-based index.
+   *   3. On valid choice, updateConfig for advisorModel or agentModel, then Connection.reload.
+   *
+   * Parameters:
+   *   @param {'advisor' | 'agent'} role — Which config field to update.
+   *
+   * Returns:
+   *   void — called for side effects only.
+   *
+   * Dependencies (classes/modules this method calls):
+   *   - Connection.listModels, Connection.reload — server list and reconnect with new models.
+   *   - updateConfig — writes advisorModel or agentModel to disk.
+   *   - promptChoice — numeric pick from the printed list.
+   *   - renderer.printModels, printError, printSuccess — UI.
+   *
+   * Dependants (classes/modules that call this method):
+   *   - CommandHandler.handleSet — advisor and agent subcommands.
+   * </Summary>
+   */
+  private handleSetModel = async (role: 'advisor' | 'agent'): Promise<void> => {
     let models: string[]
     try {
       models = await this.conn.listModels()
@@ -238,11 +418,11 @@ export class CommandHandler {
    * Returns:
    *   void — called for side effects only.
    *
-   * Dependencies:
+   * Dependencies (classes/modules this method calls):
    *   - loadConfig — reads config.json.
    *   - renderer.printConfig — displays config in formatted table.
    *
-   * Dependants:
+   * Dependants (classes/modules that call this method):
    *   - CommandHandler.handle — calls this for /config command.
    * </Summary>
    */
@@ -272,19 +452,19 @@ export class CommandHandler {
    * Returns:
    *   void — called for side effects only.
    *
-   * Dependencies:
-   *   - skills.listSkills, addSkill, readAllSkills — local file operations.
-   *   - Connection.syncSkills — uploads skills to server.
+   * Dependencies (classes/modules this method calls):
+   *   - SkillManager or listSkills, addSkill, readAllSkills — local skill files and optional manager.
+   *   - Connection.syncSkills — uploads skill payloads when not using SkillManager.sync.
    *   - renderer.printSkills, printError, printSuccess — display output.
    *
-   * Dependants:
+   * Dependants (classes/modules that call this method):
    *   - CommandHandler.handle — calls this for /skills commands.
    * </Summary>
    */
   private handleSkills = async (sub: string, arg: string): Promise<void> => {
     switch (sub) {
       case 'list':
-        printSkills(listSkills())
+        printSkills(this.skills?.list() ?? listSkills())
         break
       case 'add': {
         const name = arg.trim()
@@ -293,7 +473,11 @@ export class CommandHandler {
           return
         }
         try {
-          addSkill(name)
+          if (this.skills) {
+            this.skills.create(name)
+          } else {
+            addSkill(name)
+          }
           printSuccess(`Skill "${name}" created.`)
         } catch (err) {
           printError(err instanceof Error ? err.message : String(err))
@@ -301,6 +485,19 @@ export class CommandHandler {
         break
       }
       case 'sync': {
+        if (this.skills) {
+          try {
+            const n = await this.skills.sync()
+            if (n === 0) {
+              printError('No skills to sync. Use /skills add <name> first.')
+              return
+            }
+            printSuccess(`Synced ${n} skill(s) to server.`)
+          } catch (err) {
+            printError(`Sync failed: ${err instanceof Error ? err.message : err}`)
+          }
+          break
+        }
         const skills = readAllSkills()
         if (skills.length === 0) {
           printError('No skills to sync. Use /skills add <name> first.')
@@ -341,11 +538,11 @@ export class CommandHandler {
    * Returns:
    *   void — called for side effects only.
    *
-   * Dependencies:
-   *   - Connection.getMemory, forgetMemory, clearMemory — server API calls.
+   * Dependencies (classes/modules this method calls):
+   *   - Connection.getMemory, forgetMemory, clearMemory — server-side preference store.
    *   - renderer.printMemory, printError, printSuccess — display output.
    *
-   * Dependants:
+   * Dependants (classes/modules that call this method):
    *   - CommandHandler.handle — calls this for /memory commands.
    * </Summary>
    */
@@ -404,10 +601,10 @@ export class CommandHandler {
    * Returns:
    *   void — never returns, exits process.
    *
-   * Dependencies:
+   * Dependencies (classes/modules this method calls):
    *   None (uses console.log and process.exit).
    *
-   * Dependants:
+   * Dependants (classes/modules that call this method):
    *   - CommandHandler.handle — calls this for /exit command.
    * </Summary>
    */

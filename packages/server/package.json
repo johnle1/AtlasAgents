@@ -1,16 +1,23 @@
 {
   "name": "loopycode-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "src/index.ts",
+  "description": "LoopyCode RSocket server",
+  "main": "dist/index.js",
   "bin": {
-    "loopy-server": "src/index.ts"
+    "loopy-server": "dist/index.js"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "start": "node dist/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs"
+  "type": "commonjs",
+  "dependencies": {
+    "@rsocket/core": "1.0.0-alpha.3",
+    "@rsocket/tcp-server": "1.0.0-alpha.3"
+  }
 }

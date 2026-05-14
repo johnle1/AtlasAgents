@@ -8,8 +8,8 @@
  *   - metadataMimeType: application/json
  *
  * Per-frame `metadata` (UTF-8 JSON, same on every requestStream / requestResponse):
- *   { "auth": "<authToken string from config>" }
- *   Empty string is valid; server may treat it as anonymous if allowed.
+ *   { "password": "<string from config>" }
+ *   Empty string is valid; server may run in dev mode (accept any password).
  *
  * `data` payloads use JSON encoded as UTF-8 Buffer unless noted.
  *
@@ -213,7 +213,7 @@ const STREAM_WINDOW = 64;
  * Dependencies:
  *   - RSocketConnector — establishes the RSocket session.
  *   - TcpClientTransport — TCP transport layer under RSocket.
- *   - Config — provides server address, port, auth token, and model settings.
+ *   - Config — provides server address, port, password, and model settings.
  *
  * Dependants:
  *   - index.ts main() — creates a Connection instance on startup.
@@ -222,7 +222,7 @@ const STREAM_WINDOW = 64;
  * </Summary>
  */
 export class Connection {
-  /** Current client configuration (server, port, models, auth, etc.). */
+  /** Current client configuration (server, port, models, password, etc.). */
   private config: Config;
 
   /** Live RSocket instance after successful connect, null when disconnected. */
@@ -248,7 +248,7 @@ export class Connection {
 
   /**
    * @param {Config} config — Initial configuration with server address, port,
-   *   auth token, model names, and timeout settings.
+   *   password, model names, and timeout settings.
    */
   constructor(config: Config) {
     this.config = config;
@@ -322,19 +322,19 @@ export class Connection {
   /**
    * <Summary>
    * What it does:
-   *   Builds the metadata Buffer containing the auth token, attached to every
+   *   Builds the metadata Buffer containing the password, attached to every
    *   RSocket frame so the server can authenticate each request.
    *
    * How it does it (step by step):
-   *   1. Reads authToken from this.config (defaults to empty string).
-   *   2. Wraps it in a JSON object { auth: "..." }.
+   *   1. Reads password from this.config (defaults to empty string).
+   *   2. Wraps it in a JSON object { password: "..." }.
    *   3. Serialises to a UTF-8 Buffer.
    *
    * Parameters:
    *   None.
    *
    * Returns:
-   *   @returns {Buffer} — UTF-8 JSON Buffer e.g. {"auth":"abc123"}.
+   *   @returns {Buffer} — UTF-8 JSON Buffer e.g. {"password":"..."}.
    *
    * Dependencies:
    *   None (uses Buffer.from).
@@ -346,7 +346,7 @@ export class Connection {
    */
   private authMetadata = (): Buffer => {
     return Buffer.from(
-      JSON.stringify({ auth: this.config.authToken ?? "" }),
+      JSON.stringify({ password: this.config.password ?? "" }),
       "utf-8",
     );
   };
@@ -628,10 +628,10 @@ export class Connection {
    * <Summary>
    * What it does:
    *   Updates the internal config reference and reconnects only when server
-   *   address, port, or auth token have changed.
+   *   address, port, or password have changed.
    *
    * How it does it (step by step):
-   *   1. Snapshots the previous server, port, and authToken.
+   *   1. Snapshots the previous server, port, and password.
    *   2. Replaces this.config with the new config.
    *   3. Compares previous vs new connection-level fields.
    *   4. If unchanged, returns immediately (no reconnect needed).
@@ -661,13 +661,13 @@ export class Connection {
     const prev = {
       server: this.config.server,
       port: this.config.port,
-      authToken: this.config.authToken,
+      password: this.config.password,
     };
     this.config = config;
     if (
       prev.server === config.server &&
       prev.port === config.port &&
-      prev.authToken === config.authToken
+      prev.password === config.password
     ) {
       return;
     }
@@ -692,7 +692,7 @@ export class Connection {
    *   2. Builds a CommandRequestPayload with kind "command", the type string,
    *      and the caller's payload.
    *   3. Serialises it to a UTF-8 JSON Buffer.
-   *   4. Sends via requestResponseBuffer with auth metadata attached.
+   *   4. Sends via requestResponseBuffer with password metadata attached.
    *   5. Parses the response Buffer as JSON into a CommandResponseEnvelope.
    *   6. If env.ok is false, throws an Error with env.error message.
    *   7. Returns env.data cast to the caller's expected response type.
@@ -709,7 +709,7 @@ export class Connection {
    * Dependencies:
    *   - Connection.waitUntilConnected — ensures live socket.
    *   - Connection.requireSocket — returns the RSocket or throws.
-   *   - Connection.authMetadata — builds the per-frame auth metadata.
+   *   - Connection.authMetadata — builds the per-frame password metadata.
    *   - Connection.requestResponseBuffer — wraps requestResponse as a Promise.
    *
    * Dependants:
@@ -720,7 +720,10 @@ export class Connection {
    *   - Connection.clearMemory — sends "memory.clear".
    * </Summary>
    */
-  sendCommand = async <TResponse>(type: string, payload: unknown): Promise<TResponse> => {
+  sendCommand = async <TResponse>(
+    type: string,
+    payload: unknown,
+  ): Promise<TResponse> => {
     await this.waitUntilConnected();
     const rsocket = this.requireSocket();
     const body: CommandRequestPayload = { kind: "command", type, payload };
@@ -766,7 +769,10 @@ export class Connection {
    * </Summary>
    */
   fetchModels = async (): Promise<string[]> => {
-    const data = await this.sendCommand<{ models: string[] }>("models.list", {});
+    const data = await this.sendCommand<{ models: string[] }>(
+      "models.list",
+      {},
+    );
     if (!Array.isArray(data.models)) {
       throw new Error("Invalid models.list response");
     }
@@ -809,7 +815,7 @@ export class Connection {
    * How it does it (step by step):
    *   1. Waits until the RSocket connection is live.
    *   2. Builds a TaskStreamPayload with the task text, model names, and temps.
-   *   3. Serialises it to a UTF-8 JSON Buffer with auth metadata.
+   *   3. Serialises it to a UTF-8 JSON Buffer with password metadata.
    *   4. Calls rsocket.requestStream with an initial budget of STREAM_WINDOW (64).
    *   5. On each onNext: decodes the payload data as UTF-8, calls onToken with it.
    *   6. Tracks pendingBudget; when below half, requests another STREAM_WINDOW
@@ -830,13 +836,16 @@ export class Connection {
    * Dependencies:
    *   - Connection.waitUntilConnected — ensures live socket.
    *   - Connection.requireSocket — returns the RSocket or throws.
-   *   - Connection.authMetadata — builds the per-frame auth metadata.
+   *   - Connection.authMetadata — builds the per-frame password metadata.
    *
    * Dependants:
    *   - index.ts rl.on('line') — calls this for plain text task input.
    * </Summary>
    */
-  sendTask = async (task: string, onToken: (token: string) => void): Promise<void> => {
+  sendTask = async (
+    task: string,
+    onToken: (token: string) => void,
+  ): Promise<void> => {
     await this.waitUntilConnected();
     const rsocket = this.requireSocket();
     const taskBody: TaskStreamPayload = {
