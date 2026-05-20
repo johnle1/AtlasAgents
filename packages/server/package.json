@@ -15,9 +15,19 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "files": [
+    "dist",
+    "default-data"
+  ],
   "type": "commonjs",
   "dependencies": {
     "@rsocket/core": "1.0.0-alpha.3",
-    "@rsocket/tcp-server": "1.0.0-alpha.3"
+    "@rsocket/tcp-server": "1.0.0-alpha.3",
+    "diff": "^9.0.0",
+    "fast-glob": "^3.3.3",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.2"
   }
 }
