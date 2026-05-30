@@ -368,7 +368,7 @@ const resolveContextLength = (ollamaModelInfo: ModelInfo): number => {
  *   1. Create shallow copy of input array to avoid mutation.
  *   2. Compare rules pairwise using sort comparator function.
  *   3. Primary sort: rules with higher timesApplied come first (descending order).
- *   4. Tiebreaker: if usage counts are equal, sort by createdAt ascending (older first).
+ *   4. Tiebreaker: if usage counts are equal, sort by timestamp ascending (older first).
  *   5. Return new sorted array with original unchanged.
  *
  * Parameters:
@@ -408,10 +408,10 @@ const sortRules = (rules: PreferenceRule[]): PreferenceRule[] => {
     // Only reaches here if both rules have identical timesApplied counts
     // localeCompare() performs lexicographic (date-string) comparison
     // Returns: -1 (ruleA earlier), 0 (equal), or 1 (ruleA later)
-    // Example: ruleA.createdAt="2025-01-01", ruleB.createdAt="2025-01-05"
+    // Example: ruleA.timestamp="2025-01-01", ruleB.timestamp="2025-01-05"
     //          "2025-01-01".localeCompare("2025-01-05") = -1 (ruleA sorts first)
     // This ensures FIFO-like ordering as tiebreaker for reproducible results
-    return ruleA.createdAt.localeCompare(ruleB.createdAt);
+    return ruleA.timestamp.localeCompare(ruleB.timestamp);
   });
 };
 

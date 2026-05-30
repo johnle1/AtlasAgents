@@ -10,8 +10,8 @@
  * Dependencies:
  *   - node:fs/promises, node:path — filesystem primitives.
  *   - fast-glob — pattern search limited to workspace cwd.
- *   - ./diffEngine.js — unified diff via jsdiff.
- *   - ./confirmationBroker.js — optional accept/decline before write.
+ *   - ./diffEngine.js — line diff and Claude Code style preview.
+ *   - ./confirmationBroker.js — optional request() before write.
  *
  * Dependants:
  *   - Agent, TerminalExecutor.
@@ -23,7 +23,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import type { ConfirmationBroker } from "./confirmationBroker.js";
-import { formatWritePreview } from "./diffEngine.js";
+import { computeDiff, formatDiff } from "./diffEngine.js";
 
 const SKIP_DIR_NAMES = new Set(["node_modules", ".git", "dist", ".next"]);
 
@@ -169,38 +169,46 @@ export class WorkspaceManager {
    * </Summary>
    */
   setRoot = async (workspacePath: string): Promise<void> => {
-    const absolutePath = path.resolve(workspacePath);
+    // Step 1: Convert workspace path to absolute path
+    // This normalizes relative paths and resolves symlinks properly
+    const absoluteWorkspacePath = path.resolve(workspacePath);
 
-    // Attempt to retrieve file statistics (metadata) from the resolved path
-    let fileStats;
+    // Step 2: Attempt to retrieve file statistics (metadata) from the resolved path
+    // fs.stat will throw if the path does not exist or is inaccessible
+    let workspacePathStats;
     try {
-      fileStats = await fs.stat(absolutePath); // This will throw if the path does not exist or is inaccessible
+      workspacePathStats = await fs.stat(absoluteWorkspacePath);
     } catch (err) {
-      // Extract the error code from the NodeJS error to identify the specific issue
+      // Step 2a: Extract the error code from the NodeJS error to identify the specific issue
+      // Common error codes: ENOENT (not found), EACCES (permission denied), EISDIR (is a directory)
       const errorCode = (err as NodeJS.ErrnoException).code;
 
-      // If file does not exist, throw a specific WorkspaceError
+      // Step 2b: If file does not exist, throw a specific WorkspaceError with NOT_FOUND code
+      // This helps callers distinguish between missing files and other errors
       if (errorCode === "ENOENT") {
         throw new WorkspaceError(
           "NOT_FOUND",
-          `Workspace directory not found: ${absolutePath}`,
+          `Workspace directory not found: ${absoluteWorkspacePath}`,
         );
       }
 
-      // For other unexpected errors, propagate the original error
+      // Step 2c: For other unexpected errors, propagate the original error
+      // Callers can handle permission denied, I/O errors, etc.
       throw err;
     }
 
-    // Verify that the path points to a directory, not a file
-    if (!fileStats.isDirectory()) {
+    // Step 3: Verify that the path points to a directory, not a file
+    // isDirectory() returns true only for directories; false for files or symlinks to files
+    if (!workspacePathStats.isDirectory()) {
       throw new WorkspaceError(
         "NOT_FOUND",
-        `Workspace path is not a directory: ${absolutePath}`,
+        `Workspace path is not a directory: ${absoluteWorkspacePath}`,
       );
     }
 
-    // Store the validated absolute path as the workspace root
-    this.root = absolutePath;
+    // Step 4: Store the validated absolute path as the workspace root
+    // This root is now used by all file operations (resolvePath, listStructure, searchFiles)
+    this.root = absoluteWorkspacePath;
   };
 
   /**
@@ -255,32 +263,36 @@ export class WorkspaceManager {
    * </Summary>
    */
   readFile = async (filePath: string): Promise<string> => {
-    // Resolve and validate the relative path to an absolute path within workspace bounds
-    const absolutePath = this.resolvePath(filePath);
+    // Step 1: Resolve and validate the relative path to an absolute path within workspace bounds
+    // This ensures the path cannot escape the workspace root (security boundary)
+    // Throws WorkspaceError if root is not set or path is outside workspace
+    const absoluteFilePath = this.resolvePath(filePath);
 
-    // Read the file contents as UTF-8 text
-    return fs.readFile(absolutePath, "utf-8");
+    // Step 2: Read the file contents as UTF-8 text from disk
+    // Returns full file contents as a string
+    // Throws if file does not exist or is unreadable
+    return fs.readFile(absoluteFilePath, "utf-8");
   };
 
   /**
    * @async
    * <Summary>
    * What it does:
-   *   Shows a unified diff preview, optionally waits for user approval, then writes
-   *   new content when approved.
+   *   Builds a line diff preview, optionally waits for ConfirmationBroker.request,
+   *   then writes new content when approved.
    *
    * How it does it (step by step):
    *   1. Reads current file contents (empty when new).
-   *   2. Builds a jsdiff unified patch and colored terminal preview.
-   *   3. When ConfirmationBroker is configured, requests accept/decline before writing.
-   *   4. On approval, writes the new content directly.
+   *   2. Computes diff chunks and formats Claude Code style output.
+   *   3. When ConfirmationBroker is configured, awaits request(formatted, path).
+   *   4. On approval, writes the new content; on decline, returns without touching disk.
    *
    * Parameters:
    *   @param {string} filePath — Relative file path.
    *   @param {string} content — New UTF-8 body.
    *
    * Returns:
-   *   @returns {Promise<string>} — Unified diff patch string (plain text), or empty string if declined.
+   *   @returns {Promise<string | undefined>} — Formatted diff after a successful write; undefined when the user declines (file unchanged).
    *
    * @throws {WorkspaceError} — On illegal paths or missing root.
    *
@@ -288,54 +300,68 @@ export class WorkspaceManager {
    *   - Agent file edits.
    * </Summary>
    */
-  writeFile = async (filePath: string, content: string): Promise<string> => {
-    // Resolve the relative path to an absolute path within workspace bounds
-    const absolutePath = this.resolvePath(filePath);
+  writeFile = async (
+    filePath: string,
+    content: string,
+  ): Promise<string | undefined> => {
+    // Step 1: Resolve and validate the relative path to an absolute path within workspace bounds
+    // Throws WorkspaceError if root is not set or path is outside workspace
+    const absoluteFilePath = this.resolvePath(filePath);
 
-    // Attempt to read the existing file content for diff comparison
-    // If the file doesn't exist, we'll use an empty string as the "before" state
-    let previousContent = "";
+    // Step 2: Read existing file contents for diff calculation
+    // If file doesn't exist (new file), previousFileContent remains empty string
+    let previousFileContent = "";
     try {
-      previousContent = await fs.readFile(absolutePath, "utf-8");
+      previousFileContent = await fs.readFile(absoluteFilePath, "utf-8");
     } catch (err) {
+      // Step 2a: Extract error code to check if file simply doesn't exist
       const errorCode = (err as NodeJS.ErrnoException).code;
 
-      // Only ignore ENOENT (file not found). Re-throw any other filesystem errors.
+      // Step 2b: Only ignore ENOENT (file not found) errors
+      // Other errors (permission denied, I/O issues) should be propagated
       if (errorCode !== "ENOENT") {
         throw err;
       }
+      // If ENOENT, previousFileContent stays as empty string (this is a new file)
     }
 
-    // Generate a unified diff patch and colored terminal preview of the changes
-    const { patch, colored } = formatWritePreview(
-      filePath,
-      previousContent,
-      content,
-    );
+    // Step 3: Compute line-level diff between existing content and new content
+    // This produces chunks indicating which lines were added, removed, or unchanged
+    const diffChunks = computeDiff(previousFileContent, content);
 
-    // If a confirmation broker is configured, request user approval before writing
+    // Step 4: Format diff chunks into Claude Code style colored output with line numbers
+    // This generates the human-readable preview that will be shown for approval
+    const formattedDiffPreview = formatDiff(diffChunks, filePath);
+
+    // Step 5: Check if ConfirmationBroker is configured (user approval required)
+    // If not configured, skip approval and proceed directly to writing
     if (this.confirmation !== undefined) {
-      const userApproved = await this.confirmation.requestWriteApproval({
-        relativePath: filePath,
-        patch,
-        coloredDiff: colored,
-      });
+      // Step 5a: Request user approval by showing formatted diff preview
+      // The broker displays the diff and waits for user to approve or decline
+      const userApprovedChanges = await this.confirmation.request(
+        formattedDiffPreview,
+        filePath,
+      );
 
-      // If the user declines, silently return without making any changes to the file
-      if (!userApproved) {
-        return "";
+      // Step 5b: If user declined, return undefined without writing to disk
+      // File remains unchanged and no further action is taken
+      if (!userApprovedChanges) {
+        return;
       }
     }
 
-    // Ensure the parent directory exists before writing the file
-    const parentDirectory = path.dirname(absolutePath);
-    await fs.mkdir(parentDirectory, { recursive: true });
+    // Step 6: Create parent directory if it doesn't exist (for new files in subdirectories)
+    // recursive: true allows creating nested directories at once
+    const parentDirectoryPath = path.dirname(absoluteFilePath);
+    await fs.mkdir(parentDirectoryPath, { recursive: true });
 
-    // Write the new content to the file
-    await fs.writeFile(absolutePath, content, "utf-8");
+    // Step 7: Write the new content to disk as UTF-8 text
+    // This overwrites existing file or creates new file if it doesn't exist
+    await fs.writeFile(absoluteFilePath, content, "utf-8");
 
-    // Return the unified diff patch for logging or display purposes
-    return patch;
+    // Step 8: Return the formatted diff preview (indicates successful write)
+    // Callers can use this for logging or display purposes
+    return formattedDiffPreview;
   };
 
   /**
@@ -357,61 +383,86 @@ export class WorkspaceManager {
    * </Summary>
    */
   listStructure = async (depth: number): Promise<string> => {
-    // Guard against uninitialized workspace root
+    // Step 1: Guard against uninitialized workspace root
+    // Must call setRoot() before any file operations
     if (this.root === null) {
       throw new WorkspaceError("NO_ROOT", "Workspace root is not set");
     }
 
-    // Ensure depth is a non-negative integer; 0 means no recursion
-    const maxDepth = Math.max(0, Math.floor(depth));
-    if (maxDepth === 0) {
+    // Step 2: Validate and normalize the depth parameter
+    // Ensure depth is a non-negative integer; 0 means no recursion (return empty string)
+    const normalizedMaxDepth = Math.max(0, Math.floor(depth));
+    if (normalizedMaxDepth === 0) {
       return "";
     }
 
-    const workspaceRoot = this.root;
-    const treeLines: string[] = [];
+    // Step 3: Store workspace root reference for use in nested walkDirectory function
+    const workspaceRootPath = this.root;
 
-    // Recursive helper function to traverse the directory tree
+    // Step 4: Initialize array to accumulate tree lines for final output
+    // Each entry will be a formatted line with proper indentation
+    const treeOutputLines: string[] = [];
+
+    // Step 5: Define recursive helper function to traverse the directory tree
+    // This function walks depth-first through directories, respecting maxDepth limit
     const walkDirectory = async (
-      currentDirAbsPath: string,
-      currentDepthLevel: number,
+      currentDirectoryAbsPath: string,
+      currentRecursionDepth: number,
     ): Promise<void> => {
-      let directoryEntries;
+      // Step 5a: Read directory contents with file type information
+      let directoryContents;
       try {
-        directoryEntries = await fs.readdir(currentDirAbsPath, {
+        // withFileTypes: true returns Dirent objects (include isDirectory(), isFile() methods)
+        directoryContents = await fs.readdir(currentDirectoryAbsPath, {
           withFileTypes: true,
         });
       } catch {
-        // Silently skip directories that cannot be read (permissions, etc.)
+        // Step 5b: Silently skip directories that cannot be read
+        // This prevents permission denied errors from halting traversal
         return;
       }
 
-      for (const entry of directoryEntries) {
-        // Skip common directories that clutter the tree (dependencies, version control, build output)
-        if (SKIP_DIR_NAMES.has(entry.name)) {
+      // Step 5c: Process each entry in the current directory
+      for (const directoryEntry of directoryContents) {
+        // Step 5d: Skip common directories that clutter the tree
+        // Examples: node_modules, .git, dist, .next (defined in SKIP_DIR_NAMES)
+        if (SKIP_DIR_NAMES.has(directoryEntry.name)) {
           continue;
         }
 
-        const childAbsPath = path.join(currentDirAbsPath, entry.name);
+        // Step 5e: Construct absolute path for this entry
+        const entryAbsolutePath = path.join(
+          currentDirectoryAbsPath,
+          directoryEntry.name,
+        );
 
-        // Validate that the child path stays within workspace bounds
-        assertInsideRoot(workspaceRoot, childAbsPath);
+        // Step 5f: Validate that the entry path stays within workspace bounds
+        // This security check prevents directory traversal outside the workspace
+        assertInsideRoot(workspaceRootPath, entryAbsolutePath);
 
-        // Add the entry to the tree with proper indentation
-        const indentation = "  ".repeat(currentDepthLevel);
-        treeLines.push(`${indentation}${entry.name}`);
+        // Step 5g: Add the entry to the tree with proper indentation
+        // Indentation indicates depth level (2 spaces per level)
+        const indentationString = "  ".repeat(currentRecursionDepth);
+        treeOutputLines.push(`${indentationString}${directoryEntry.name}`);
 
-        // Recursively process subdirectories up to maxDepth
-        if (entry.isDirectory() && currentDepthLevel + 1 < maxDepth) {
-          await walkDirectory(childAbsPath, currentDepthLevel + 1);
+        // Step 5h: Recursively process subdirectories only if within depth limit
+        // Condition: is a directory AND next depth level is less than max depth
+        if (
+          directoryEntry.isDirectory() &&
+          currentRecursionDepth + 1 < normalizedMaxDepth
+        ) {
+          await walkDirectory(entryAbsolutePath, currentRecursionDepth + 1);
         }
       }
     };
 
-    // Start tree traversal from the workspace root at depth 0
-    await walkDirectory(workspaceRoot, 0);
+    // Step 6: Start tree traversal from the workspace root
+    // Begin at depth 0, which will process all entries at all levels up to maxDepth
+    await walkDirectory(workspaceRootPath, 0);
 
-    return treeLines.join("\n");
+    // Step 7: Join all accumulated lines with newlines for final output
+    // Returns multi-line string suitable for display
+    return treeOutputLines.join("\n");
   };
 
   /**
@@ -433,25 +484,37 @@ export class WorkspaceManager {
    * </Summary>
    */
   searchFiles = async (pattern: string): Promise<string[]> => {
-    // Guard against uninitialized workspace root
+    // Step 1: Guard against uninitialized workspace root
+    // Must call setRoot() before any file operations
     if (this.root === null) {
       throw new WorkspaceError("NO_ROOT", "Workspace root is not set");
     }
 
-    // Execute fast-glob pattern search from the workspace root directory
-    // Configuration:
-    // - cwd: search from workspace root to constrain results to workspace
-    // - dot: false — ignore hidden files (starting with .)
-    // - onlyFiles: false — return both files and directories
-    // - ignore: exclude common non-project directories (dependencies, builds, version control)
-    const matchingPaths = await fg(pattern, {
+    // Step 2: Execute fast-glob pattern search from the workspace root directory
+    // The glob pattern can use wildcards like *, **, ? for flexible matching
+    // Results will be relative paths from the workspace root
+    const foundFilePaths = await fg(pattern, {
+      // cwd: change working directory to workspace root
+      // This constrains all searches to remain within workspace
       cwd: this.root,
+
+      // dot: false — ignore hidden files (starting with . on Unix/Mac)
+      // Prevents .git, .env, and other dotfiles from appearing in results
       dot: false,
+
+      // onlyFiles: false — return both files AND directories
+      // If true, would only return files and skip directories
       onlyFiles: false,
+
+      // ignore: exclude common non-project directories
+      // Patterns prevent dependencies, builds, and version control from cluttering results
+      // Examples: node_modules/ (npm packages), dist/ (compiled output), .git/ (version control)
       ignore: ["**/node_modules/**", "**/dist/**", "**/.git/**"],
     });
 
-    // Return a shallow copy of the matches array
-    return [...matchingPaths];
+    // Step 3: Return a shallow copy of the matches array
+    // Shallow copy prevents external code from mutating the original array
+    // Each element is a relative path string (not copied, still references same strings)
+    return [...foundFilePaths];
   };
 }

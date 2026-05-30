@@ -17,8 +17,19 @@
  * </Summary>
  */
 
+import type {
+  CommandOutput,
+  ExperienceRecord,
+  SessionSummary,
+} from "../memory/types.js";
 import type { ModelInfo, PullProgress, RunningModel } from "../ollama/types.js";
 import type { ChatOptions, Message, OrchestrationOutcome } from "./types.js";
+
+/** Confidence level for a learned or explicit preference rule. */
+export type PreferenceConfidence = "high" | "medium" | "low";
+
+/** Provenance of a preference rule. */
+export type PreferenceSource = "explicit" | "outcome" | "fix" | "style";
 
 /**
  * <Summary>
@@ -62,12 +73,33 @@ export interface PreferenceRule {
   /** Topic tags for overlap filtering against task keywords. */
   topics: string[];
 
+  /** Language or domain scope (e.g. "all", "javascript", "python"). */
+  scope: string;
+
+  /** How strongly to weight this rule. */
+  confidence: PreferenceConfidence;
+
+  /** Where the rule came from (explicit user vs learned). */
+  source: PreferenceSource;
+
+  /** ISO-8601 last update or creation time. */
+  timestamp: string;
+
   /** How often this rule was applied (higher sorts first). */
   timesApplied: number;
-
-  /** ISO-8601 creation time. */
-  createdAt: string;
 }
+
+/**
+ * <Summary>
+ * What it does:
+ *   Input shape for PreferenceStore.add before id and timestamp are assigned.
+ * </Summary>
+ */
+export type NewPreferenceRule = Omit<
+  PreferenceRule,
+  "id" | "timestamp" | "timesApplied"
+> &
+  Partial<Pick<PreferenceRule, "timestamp" | "timesApplied">>;
 
 /**
  * <Summary>
@@ -108,20 +140,88 @@ export interface IPreferenceStore {
    * @async
    * <Summary>
    * What it does:
-   *   Appends a new rule with fresh id and createdAt.
+   *   Adds or merges a rule (dedup by text similarity >= 0.8).
    *
    * Parameters:
-   *   @param {string} text — Rule body text.
-   *   @param {string[]} topics — Topic tags (may be empty for universal rules).
+   *   @param {NewPreferenceRule} rule — Rule fields without id/timesApplied (timestamp optional).
    *
    * Returns:
-   *   @returns {Promise<PreferenceRule>} — Persisted row.
+   *   @returns {Promise<PreferenceRule>} — Persisted or merged row.
    *
    * Dependants:
-   *   - Future memory routes.
+   *   - PatternExtractor, memory routes.
    * </Summary>
    */
-  add(text: string, topics: string[]): Promise<PreferenceRule>;
+  add(rule: NewPreferenceRule): Promise<PreferenceRule>;
+
+  /**
+   * @async
+   * <Summary>
+   * What it does:
+   *   Returns rules whose topics overlap task keywords, sorted by timesApplied desc.
+   *
+   * Parameters:
+   *   @param {Iterable<string>} taskKeywords — Keyword set from task text.
+   *
+   * Returns:
+   *   @returns {Promise<PreferenceRule[]>} — Matching rules.
+   *
+   * Dependants:
+   *   - ContextBuilder.build.
+   * </Summary>
+   */
+  getForTask(taskKeywords: Iterable<string>): Promise<PreferenceRule[]>;
+
+  /**
+   * @async
+   * <Summary>
+   * What it does:
+   *   Replaces fields on one rule by id.
+   *
+   * Parameters:
+   *   @param {string} ruleId — Rule id.
+   *   @param {Partial<PreferenceRule>} newRule — Fields to merge.
+   *
+   * Returns:
+   *   @returns {Promise<PreferenceRule | null>} — Updated row or null if id missing.
+   * </Summary>
+   */
+  update(
+    ruleId: string,
+    newRule: Partial<PreferenceRule>,
+  ): Promise<PreferenceRule | null>;
+
+  /**
+   * @async
+   * <Summary>
+   * What it does:
+   *   Removes all rules whose topics array contains the given topic.
+   *
+   * Parameters:
+   *   @param {string} topic — Topic tag to remove.
+   *
+   * Returns:
+   *   @returns {Promise<number>} — Count of rules removed.
+   * </Summary>
+   */
+  deleteByTopic(topic: string): Promise<number>;
+
+  /**
+   * @async
+   * <Summary>
+   * What it does:
+   *   Merges duplicate rules via advisor model when rule count >= 20.
+   *
+   * Parameters:
+   *   None.
+   *
+   * Returns:
+   *   @returns {Promise<void>} — Completes after optional rewrite.
+   *
+   * @throws {Error} — When Ollama/config deps were not injected at construction.
+   * </Summary>
+   */
+  consolidate(): Promise<void>;
 
   /**
    * @async
@@ -557,46 +657,98 @@ export interface IExperienceRecorder {
    * @async
    * <Summary>
    * What it does:
-   *   Opens a new experience record when a task begins.
-   *
-   * Parameters:
-   *   @param {string} taskId — Unique id for this orchestration run.
-   *   @param {string} taskText — Original user task.
-   *
-   * Returns:
-   *   @returns {Promise<void>} — Completes when storage is ready.
-   *
-   * Dependencies:
-   *   None.
-   *
-   * Dependants:
-   *   - AdvisorOrchestrator.runTask.
+   *   Opens a new in-memory experience record when a task begins.
    * </Summary>
    */
   start(taskId: string, taskText: string): Promise<void>;
 
   /**
+   * <Summary>
+   * What it does:
+   *   Appends a file read to the active record (no-op if task unknown).
+   * </Summary>
+   */
+  logRead(taskId: string, path: string): void;
+
+  /**
+   * <Summary>
+   * What it does:
+   *   Appends a file write with diff to the active record.
+   * </Summary>
+   */
+  logWrite(taskId: string, path: string, diff: string): void;
+
+  /**
+   * <Summary>
+   * What it does:
+   *   Appends a terminal command run to the active record.
+   * </Summary>
+   */
+  logCommand(taskId: string, command: string, output: CommandOutput): void;
+
+  /**
+   * <Summary>
+   * What it does:
+   *   Appends an escalation and advisor guidance pair.
+   * </Summary>
+   */
+  logEscalation(taskId: string, reason: string, guidance: string): void;
+
+  /**
+   * <Summary>
+   * What it does:
+   *   Appends a user edit (before/after) for style learning.
+   * </Summary>
+   */
+  logUserEdit(
+    taskId: string,
+    path: string,
+    before: string,
+    after: string,
+  ): void;
+
+  /**
    * @async
    * <Summary>
    * What it does:
-   *   Finalises the record with outcomes and triggers downstream extractors.
-   *
-   * Parameters:
-   *   @param {string} taskId — Same id passed to start.
-   *   @param {OrchestrationOutcome} outcome — Plan, results, ok flag, optional error.
-   *
-   * Returns:
-   *   @returns {Promise<void>} — Completes after persistence side effects.
-   *
-   * Dependencies:
-   *   None.
-   *
-   * Dependants:
-   *   - AdvisorOrchestrator.runTask.
+   *   Persists the record, optional snapshot cleanup, session append, and
+   *   fire-and-forget pattern extraction; returns without awaiting learning.
    * </Summary>
    */
-  finish(taskId: string, outcome: OrchestrationOutcome): Promise<void>;
+  finish(
+    taskId: string,
+    outcome: OrchestrationOutcome,
+    sessionSummary?: SessionSummary,
+  ): Promise<void>;
 }
+
+/**
+ * <Summary>
+ * What it does:
+ *   Asynchronously extracts reusable preference rules from a finished experience.
+ *
+ * Produced by:
+ *   - packages/server/src/memory/patternExtractor.ts.
+ *
+ * Dependants:
+ *   - ExperienceRecorder.finish — triggered fire-and-forget.
+ * </Summary>
+ */
+export interface IPatternExtractor {
+  /**
+   * <Summary>
+   * What it does:
+   *   Schedules async extraction; must not block the caller.
+   * </Summary>
+   */
+  extract(record: ExperienceRecord): void;
+}
+
+export type {
+  CommandOutput,
+  ExperienceRecord,
+  SessionSummary,
+} from "../memory/types.js";
 
 export type { ModelInfo, PullProgress, RunningModel } from "../ollama/types.js";
 export { OllamaError } from "../ollama/types.js";
