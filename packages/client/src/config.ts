@@ -8,6 +8,37 @@ import * as os from "node:os";
  * What it does:
  *   Defines the structure of the CLI configuration file persisted to disk.
  *
+ * How it fits in the system:
+ *   Provides type safety for config operations and ensures all required fields are present.
+ *
+ * Used by:
+ *   - Config — uses this as nested ui configuration object.
+ *   - loadConfig — returns objects with this shape.
+ *   - saveConfig — writes objects with this shape.
+ *
+ * Produced by:
+ *   - DEFAULT_CONFIG — provides default values for these fields.
+ * </Summary>
+ */
+export interface UiConfig {
+  /** Key into THEMES — e.g. "default", "ocean", "vscode-dark" */
+  theme: string;
+
+  /** Show animated status spinner (default true) */
+  showSpinner?: boolean;
+
+  /** Use alternate screen buffer for full-screen UI (default false) */
+  useAlternateBuffer?: boolean;
+}
+
+/**
+ * <Summary>
+ * What it does:
+ *   Defines the structure of the CLI configuration file persisted to disk.
+ *
+ * How it fits in the system:
+ *   Central config type used throughout the application for type safety and validation.
+ *
  * Used by:
  *   - loadConfig — returns objects of this shape from ~/.agent-cli/config.json.
  *   - saveConfig — writes objects of this shape to disk.
@@ -55,6 +86,15 @@ export interface Config {
 
   /** Default directory agents are allowed to read/write; empty until set by user */
   workspace: string;
+
+  /** Print advisor/agent think boxes in the terminal (default off) */
+  showThinkOutput: boolean;
+
+  /** Max parallel agent groups when no trigger word (min 1); use ::max for no cap */
+  agentCap: number;
+
+  /** Client-only UI preferences (theme, etc.) */
+  ui: UiConfig;
 }
 
 /**
@@ -71,9 +111,9 @@ const DEFAULT_CONFIG: Config = {
   // Set on first run, /set password, or editing config.json
   password: "",
 
-  // Sensible defaults so first run works without manual setup
-  advisorModel: "gemma3:27b",
-  agentModel: "gemma3:4b",
+  // Model names (empty until set by user or first-run prompts)
+  advisorModel: "",
+  agentModel: "",
 
   // Low for advisor (deterministic planning), moderate for agents (creative code)
   advisorTemp: 0.1,
@@ -82,14 +122,23 @@ const DEFAULT_CONFIG: Config = {
   // Standard retry count — 3 attempts before escalating or failing
   retries: 3,
 
-  // Prevents CLI hanging on slow or unresponsive models
-  timeout: 120_000,
+  // Prevents CLI hanging on slow or unresponsive models (10 minutes)
+  timeout: 600_000,
 
-  // Caps how much of the context window memory injection can consume
+  // Caps how much of the context window memory injection can consume (20%)
   maxContextBudget: 0.2,
 
   // Empty until set via `/workspace set <path>` or editing config.json
   workspace: "",
+
+  // Disable think output by default (shows advisor/agent think boxes when true)
+  showThinkOutput: false,
+
+  // Allow 3 parallel agent groups by default (minimum 1)
+  agentCap: 3,
+
+  // Default UI preferences
+  ui: { theme: "default", showSpinner: true, useAlternateBuffer: false },
 };
 
 /** e.g. ~/.agent-cli — config, .history, and skills/ live here. */
@@ -99,14 +148,58 @@ const CONFIG_DIR = path.join(os.homedir(), ".agent-cli");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 
 /**
- * Whether `config.json` is already on disk.
- * `index.ts` uses this before `loadConfig()`: otherwise `loadConfig` would create the file
- * and the first-run prompts would never run.
+ * <Summary>
+ * What it does:
+ *   Checks whether the config.json file already exists on disk.
+ *
+ * How it does it (step by step):
+ *   1. Calls fs.existsSync to check if CONFIG_FILE exists.
+ *   2. Returns true if file exists, false otherwise.
+ *
+ * Parameters:
+ *   None.
+ *
+ * Returns:
+ *   @returns {boolean} — true if config.json exists, false otherwise.
+ *
+ * Dependencies:
+ *   - fs.existsSync — checks file existence.
+ *
+ * Dependants:
+ *   - index.ts — uses this before loadConfig to avoid creating file on first run.
+ * </Summary>
  */
 export const hasConfigFile = (): boolean => fs.existsSync(CONFIG_FILE);
 
-/** Deep-safe copy of defaults for first-run `saveConfig({ ...defaults, ...answers })`. */
-export const getDefaultConfig = (): Config => ({ ...DEFAULT_CONFIG });
+/**
+ * <Summary>
+ * What it does:
+ *   Creates a deep copy of the default configuration for first-run setup.
+ *
+ * How it does it (step by step):
+ *   1. Spreads DEFAULT_CONFIG to create a shallow copy.
+ *   2. Spreads DEFAULT_CONFIG.ui to create a separate copy of the ui object.
+ *   3. Returns the complete copy with nested objects properly separated.
+ *
+ * Parameters:
+ *   None.
+ *
+ * Returns:
+ *   @returns {Config} — A deep copy of the default configuration object.
+ *
+ * Dependencies:
+ *   - None (object spreading only).
+ *
+ * Dependants:
+ *   - index.ts — uses this for first-run config merging.
+ * </Summary>
+ */
+export const getDefaultConfig = (): Config => ({
+  // Create a shallow copy of DEFAULT_CONFIG
+  ...DEFAULT_CONFIG,
+  // Create a separate copy of the ui object to avoid shared references
+  ui: { ...DEFAULT_CONFIG.ui },
+});
 
 /**
  * Path to the readline history file for arrow-key command recall.
@@ -145,8 +238,123 @@ export const SKILLS_DIR = path.join(CONFIG_DIR, "skills");
  * </Summary>
  */
 export const ensureDirs = (): void => {
-  // recursive: true — no error if ~/.agent-cli already exists
+  // Create CONFIG_DIR with recursive: true to create parent directories if needed
+  // No error if directory already exists
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
+};
+
+/**
+ * <Summary>
+ * What it does:
+ *   Merges parsed config from disk with DEFAULT_CONFIG to fill missing keys.
+ *
+ * How it does it (step by step):
+ *   1. Spreads DEFAULT_CONFIG as the base layer.
+ *   2. Spreads parsed config on top to override defaults.
+ *   3. Validates showThinkOutput is boolean, otherwise use default.
+ *   4. Validates agentCap is positive integer, otherwise use default.
+ *   5. Merges ui objects with defaults as base.
+ *
+ * Parameters:
+ *   @param {Partial<Config>} parsedConfig — Config object parsed from config.json.
+ *
+ * Returns:
+ *   @returns {Config} — The merged configuration with all required fields.
+ *
+ * Dependencies:
+ *   - None (object spreading and type validation only).
+ *
+ * Dependants:
+ *   - loadConfig — merges disk config with defaults.
+ * </Summary>
+ */
+const mergeConfigFromDisk = (parsedConfig: Partial<Config>): Config => ({
+  // Start with DEFAULT_CONFIG as the base
+  ...DEFAULT_CONFIG,
+  // Override with parsed config values
+  ...parsedConfig,
+  // Validate showThinkOutput is boolean, otherwise use default
+  showThinkOutput:
+    typeof parsedConfig.showThinkOutput === "boolean"
+      ? parsedConfig.showThinkOutput
+      : DEFAULT_CONFIG.showThinkOutput,
+  // Validate agentCap is positive integer, otherwise use default
+  agentCap:
+    typeof parsedConfig.agentCap === "number" &&
+    Number.isInteger(parsedConfig.agentCap) &&
+    parsedConfig.agentCap >= 1
+      ? parsedConfig.agentCap
+      : DEFAULT_CONFIG.agentCap,
+  // Merge ui objects with defaults as base
+  ui: { ...DEFAULT_CONFIG.ui, ...parsedConfig.ui },
+});
+
+/**
+ * <Summary>
+ * What it does:
+ *   Determines whether the config needs to be persisted back to disk.
+ *
+ * How it does it (step by step):
+ *   1. Checks if any DEFAULT_CONFIG keys are missing from stored config.
+ *   2. Checks if nested ui object is missing any keys.
+ *   3. Validates agentCap is a positive integer.
+ *   4. Validates showThinkOutput is a boolean.
+ *   5. Returns true if any corrections are needed, false otherwise.
+ *
+ * Parameters:
+ *   @param {Record<string, unknown>} storedConfig — Raw config object read from disk.
+ *   @param {Partial<Config>} parsedConfig — Parsed config with type information.
+ *
+ * Returns:
+ *   @returns {boolean} — true if config should be persisted, false otherwise.
+ *
+ * Dependencies:
+ *   - None (comparison logic only).
+ *
+ * Dependants:
+ *   - loadConfig — checks if merged config needs to be written back to disk.
+ * </Summary>
+ */
+const configNeedsPersist = (
+  storedConfig: Record<string, unknown>,
+  parsedConfig: Partial<Config>,
+): boolean => {
+  // Check if any default keys are missing from stored config
+  for (const key of Object.keys(DEFAULT_CONFIG)) {
+    if (key === "ui") {
+      if (typeof storedConfig.ui !== "object" || storedConfig.ui === null) {
+        return true;
+      }
+      const uiObject = storedConfig.ui as Record<string, unknown>;
+      // Check if nested ui keys are missing
+      for (const uiKey of Object.keys(DEFAULT_CONFIG.ui)) {
+        if (!(uiKey in uiObject)) {
+          return true;
+        }
+      }
+      continue;
+    }
+    if (!(key in storedConfig)) {
+      return true;
+    }
+  }
+  // Validate agentCap is a positive integer
+  if (
+    parsedConfig.agentCap !== undefined &&
+    (typeof parsedConfig.agentCap !== "number" ||
+      !Number.isInteger(parsedConfig.agentCap) ||
+      parsedConfig.agentCap < 1)
+  ) {
+    return true;
+  }
+  // Validate showThinkOutput is a boolean
+  if (
+    parsedConfig.showThinkOutput !== undefined &&
+    typeof parsedConfig.showThinkOutput !== "boolean"
+  ) {
+    return true;
+  }
+  return false;
 };
 
 /**
@@ -160,8 +368,9 @@ export const ensureDirs = (): void => {
  *   2. Checks if config.json exists — if not, writes DEFAULT_CONFIG and returns it.
  *   3. Reads config.json as UTF-8 text.
  *   4. Parses JSON and merges with DEFAULT_CONFIG (fills missing keys).
- *   5. Returns the merged config object.
- *   6. On any error (read failure, JSON parse failure), returns DEFAULT_CONFIG.
+ *   5. Checks if merged config needs to be persisted back to disk.
+ *   6. Returns the merged config object.
+ *   7. On any error (read failure, JSON parse failure), returns DEFAULT_CONFIG.
  *
  * Parameters:
  *   None.
@@ -174,11 +383,15 @@ export const ensureDirs = (): void => {
  *   - fs.existsSync — checks if config.json exists.
  *   - fs.readFileSync — reads config.json from disk.
  *   - saveConfig — writes default config on first run.
+ *   - mergeConfigFromDisk — merges disk config with defaults.
+ *   - configNeedsPersist — checks if config needs to be written back.
  *
  * Dependants:
  *   - index.ts main() — loads config on CLI startup.
  *   - updateConfig — loads existing config before merging changes.
  *   - CommandHandler.handleConfig — displays current config to user.
+ *   - getConfig — reads current config for single field access.
+ *   - setConfig — reads current config for single field update.
  * </Summary>
  */
 export const loadConfig = (): Config => {
@@ -186,16 +399,21 @@ export const loadConfig = (): Config => {
   if (!fs.existsSync(CONFIG_FILE)) {
     // No file yet: write defaults so the path always has a valid JSON, then return them.
     saveConfig(DEFAULT_CONFIG);
-    return { ...DEFAULT_CONFIG };
+    return { ...DEFAULT_CONFIG, ui: { ...DEFAULT_CONFIG.ui } };
   }
   try {
-    const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
-    // Merge: start from defaults, then overlay keys from disk. Later spread wins on conflicts.
-    // `as Config` tells TypeScript the shape; it does not validate JSON at runtime.
-    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) } as Config;
+    const rawConfigString = fs.readFileSync(CONFIG_FILE, "utf-8");
+    const parsedConfig = JSON.parse(rawConfigString) as Partial<Config>;
+    const mergedConfig = mergeConfigFromDisk(parsedConfig);
+    if (
+      configNeedsPersist(parsedConfig as Record<string, unknown>, parsedConfig)
+    ) {
+      saveConfig(mergedConfig);
+    }
+    return mergedConfig;
   } catch {
     // Bad JSON or unreadable file — fail soft so the CLI can still start.
-    return { ...DEFAULT_CONFIG };
+    return { ...DEFAULT_CONFIG, ui: { ...DEFAULT_CONFIG.ui } };
   }
 };
 
@@ -225,7 +443,9 @@ export const loadConfig = (): Config => {
  * </Summary>
  */
 export const saveConfig = (config: Config): void => {
+  // Ensure the config directory exists before writing
   ensureDirs();
+  // Write config as formatted JSON with 2-space indent for readability
   fs.writeFileSync(
     CONFIG_FILE,
     // null, 2 → pretty-print with 2-space indent (easier for users to edit by hand).
@@ -261,10 +481,14 @@ export const saveConfig = (config: Config): void => {
  * </Summary>
  */
 export const updateConfig = (patch: Partial<Config>): Config => {
-  const config = loadConfig(); // full merged object from disk + defaults
-  Object.assign(config, patch); // shallow merge: only keys in `patch` change
-  saveConfig(config);
-  return config;
+  // Load the current full config from disk (merged with defaults)
+  const currentConfig = loadConfig();
+  // Shallow merge: only keys in `patch` will change, others remain as-is
+  Object.assign(currentConfig, patch);
+  // Save the updated config back to disk
+  saveConfig(currentConfig);
+  // Return the updated config
+  return currentConfig;
 };
 
 /**
@@ -291,7 +515,9 @@ export const updateConfig = (patch: Partial<Config>): Config => {
  * </Summary>
  */
 export const getConfig = <K extends keyof Config>(key: K): Config[K] => {
-  return loadConfig()[key]; // re-reads file each call — fine for rare lookups
+  // Load the full config and return the value at the requested key
+  // Note: re-reads file each call — acceptable for rare single-field lookups
+  return loadConfig()[key];
 };
 
 /**
@@ -325,8 +551,12 @@ export const setConfig = <K extends keyof Config>(
   key: K,
   value: Config[K],
 ): Config => {
-  const config = loadConfig();
-  Object.assign(config, { [key]: value } as Partial<Config>); // single-field update
-  saveConfig(config);
-  return config;
+  // Load the current config from disk
+  const currentConfig = loadConfig();
+  // Update only the specified field using single-field update
+  Object.assign(currentConfig, { [key]: value } as Partial<Config>);
+  // Save the updated config back to disk
+  saveConfig(currentConfig);
+  // Return the updated config
+  return currentConfig;
 };
