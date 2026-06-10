@@ -7,6 +7,7 @@
     "packages/*"
   ],
   "scripts": {
+    "build": "npm run build -w @loopycode/shared && npm run build -w loopycode && npm run build -w loopycode-server",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
