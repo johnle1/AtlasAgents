@@ -1,8 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { SKILLS_DIR } from "./config.js";
-import type { Connection, SkillPayload } from "./connection.js";
+import type { Connection, SkillPayload } from "./connection/index.js";
 
 /**
  * <Summary>
@@ -17,7 +18,7 @@ import type { Connection, SkillPayload } from "./connection.js";
  * </Summary>
  */
 const DEFAULT_SKILLS_PACKAGE_DIR = path.resolve(
-  __dirname,
+  path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "default-skills",
 );
@@ -426,4 +427,9 @@ export class SkillManager {
     await this.conn.syncSkills(skills);
     return skills.length;
   };
+
+  /**
+   * Syncs local skills to the server once (e.g. after connect).
+   */
+  autoSync = async (): Promise<number> => this.sync();
 }

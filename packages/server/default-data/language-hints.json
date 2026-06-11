@@ -1,0 +1,23 @@
+[
+  { "needle": "typescript", "tag": "typescript" },
+  { "needle": "ts ", "tag": "typescript" },
+  { "needle": ".ts", "tag": "typescript" },
+  { "needle": "javascript", "tag": "javascript" },
+  { "needle": "js ", "tag": "javascript" },
+  { "needle": ".js", "tag": "javascript" },
+  { "needle": "python", "tag": "python" },
+  { "needle": ".py", "tag": "python" },
+  { "needle": "rust", "tag": "rust" },
+  { "needle": ".rs", "tag": "rust" },
+  { "needle": "go ", "tag": "go" },
+  { "needle": "golang", "tag": "go" },
+  { "needle": ".go", "tag": "go" },
+  { "needle": "java", "tag": "java" },
+  { "needle": "kotlin", "tag": "kotlin" },
+  { "needle": "swift", "tag": "swift" },
+  { "needle": "ruby", "tag": "ruby" },
+  { "needle": "php", "tag": "php" },
+  { "needle": "c++", "tag": "cpp" },
+  { "needle": "csharp", "tag": "csharp" },
+  { "needle": "c#", "tag": "csharp" }
+]

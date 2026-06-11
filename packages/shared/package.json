@@ -1,0 +1,22 @@
+{
+  "name": "@loopycode/shared",
+  "version": "0.1.0",
+  "description": "Shared utilities for LoopyCode client and server",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "diff": "^9.0.0",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.2"
+  }
+}

@@ -24,6 +24,7 @@ import {
 import { TcpServerTransport } from '@rsocket/tcp-server'
 
 import { AuthMiddleware } from './auth/middleware.js'
+import { installUserDataDefaults } from './installUserDataDefaults.js'
 import { Router, type TaskRequest } from './routing/router.js'
 
 const OLLAMA_TAGS_URL = 'http://localhost:11434/api/tags'
@@ -662,6 +663,8 @@ const main = async (): Promise<void> => {
   }
 
   const { password, port } = await runServerStartupPrompts()
+
+  await installUserDataDefaults(process.cwd())
 
   process.stdout.write(`Connecting to Ollama at ${OLLAMA_TAGS_URL}...`)
   try {

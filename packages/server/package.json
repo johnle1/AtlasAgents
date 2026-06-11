@@ -10,14 +10,26 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "start": "node dist/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm run build && node --test dist/orchestration/readyQueue.test.js dist/orchestration/advisorThink.test.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "files": [
+    "dist",
+    "default-data"
+  ],
   "type": "commonjs",
   "dependencies": {
+    "@loopycode/shared": "file:../shared",
     "@rsocket/core": "1.0.0-alpha.3",
-    "@rsocket/tcp-server": "1.0.0-alpha.3"
+    "@rsocket/tcp-server": "1.0.0-alpha.3",
+    "diff": "^9.0.0",
+    "fast-glob": "^3.3.3",
+    "picocolors": "^1.1.1",
+    "undici": "^7.27.2"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.2"
   }
 }
