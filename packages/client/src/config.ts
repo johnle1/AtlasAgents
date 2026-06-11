@@ -81,6 +81,9 @@ export interface Config {
   /** Timeout in ms for model responses — prevents CLI hanging on slow models */
   timeout: number;
 
+  /** Timeout in ms for shell commands executed via the file proxy */
+  shellTimeoutMs: number;
+
   /** Percentage of context window memory injection is allowed to consume */
   maxContextBudget: number;
 
@@ -124,6 +127,9 @@ const DEFAULT_CONFIG: Config = {
 
   // Prevents CLI hanging on slow or unresponsive models (10 minutes)
   timeout: 600_000,
+
+  // Kill shell commands after 30 seconds by default
+  shellTimeoutMs: 30_000,
 
   // Caps how much of the context window memory injection can consume (20%)
   maxContextBudget: 0.2,
