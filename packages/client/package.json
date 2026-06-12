@@ -10,7 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "start": "node dist/index.js",
-    "test": "npm run build && node --test dist/connection/commands.test.js dist/connection/connection.test.js dist/fileProxy/pathUtils.test.js dist/ui/spinnerSync.test.js dist/ui/statusVisual.test.js"
+    "test": "npm run build && node --test dist/connection/commands.test.js dist/connection/connection.test.js dist/fileProxy/pathUtils.test.js dist/ui/spinnerSync.test.js dist/ui/statusVisual.test.js dist/ui/historySanitize.test.js"
   },
   "keywords": [],
   "author": "",

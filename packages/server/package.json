@@ -10,7 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "start": "node dist/index.js",
-    "test": "npm run build && node --test dist/orchestration/readyQueue.test.js dist/orchestration/advisorThink.test.js"
+    "test": "npm run build && node --test dist/orchestration/readyQueue.test.js dist/orchestration/advisorThink.test.js dist/skills/skillManager.test.js"
   },
   "keywords": [],
   "author": "",
