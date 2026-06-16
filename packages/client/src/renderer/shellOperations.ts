@@ -207,7 +207,7 @@ export const printBashApproved = (): void => {
  *   3. Build the completion line with exit code and success icon.
  *   4. Trim whitespace from stdout and stderr outputs.
  *   5. If stdout has content, display up to 8 lines of output.
- *   6. If stderr has content, display up to 4 lines of error output.
+ *   6. If stderr has content, display up to 4 lines of error output (independent of stdout).
  *   7. If both are empty and exit code is 0, display no output message.
  *   8. Append all lines to the output block.
  *
@@ -264,19 +264,15 @@ export const printBashRan = (
       `${theme.textSecondary}${stdoutTrimmed.split("\n").slice(0, 8).join("\n")}${theme.reset}`,
     );
   }
-  // ===== STEP 6: Display stderr if present (and no stdout) =====
-  // Step 6a: Check if stderr has content after trimming (only if stdout is empty)
-  else if (stderrTrimmed.length > 0) {
-    // Step 6b: Split stderr into lines and display up to 4 lines
-    // Step 6c: Limit to 4 lines as errors are typically more concise
-    // Step 6d: Apply secondary text color for the error content
+  // ===== STEP 6: Display stderr if present =====
+  if (stderrTrimmed.length > 0) {
     outputLines.push(
       `${theme.textSecondary}${stderrTrimmed.split("\n").slice(0, 4).join("\n")}${theme.reset}`,
     );
   }
   // ===== STEP 7: Display no output message =====
   // Step 7a: If both stdout and stderr are empty and exit code is 0, show no output message
-  else if (exitCode === 0) {
+  if (stdoutTrimmed.length === 0 && stderrTrimmed.length === 0 && exitCode === 0) {
     outputLines.push(`${theme.textSecondary}  (no output)${theme.reset}`);
   }
 

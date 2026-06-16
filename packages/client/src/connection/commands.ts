@@ -143,7 +143,6 @@ export function requestResponseBuffer(
  *   - getMemory — sends "memory.get".
  *   - forgetMemory — sends "memory.forget".
  *   - clearMemory — sends "memory.clear".
- *   - respondConfirmation — sends "confirm.respond".
  *   - respondPlan — sends "plan.respond".
  * </Summary>
  */
@@ -425,45 +424,6 @@ export async function clearMemory(
   // Step 1a: Call sendCommand with "memory.clear" route and empty payload
   // Step 1b: Server wipes ALL memory entries for this user session
   await sendCommand(rsocket, "memory.clear", {}, metadata);
-}
-
-/**
- * <Summary>
- * What it does:
- *   Responds to a pending confirmation request from the server, allowing the
- *   user to approve or reject an action requiring confirmation.
- *
- * How it does it (step by step):
- *   1. Sends a "confirm.respond" command via sendCommand with the confirmation ID.
- *   2. Includes the approved boolean flag to indicate user's decision.
- *   3. Server processes the response and proceeds or cancels the pending action.
- *
- * Parameters:
- *   @param {RSocket} rsocket — The live RSocket connection instance.
- *   @param {Buffer} metadata — The auth metadata Buffer.
- *   @param {string} id — The unique confirmation ID from the server's request.
- *   @param {boolean} approved — True to approve the action, false to reject it.
- *
- * Returns:
- *   @returns {Promise<void>} — Resolves when the server acknowledges the response.
- *
- * Dependencies:
- *   - sendCommand — sends the requestResponse.
- *
- * Dependants:
- *   - CommandHandler — calls this when user responds to a confirmation prompt.
- * </Summary>
- */
-export async function respondConfirmation(
-  rsocket: RSocket,
-  metadata: Buffer,
-  id: string,
-  approved: boolean,
-): Promise<void> {
-  // ===== STEP 1: Send Confirmation Response =====
-  // Step 1a: Send "confirm.respond" command with the confirmation ID and approval flag
-  // Step 1b: Server uses this to proceed or cancel pending user confirmations
-  await sendCommand(rsocket, "confirm.respond", { id, approved }, metadata);
 }
 
 /**

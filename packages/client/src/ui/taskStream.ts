@@ -5,13 +5,12 @@
  *
  * How it fits in the system:
  *   Manages the execution of user tasks through the RSocket connection. It handles streaming
- *   text tokens, status frames, plan confirmations, file operation approvals, and command approvals.
+ *   text tokens, status frames, and plan confirmations.
  *   This is the main bridge between the server-side task execution and the client-side UI.
  *
  * Dependencies:
  *   - Connection — provides the RSocket connection for task execution.
  *   - loadConfig — provides configuration for agent settings.
- *   - renderDiff — renders file diffs for approval display.
  *   - formatAdvisorThinkForDisplay — formats advisor think blocks for display.
  *   - agentStatus — manages task activity tracking.
  *   - uiBridge — provides UI bridge functions for display and state management.
@@ -25,7 +24,6 @@
 import type { Connection } from "../connection/index.js";
 import type { TaskFrame } from "../frames.js";
 import { loadConfig } from "../config.js";
-import { renderDiff } from "../diff/diffRenderer.js";
 import { formatAdvisorThinkForDisplay } from "../renderer.js";
 import { setTaskActive } from "../agentStatus.js";
 import type { MaxAgentsParam } from "../taskModifiers.js";
@@ -56,7 +54,7 @@ import type { PlanDecision } from "./types.js";
  *   4. Initialize streaming buffer for token accumulation.
  *   5. Send task to server with token and frame callbacks.
  *   6. Handle tokens by updating streaming text buffer.
- *   7. Handle frames based on their kind (think, status, confirm-plan, confirm-file, etc.).
+ *   7. Handle frames based on their kind (think, status, confirm-plan, etc.).
  *   8. Process plan confirmations with approval requests.
  *   9. Process file operation confirmations with diff display.
  *   10. Process command confirmations with approval requests.
@@ -75,7 +73,6 @@ import type { PlanDecision } from "./types.js";
  *   - Connection — sends task execution request to server.
  *   - uiBridge — manages UI state and display.
  *   - spinnerSync — provides spinner state mapping.
- *   - renderDiff — renders file diffs for approval.
  *   - formatAdvisorThinkForDisplay — formats think blocks.
  *
  * Dependants:
@@ -250,47 +247,7 @@ export const runTaskStream = async (
           // Step 2a-5i: Show agent spinner for execution phase
           setSpinner({ active: true, label: "Agent", mode: "thinking" });
         }
-        // ===== STEP 2a-6: Handle file operation confirmation frames =====
-        else if (taskFrame.kind === "confirm-file") {
-          // Step 2a-6a: Clear spinner for interactive approval
-          setSpinner(null);
-
-          // Step 2a-6b: Render the file diff for user review
-          const diffBody = await renderDiff(taskFrame.path, taskFrame.diff);
-
-          // Step 2a-6c: Append diff to history for user review
-          appendHistory({ kind: "diff", path: taskFrame.path, body: diffBody });
-
-          // Step 2a-6d: Request user approval for file operation
-          const isApproved = (await requestApproval({
-            type: "keepUndo",
-            contextLabel: `Apply changes to ${taskFrame.path}`,
-          })) as boolean;
-
-          // Step 2a-6e: Send approval decision to server
-          await connection.respondConfirmation(taskFrame.id, isApproved);
-
-          // Step 2a-6f: Show agent spinner for next operation
-          setSpinner({ active: true, label: "Agent", mode: "working" });
-        }
-        // ===== STEP 2a-7: Handle command confirmation frames =====
-        else if (taskFrame.kind === "confirm-command") {
-          // Step 2a-7a: Clear spinner for interactive approval
-          setSpinner(null);
-
-          // Step 2a-7b: Request user approval for command execution
-          const isApproved = (await requestApproval({
-            type: "runSkip",
-            command: taskFrame.command,
-          })) as boolean;
-
-          // Step 2a-7c: Send approval decision to server
-          await connection.respondConfirmation(taskFrame.id, isApproved);
-
-          // Step 2a-7d: Show agent spinner for next operation
-          setSpinner({ active: true, label: "Agent", mode: "working" });
-        }
-        // ===== STEP 2a-8: Handle error frames =====
+        // ===== STEP 2a-6: Handle error frames =====
         else if (taskFrame.kind === "error") {
           // Step 2a-8a: Append error message to history with error variant
           appendHistory({

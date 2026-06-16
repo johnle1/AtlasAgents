@@ -9,7 +9,6 @@ import {
   fetchModelsDetailed as fetchModelsDetailedFn,
   forgetMemory as forgetMemoryFn,
   getMemory as getMemoryFn,
-  respondConfirmation as respondConfirmationFn,
   respondPlan as respondPlanFn,
   sendCommand as sendCommandFn,
   syncSkills as syncSkillsFn,
@@ -1067,38 +1066,6 @@ export class Connection {
     // ===== STEP 2: Delegate to Streaming Helper =====
     // Step 2a: Pass operation options, metadata, and socket to sendStream
     await sendStreamFn(opts, this.meta(), this.socket());
-  };
-
-  /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Responds to a pending server confirmation request (approve or reject).
-   *
-   * How it does it (step by step):
-   *   1. Waits until connected.
-   *   2. Delegates to respondConfirmation in commands.js.
-   *
-   * Parameters:
-   *   @param {string} id — Confirmation ID from the server frame.
-   *   @param {boolean} approved — True to approve, false to reject.
-   *
-   * Returns:
-   *   @returns {Promise<void>} — Resolves when the server acknowledges.
-   *
-   * Dependencies:
-   *   - respondConfirmation — commands.js helper.
-   *
-   * Dependants:
-   *   - taskStream.runTaskStream — user approval prompts in Ink UI.
-   * </Summary>
-   */
-  respondConfirmation = async (
-    id: string,
-    approved: boolean,
-  ): Promise<void> => {
-    await this.waitUntilConnected();
-    await respondConfirmationFn(this.socket(), this.meta(), id, approved);
   };
 
   /**

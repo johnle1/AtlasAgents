@@ -62,11 +62,15 @@ type BridgeHooks = {
 
   /** Callback invoked when agent status map changes (added, updated, or removed). */
   onAgentStatuses?: (
-    statuses: Map<number | "advisor", AgentStatusState>,
+    updater: (
+      prev: Map<number | "advisor", AgentStatusState>,
+    ) => Map<number | "advisor", AgentStatusState>,
   ) => void;
 
   /** Callback invoked when agent boards are updated (task assignments changed). */
-  onAgentBoards?: (boards: AgentBoardState[]) => void;
+  onAgentBoards?: (
+    updater: (prev: AgentBoardState[]) => AgentBoardState[],
+  ) => void;
 
   /** Callback invoked when an approval request appears or is resolved. */
   onApprovalChange?: (req: ApprovalRequest | null) => void;
@@ -446,66 +450,12 @@ export const setSpinner = (spinnerState: SpinnerState | null): void => {
   bridgeHooks.onSpinner?.(spinnerState);
 };
 
-/**
- * <Summary>
- * What it does:
- *   Stores the current map of agent status states.
- *
- * Used by:
- *   - setAgentStatus — updates this map with new status.
- *   - removeAgentStatus — removes entries from this map.
- *   - clearAgentStatuses — clears all entries from this map.
- *   - onAgentStatuses hook — receives this map for display.
- *
- * Produced by:
- *   - setAgentStatus — updates this map with new status.
- *   - removeAgentStatus — removes entries from this map.
- *   - clearAgentStatuses — clears all entries from this map.
- * </Summary>
- */
-let agentStatusMap = new Map<number | "advisor", AgentStatusState>();
-
-/**
- * <Summary>
- * What it does:
- *   Sets the status for an agent or the advisor.
- *
- * How it does it (step by step):
- *   1. Create a new Map from the current agent status map to trigger reactivity.
- *   2. Set the agent's status in the map.
- *   3. Call the registered onAgentStatuses hook to update the UI.
- *
- * Parameters:
- * @param {AgentStatusState} status — The agent status to set.
- *
- * Returns:
- * @returns {void} — Returns after updating the agent status.
- *
- * Dependencies:
- *   - agentStatusMap — stores the current agent statuses.
- *   - bridgeHooks — provides the registered hooks.
- *
- * Dependants:
- *   - taskStream — updates agent status during task execution.
- *   - Status frame handlers — update agent status when frames arrive.
- * </Summary>
- */
 export const setAgentStatus = (status: AgentStatusState): void => {
-  // ===== STEP 1: Create new map for reactivity =====
-  // Step 1a: Create a new Map from the current agent status map
-  // Step 1b: This ensures React components re-render when the map changes
-  const newAgentStatusMap = new Map(agentStatusMap);
-
-  // ===== STEP 2: Update agent status =====
-  // Step 2a: Set the agent's status in the map using its ID as the key
-  newAgentStatusMap.set(status.id, status);
-
-  // ===== STEP 3: Trigger UI update =====
-  // Step 3a: Update the module-level map for future operations
-  agentStatusMap = newAgentStatusMap;
-
-  // Step 3b: Call the registered onAgentStatuses hook to update the UI
-  bridgeHooks.onAgentStatuses?.(agentStatusMap);
+  bridgeHooks.onAgentStatuses?.((prev) => {
+    const next = new Map(prev);
+    next.set(status.id, status);
+    return next;
+  });
 };
 
 /**
@@ -527,7 +477,6 @@ export const setAgentStatus = (status: AgentStatusState): void => {
  * @returns {void} — Returns after removing the agent status.
  *
  * Dependencies:
- *   - agentStatusMap — stores the current agent statuses.
  *   - bridgeHooks — provides the registered hooks.
  *
  * Dependants:
@@ -535,27 +484,14 @@ export const setAgentStatus = (status: AgentStatusState): void => {
  * </Summary>
  */
 export const removeAgentStatus = (agentId: number | "advisor"): void => {
-  // ===== STEP 1: Check if agent exists =====
-  // Step 1a: Check if the agent ID exists in the status map
-  // Step 1b: If not found, return early as there's nothing to remove
-  if (!agentStatusMap.has(agentId)) {
-    return;
-  }
-
-  // ===== STEP 2: Create new map for reactivity =====
-  // Step 2a: Create a new Map from the current status map to trigger reactivity
-  const newAgentStatusMap = new Map(agentStatusMap);
-
-  // ===== STEP 3: Delete agent status =====
-  // Step 3a: Delete the agent's status from the map using its ID as the key
-  newAgentStatusMap.delete(agentId);
-
-  // ===== STEP 4: Trigger UI update =====
-  // Step 4a: Update the module-level map for future operations
-  agentStatusMap = newAgentStatusMap;
-
-  // Step 4b: Call the registered onAgentStatuses hook to update the UI
-  bridgeHooks.onAgentStatuses?.(agentStatusMap);
+  bridgeHooks.onAgentStatuses?.((prev) => {
+    if (!prev.has(agentId)) {
+      return prev;
+    }
+    const next = new Map(prev);
+    next.delete(agentId);
+    return next;
+  });
 };
 
 /**
@@ -572,8 +508,6 @@ export const removeAgentStatus = (agentId: number | "advisor"): void => {
  * @returns {void} — Returns after clearing all agent statuses and boards.
  *
  * Dependencies:
- *   - agentStatusMap — stores the current agent statuses.
- *   - agentBoards — stores the current agent boards.
  *   - bridgeHooks — provides the registered hooks.
  *
  * Dependants:
@@ -581,37 +515,9 @@ export const removeAgentStatus = (agentId: number | "advisor"): void => {
  * </Summary>
  */
 export const clearAgentStatuses = (): void => {
-  // ===== STEP 1: Clear agent statuses =====
-  // Step 1a: Create a new empty Map for agent statuses
-  const emptyAgentStatusMap = new Map();
-
-  // Step 1b: Update the module-level map
-  agentStatusMap = emptyAgentStatusMap;
-
-  // Step 1c: Call the registered onAgentStatuses hook to update the UI
-  bridgeHooks.onAgentStatuses?.(agentStatusMap);
-
-  // ===== STEP 2: Clear agent boards =====
-  // Step 2a: Clear the agent boards as well
+  bridgeHooks.onAgentStatuses?.(() => new Map());
   clearAgentBoards();
 };
-
-/**
- * <Summary>
- * What it does:
- *   Stores the current array of agent boards (task assignments).
- *
- * Used by:
- *   - setAgentBoards — updates this array with new boards.
- *   - updateAgentActivity — updates activity within this array.
- *   - clearAgentBoards — clears this array.
- *   - onAgentBoards hook — receives this array for display.
- *
- * Produced by:
- *   - setAgentBoards — updates this array with new boards.
- * </Summary>
- */
-let agentBoards: AgentBoardState[] = [];
 
 /**
  * <Summary>
@@ -631,7 +537,6 @@ let agentBoards: AgentBoardState[] = [];
  * @returns {void} — Returns after updating the agent boards.
  *
  * Dependencies:
- *   - agentBoards — stores the current agent boards.
  *   - bridgeHooks — provides the registered hooks.
  *
  * Dependants:
@@ -640,33 +545,20 @@ let agentBoards: AgentBoardState[] = [];
  * </Summary>
  */
 export const setAgentBoards = (boards: AgentBoardState[]): void => {
-  // ===== STEP 1: Update boards with activity preservation =====
-  // Step 1a: Map over the provided boards to determine activity preservation
-  const updatedBoards = boards.map((board) => {
-    // Step 1b: Check if the board has running tasks
-    const hasRunningTask = board.tasks.some((task) => task.state === "running");
-
-    // Step 1c: Find the previous board state for this agent (if it exists)
-    const previousBoard = agentBoards.find(
-      (previousBoard) => previousBoard.id === board.id,
-    );
-
-    // Step 1d: Preserve activity if there are running tasks, otherwise clear it
-    // Step 1e: This prevents activity from being lost when boards are refreshed
-    return {
-      ...board,
-      activity: hasRunningTask
-        ? (previousBoard?.activity ?? board.activity)
-        : undefined,
-    };
-  });
-
-  // ===== STEP 2: Update and trigger UI update =====
-  // Step 2a: Update the module-level agent boards
-  agentBoards = updatedBoards;
-
-  // Step 2b: Call the registered onAgentBoards hook to update the UI
-  bridgeHooks.onAgentBoards?.(agentBoards);
+  bridgeHooks.onAgentBoards?.((prev) =>
+    boards.map((board) => {
+      const hasRunningTask = board.tasks.some((task) => task.state === "running");
+      const previousBoard = prev.find(
+        (previousBoard) => previousBoard.id === board.id,
+      );
+      return {
+        ...board,
+        activity: hasRunningTask
+          ? (previousBoard?.activity ?? board.activity)
+          : undefined,
+      };
+    }),
+  );
 };
 
 /**
@@ -688,7 +580,6 @@ export const setAgentBoards = (boards: AgentBoardState[]): void => {
  * @returns {void} — Returns after updating the agent's activity.
  *
  * Dependencies:
- *   - agentBoards — stores the current agent boards.
  *   - bridgeHooks — provides the registered hooks.
  *
  * Dependants:
@@ -700,29 +591,17 @@ export const updateAgentActivity = (
   agentId: number,
   activity: { stage: AgentStage; message: string } | null,
 ): void => {
-  // ===== STEP 1: Find agent board =====
-  // Step 1a: Find the index of the agent board by ID
-  const boardIndex = agentBoards.findIndex((board) => board.id === agentId);
-
-  // Step 1b: If not found, return early (agent doesn't exist in boards)
-  if (boardIndex < 0) {
-    return;
-  }
-
-  // ===== STEP 2: Update agent activity =====
-  // Step 2a: Map over the boards, updating the matching agent's activity
-  const updatedBoards = agentBoards.map((board, boardIndex) =>
-    boardIndex === boardIndex
-      ? { ...board, activity: activity ?? undefined }
-      : board,
-  );
-
-  // ===== STEP 3: Update and trigger UI update =====
-  // Step 3a: Update the module-level agent boards
-  agentBoards = updatedBoards;
-
-  // Step 3b: Call the registered onAgentBoards hook to update the UI
-  bridgeHooks.onAgentBoards?.(agentBoards);
+  bridgeHooks.onAgentBoards?.((prev) => {
+    const foundIndex = prev.findIndex((board) => board.id === agentId);
+    if (foundIndex < 0) {
+      return prev;
+    }
+    return prev.map((board, index) =>
+      index === foundIndex
+        ? { ...board, activity: activity ?? undefined }
+        : board,
+    );
+  });
 };
 
 /**
@@ -738,7 +617,6 @@ export const updateAgentActivity = (
  * @returns {void} — Returns after clearing the agent boards.
  *
  * Dependencies:
- *   - agentBoards — stores the current agent boards.
  *   - bridgeHooks — provides the registered hooks.
  *
  * Dependants:
@@ -746,13 +624,7 @@ export const updateAgentActivity = (
  * </Summary>
  */
 export const clearAgentBoards = (): void => {
-  // ===== STEP 1: Clear boards =====
-  // Step 1a: Set the module-level agent boards array to empty
-  agentBoards = [];
-
-  // ===== STEP 2: Trigger UI update =====
-  // Step 2a: Call the registered onAgentBoards hook to update the UI
-  bridgeHooks.onAgentBoards?.(agentBoards);
+  bridgeHooks.onAgentBoards?.(() => []);
 };
 
 /**
@@ -926,18 +798,20 @@ export const requestApproval = (
   // Step 1a: All approvals should always be shown for user confirmation
   // Step 1b: Only auto-resolve if ink is not active (UI not available)
 
-  // ===== STEP 2: Auto-resolve if UI not available =====
+  // ===== STEP 2: Fail closed if UI not available =====
   if (!inkUIActive) {
-    // Step 2a: If plan review, auto-implement (simplest choice for non-interactive)
     if (approvalRequest.type === "planReview")
-      return Promise.resolve("implement" as const);
-
-    // Step 2b: For other requests, auto-approve (true)
-    return Promise.resolve(true);
+      return Promise.resolve("skip" as const);
+    return Promise.resolve(false);
   }
 
-  // ===== STEP 3: Create approval promise =====
-  // Step 3a: Return a new promise that will resolve when user responds
+  // ===== STEP 3: Reject concurrent requests =====
+  if (pendingApproval !== null) {
+    return Promise.reject(new Error("Approval request already pending"));
+  }
+
+  // ===== STEP 4: Create approval promise =====
+  // Step 4a: Return a new promise that will resolve when user responds
   return new Promise((resolveFunction) => {
     // Step 3b: Store the approval request and resolve function for later resolution
     pendingApproval = { req: approvalRequest, resolve: resolveFunction };
@@ -1030,24 +904,22 @@ export const requestPrompt = (
   // Step 1a: All prompts should always be shown for user interaction
   // Step 1b: Only auto-resolve if ink is not active (UI not available)
 
-  // ===== STEP 2: Auto-resolve if UI not available =====
+  // ===== STEP 2: Fail closed if UI not available =====
   if (!inkUIActive) {
-    // Step 2a: If choice prompt, auto-select first option
-    if (promptRequest.type === "choice") return Promise.resolve(1);
-
-    // Step 2b: If plan edit prompt, return initial steps unchanged
+    if (promptRequest.type === "choice") return Promise.resolve(0);
     if (promptRequest.type === "planEdit")
       return Promise.resolve(promptRequest.initial);
-
-    // Step 2c: If theme prompt, return undefined (no result needed)
     if (promptRequest.type === "theme") return Promise.resolve(undefined);
-
-    // Step 2d: If line prompt, return empty string
     return Promise.resolve("");
   }
 
-  // ===== STEP 3: Create prompt promise =====
-  // Step 3a: Return a new promise that will resolve when user responds
+  // ===== STEP 3: Reject concurrent requests =====
+  if (pendingPrompt !== null) {
+    return Promise.reject(new Error("Prompt request already pending"));
+  }
+
+  // ===== STEP 4: Create prompt promise =====
+  // Step 4a: Return a new promise that will resolve when user responds
   return new Promise((resolveFunction) => {
     // Step 3b: Store the prompt request and resolve function for later resolution
     pendingPrompt = { req: promptRequest, resolve: resolveFunction };

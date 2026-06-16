@@ -7,7 +7,7 @@ const MAX_HISTORY = 1_000;
 export const loadHistory = (): string[] => {
   try {
     const raw = fs.readFileSync(HISTORY_FILE, "utf-8");
-    return raw.split("\n").filter(Boolean);
+    return raw.split("\n").filter(Boolean).map(sanitizeHistoryLine);
   } catch {
     return [];
   }

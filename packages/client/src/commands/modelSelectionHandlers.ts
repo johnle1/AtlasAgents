@@ -1,14 +1,30 @@
 /**
- * Model selection command handlers.
+ * <Summary>
+ * What it does:
+ *   Handles model selection command handlers for the CLI.
  *
- * This module handles commands for selecting advisor and agent models:
- * - /set advisor
- * - /set agent
+ * How it fits in the system:
+ *   This module provides command handlers for selecting advisor and agent models through the CLI.
+ *   It fetches available models from the server, displays them to the user, and allows the user
+ *   to select a model. The selected model is then saved to the local configuration and synced to
+ *   the server. The banner is also refreshed to reflect the updated configuration.
+ *
+ * Dependencies:
+ *   - config — provides configuration management functions.
+ *   - Connection — provides server communication methods.
+ *   - PromptPort — provides user prompt interface.
+ *   - uiBridge — provides banner refresh function.
+ *   - renderer — provides output formatting and display functions.
+ *
+ * Dependants:
+ *   - configHandlers.handleSet — uses these handlers for /set advisor and /set agent commands.
+ * </Summary>
  */
 
-import { updateConfig } from "../config.js";
+import { updateConfig, loadConfig } from "../config.js";
 import type { Connection } from "../connection/index.js";
 import type { PromptPort } from "../ui/promptPort.js";
+import { refreshInkBanner } from "../ui/uiBridge.js";
 import { printModels, printError, printSuccess } from "../renderer.js";
 
 /**
@@ -17,82 +33,142 @@ import { printModels, printError, printSuccess } from "../renderer.js";
  *   Lets the user pick the advisor or agent model from the server's model list and saves it to config.
  *
  * How it does it (step by step):
- *   1. Fetches model names via Connection.listModels.
- *   2. Prints a numbered list and promptChoice for a 1-based index.
- *   3. On valid choice, updateConfig for advisorModel or agentModel, then Connection.reload.
+ *   1. Fetch available model names from the server via Connection.listModels.
+ *   2. Handle errors if model fetch fails.
+ *   3. Check if any models are available on the server.
+ *   4. Display a numbered list of models using renderer.printModels.
+ *   5. Prompt the user to select a model by number using promptChoice.
+ *   6. Validate the user's choice is within the valid range.
+ *   7. Get the selected model name from the array.
+ *   8. Determine the configuration key based on the role (advisorModel or agentModel).
+ *   9. Capture the previous model name for rollback.
+ *   10. Update the local configuration with the selected model.
+ *   11. Update the connection with the new configuration.
+ *   12. Sync the model choice to the server using Connection.sendCommand.
+ *   13. Roll back local config if server sync fails.
+ *   14. Refresh the banner to reflect the updated configuration.
+ *   15. Print a success message to the user.
  *
  * Parameters:
- *   @param {'advisor' | 'agent'} role — Which config field to update.
- *   @param {Connection} conn — RSocket connection for server communication.
- *   @param {PromptPort} prompts — For user prompts.
+ * @param {"advisor" | "agent"} modelRole — Which configuration field to update ("advisor" for advisorModel, "agent" for agentModel).
+ * @param {Connection} connection — RSocket connection for server communication.
+ * @param {PromptPort} prompts — Prompt port for user interaction and selection.
  *
  * Returns:
- *   @returns {Promise<void>} — called for side effects only.
+ * @returns {Promise<void>} — Promise that resolves after setting the model (called for side effects only).
  *
  * Dependencies:
- *   - Connection.listModels, Connection.reload — server list and reconnect with new models.
- *   - updateConfig — writes advisorModel or agentModel to disk.
- *   - promptChoice — numeric pick from the printed list.
- *   - renderer.printModels, printError, printSuccess — UI.
+ *   - Connection.listModels — fetches available model names from server.
+ *   - Connection.sendCommand — sends configuration updates to server.
+ *   - Connection.updateConfig — updates connection with new configuration.
+ *   - updateConfig — writes advisorModel or agentModel to local configuration file.
+ *   - promptChoice — prompts user to select from numbered list.
+ *   - renderer.printModels — displays numbered list of available models.
+ *   - renderer.printError — displays error messages.
+ *   - renderer.printSuccess — displays success messages.
+ *   - refreshInkBanner — refreshes the banner to show updated configuration.
  *
  * Dependants:
- *   - configHandlers.handleSet — advisor and agent subcommands.
+ *   - configHandlers.handleSet — calls this for /set advisor and /set agent subcommands.
  * </Summary>
  */
 export const handleSetModel = async (
-  role: "advisor" | "agent",
-  conn: Connection,
+  modelRole: "advisor" | "agent",
+  connection: Connection,
   prompts: PromptPort,
 ): Promise<void> => {
-  let models: string[];
+  // ===== STEP 1: Fetch available models from server =====
+  let availableModels: string[];
+
+  // Step 1a: Wrap in try-catch to handle network errors gracefully
   try {
-    // Fetch available models from server
-    models = await conn.listModels();
-  } catch (err) {
+    // Step 1b: Fetch the list of available model names from the server
+    availableModels = await connection.listModels();
+  } catch (error) {
+    // Step 1c: Handle errors by printing error message and exiting
+    // Step 1d: Extract error message if it's an Error object, otherwise use the error itself
     printError(
-      `Could not fetch models: ${err instanceof Error ? err.message : err}`,
+      `Could not fetch models: ${error instanceof Error ? error.message : error}`,
     );
     return;
   }
 
-  // Check if any models are available
-  if (models.length === 0) {
+  // ===== STEP 2: Check if models are available =====
+  // Step 2a: Check if any models are available on the server
+  if (availableModels.length === 0) {
+    // Step 2b: Print error message if no models are available
     printError("No models available on the server.");
     return;
   }
 
-  // Display numbered list of models
-  printModels(models, role);
+  // ===== STEP 3: Display model list to user =====
+  // Step 3a: Display a numbered list of available models to the user
+  // Step 3b: The role is used for display context (advisor vs agent selection)
+  printModels(availableModels, modelRole);
 
-  // Prompt user to pick a model by number
-  const pickedNumber = await prompts.choose(
-    `  Pick a number (1-${models.length}): `,
-    models.length,
+  // ===== STEP 4: Prompt user to select a model =====
+  // Step 4a: Prompt the user to pick a model by entering a number
+  // Step 4b: The range is from 1 to the number of available models (1-based index)
+  const selectedNumber = await prompts.choose(
+    `  Pick a number (1-${availableModels.length}): `,
+    availableModels.length,
   );
-  const choiceIndex = pickedNumber - 1;
 
-  // Validate user choice
-  if (choiceIndex < 0 || choiceIndex >= models.length) {
+  // Step 4c: Convert from 1-based index to 0-based index for array access
+  const modelIndex = selectedNumber - 1;
+
+  // ===== STEP 5: Validate user choice =====
+  // Step 5a: Check if the user's choice is within the valid range
+  // Step 5b: Invalid choice (including 0 from cancellation) results in no change
+  if (modelIndex < 0 || modelIndex >= availableModels.length) {
+    // Step 5c: Print message that the selection was cancelled
     printError("Cancelled — no change.");
     return;
   }
 
-  // Get selected model and determine config key
-  const selectedModel = models[choiceIndex];
-  const configKey = role === "advisor" ? "advisorModel" : "agentModel";
+  // ===== STEP 6: Get selected model and determine config key =====
+  // Step 6a: Get the selected model name from the array using the validated index
+  const selectedModelName = availableModels[modelIndex];
+
+  // Step 6b: Determine the configuration key based on the role
+  // Step 6c: For advisor role, use "advisorModel"; for agent role, use "agentModel"
+  const configKey = modelRole === "advisor" ? "advisorModel" : "agentModel";
+  const previousModelName = loadConfig()[configKey];
+
+  // ===== STEP 7: Update local configuration =====
+  let updatedConfig;
   try {
-    // Sync model choice to server
-    await conn.sendCommand("config.set", {
-      key: configKey,
-      value: selectedModel,
-    });
-  } catch (err) {
+    updatedConfig = updateConfig({ [configKey]: selectedModelName });
+  } catch (error) {
     printError(
-      `Failed to set ${role} model on server: ${err instanceof Error ? err.message : err}`,
+      `Failed to save configuration: ${error instanceof Error ? error.message : error}`,
     );
     return;
   }
-  const config = updateConfig({ [configKey]: selectedModel });
-  conn.updateConfig(config);
-  printSuccess(`${role} model set to ${selectedModel}`);
+
+  // ===== STEP 8: Update connection with new configuration =====
+  connection.updateConfig(updatedConfig);
+
+  // ===== STEP 9: Sync model choice to server =====
+  try {
+    await connection.sendCommand("config.set", {
+      key: configKey,
+      value: selectedModelName,
+    });
+  } catch (error) {
+    const rolledBack = updateConfig({ [configKey]: previousModelName });
+    connection.updateConfig(rolledBack);
+    printError(
+      `Failed to set ${modelRole} model on server: ${error instanceof Error ? error.message : error}`,
+    );
+    return;
+  }
+
+  // ===== STEP 10: Refresh banner to reflect changes =====
+  // Step 10a: Refresh the banner to display the updated model configuration
+  refreshInkBanner(updatedConfig);
+
+  // ===== STEP 11: Print success message =====
+  // Step 11a: Print a success message to confirm the model was set
+  printSuccess(`${modelRole} model set to ${selectedModelName}`);
 };
