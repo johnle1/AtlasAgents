@@ -21,6 +21,24 @@ import type { Connection } from "../connection/index.js";
 import type { SkillManager } from "../skills.js";
 import type { LocalFileProxy } from "../localFileProxy.js";
 
+/**
+ * Dependencies required by the CommandHandler class.
+ */
+export interface CommandHandlerDeps {
+  /** Live RSocket client for server-backed commands. */
+  conn: Connection;
+  /** REPL prompts used for user interaction. */
+  prompts: PromptPort;
+  /** Optional SkillManager for /skills command. */
+  skills?: SkillManager;
+  /** Optional file proxy for workspace operations. */
+  fileProxy?: LocalFileProxy;
+  /** Optional callback for prompt updates. */
+  onPromptUpdate?: () => void;
+  /** Optional custom exit handler. */
+  onExit?: () => void;
+}
+
 // Import handler functions from specialized modules
 import {
   handleAgent,
@@ -57,6 +75,18 @@ import { printError } from "../renderer.js";
  * </Summary>
  */
 export class CommandHandler {
+  /** Live RSocket client for server-backed commands. */
+  private conn: Connection;
+  /** REPL prompts used for user interaction. */
+  private prompts: PromptPort;
+  /** Optional SkillManager for /skills command. */
+  private readonly skills?: SkillManager;
+  /** Optional file proxy for workspace operations. */
+  private readonly fileProxy?: LocalFileProxy;
+  /** Optional callback for prompt updates. */
+  private readonly onPromptUpdate?: () => void;
+  /** Optional custom exit handler. */
+  private readonly onExit?: () => void;
   /**
    * <Summary>
    * What it does:
@@ -66,12 +96,7 @@ export class CommandHandler {
    *   1. Stores conn, prompts, and optional dependencies on the instance for handler methods.
    *
    * Parameters:
-   *   @param {Connection} conn — Live RSocket client for server-backed commands.
-   *   @param {PromptPort} prompts — REPL prompts used for user interaction.
-   *   @param {SkillManager | undefined} skills — When set, /skills uses SkillManager; otherwise falls back to module functions.
-   *   @param {LocalFileProxy | undefined} fileProxy — Optional file proxy for workspace operations.
-   *   @param {(() => void) | undefined} onPromptUpdate — Optional callback for prompt updates.
-   *   @param {(() => void) | undefined} onExit — Optional custom exit handler.
+   *   @param {CommandHandlerDeps} deps — Object containing all CommandHandler dependencies.
    *
    * Returns:
    *   void — constructor side effects only.
@@ -83,14 +108,14 @@ export class CommandHandler {
    *   - index.ts — constructs CommandHandler after Connection.connect.
    * </Summary>
    */
-  constructor(
-    private conn: Connection,
-    private prompts: PromptPort,
-    private readonly skills?: SkillManager,
-    private readonly fileProxy?: LocalFileProxy,
-    private readonly onPromptUpdate?: () => void,
-    private readonly onExit?: () => void,
-  ) {}
+  constructor(deps: CommandHandlerDeps) {
+    this.conn = deps.conn;
+    this.prompts = deps.prompts;
+    this.skills = deps.skills;
+    this.fileProxy = deps.fileProxy;
+    this.onPromptUpdate = deps.onPromptUpdate;
+    this.onExit = deps.onExit;
+  }
 
   /**
    * @async
@@ -145,7 +170,7 @@ export class CommandHandler {
         handleAgent(subcommand, argument);
         break;
       case "config":
-        handleConfig();
+        await handleConfig();
         break;
       case "skills":
         await handleSkills(subcommand, argument, this.skills, this.conn);

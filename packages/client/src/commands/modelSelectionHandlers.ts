@@ -26,6 +26,7 @@ import type { Connection } from "../connection/index.js";
 import type { PromptPort } from "../ui/promptPort.js";
 import { refreshInkBanner } from "../ui/uiBridge.js";
 import { printModels, printError, printSuccess } from "../renderer.js";
+import { formatErrorMessage } from "./utils.js";
 
 /**
  * <Summary>
@@ -87,9 +88,7 @@ export const handleSetModel = async (
   } catch (error) {
     // Step 1c: Handle errors by printing error message and exiting
     // Step 1d: Extract error message if it's an Error object, otherwise use the error itself
-    printError(
-      `Could not fetch models: ${error instanceof Error ? error.message : error}`,
-    );
+    printError(`Could not fetch models: ${formatErrorMessage(error)}`);
     return;
   }
 
@@ -133,39 +132,38 @@ export const handleSetModel = async (
   // Step 6b: Determine the configuration key based on the role
   // Step 6c: For advisor role, use "advisorModel"; for agent role, use "agentModel"
   const configKey = modelRole === "advisor" ? "advisorModel" : "agentModel";
-  const previousModelName = loadConfig()[configKey];
+  const previousModelName = loadConfig()[configKey] ?? "";
 
   // ===== STEP 7: Update local configuration =====
   let updatedConfig;
   try {
     updatedConfig = updateConfig({ [configKey]: selectedModelName });
   } catch (error) {
-    printError(
-      `Failed to save configuration: ${error instanceof Error ? error.message : error}`,
-    );
+    printError(`Failed to save configuration: ${formatErrorMessage(error)}`);
     return;
   }
 
-  // ===== STEP 8: Update connection with new configuration =====
-  connection.updateConfig(updatedConfig);
-
-  // ===== STEP 9: Sync model choice to server =====
+  // ===== STEP 8: Sync model choice to server FIRST =====
   try {
     await connection.sendCommand("config.set", {
       key: configKey,
       value: selectedModelName,
     });
+    // Only update connection after server confirms the change
+    connection.updateConfig(updatedConfig);
   } catch (error) {
+    // Roll back local config since server sync failed
     const rolledBack = updateConfig({ [configKey]: previousModelName });
-    connection.updateConfig(rolledBack);
+    // Note: connection.updateConfig is not called here because it was only updated
+    // after successful server sync (line 157), so the connection still has the correct config
     printError(
-      `Failed to set ${modelRole} model on server: ${error instanceof Error ? error.message : error}`,
+      `Failed to set ${modelRole} model on server: ${formatErrorMessage(error)}`,
     );
     return;
   }
 
-  // ===== STEP 10: Refresh banner to reflect changes =====
-  // Step 10a: Refresh the banner to display the updated model configuration
+  // ===== STEP 9: Refresh banner to reflect changes =====
+  // Step 9a: Refresh the banner to display the updated model configuration
   refreshInkBanner(updatedConfig);
 
   // ===== STEP 11: Print success message =====

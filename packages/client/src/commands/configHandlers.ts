@@ -27,6 +27,7 @@ import type { Connection } from "../connection/index.js";
 import { getTheme } from "../theme/themeManager.js";
 import { printError, printSuccess } from "../renderer.js";
 import { parsePort } from "./utils.js";
+import { logger } from "../utils/logger.js";
 
 /**
  * <Summary>
@@ -185,7 +186,7 @@ export const handleSet = async (
       // Step 2a-i-2: If no inline argument, prompt user for password
       if (!passwordValue) {
         // Step 2a-i-3: Display warning about password visibility in REPL
-        console.log(
+        logger.info(
           `${getTheme().textSecondary}  Password echo is visible in the REPL (masked input needs no readline).${getTheme().reset}`,
         );
 
@@ -326,7 +327,7 @@ export const handleSet = async (
  *   - CommandHandler.handle — routes "/config" commands to this handler.
  * </Summary>
  */
-export const handleConfig = (): void => {
+export const handleConfig = async (): Promise<void> => {
   // ===== STEP 1: Load Configuration =====
   // Step 1a: Read current configuration from disk (config.json)
   const currentConfig = loadConfig();
@@ -334,7 +335,7 @@ export const handleConfig = (): void => {
   // ===== STEP 2: Display Configuration =====
   // Step 2a: Dynamically import printConfig function from renderer module
   // (dynamic import to avoid circular dependency issues)
-  const { printConfig } = require("../renderer.js");
+  const { printConfig } = await import("../renderer.js");
 
   // Step 2b: Format and display configuration as a table to user
   printConfig(currentConfig);

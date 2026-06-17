@@ -24,7 +24,13 @@
  * </Summary>
  */
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import { loadConfig, type Config } from "./config.js";
 import { buildPromptLabel } from "./pathDisplay.js";
@@ -359,7 +365,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({
   // Step 1b: Keep the ref in sync with the state for external access
   useEffect(() => {
     onInputHistoryRef.current = inputHistory;
-  }, [inputHistory, onInputHistoryRef]);
+  }, [inputHistory]);
 
   // ===== STEP 2: Initialize history state =====
   // Step 2a: Initialize history state from initial history lines
@@ -395,17 +401,33 @@ export const AppProvider: React.FC<AppProviderProps> = ({
   // ===== STEP 7: Initialize prompt state =====
   // Step 7a: Initialize prompt state from current working directory
   // Step 7b: Use fileProxy to get current directory and build prompt label
-  const [prompt, setPrompt] = useState(() =>
-    buildPromptLabel(fileProxy.getCwd()),
-  );
+  const [prompt, setPrompt] = useState(() => {
+    try {
+      return buildPromptLabel(fileProxy.getCwd());
+    } catch {
+      return "$ ";
+    }
+  });
 
   // ===== STEP 8: Initialize approval state =====
   // Step 8a: Initialize approval state from pending approval (if any)
-  const [approval, setApproval] = useState(() => getPendingApproval());
+  const [approval, setApproval] = useState(() => {
+    try {
+      return getPendingApproval();
+    } catch {
+      return null;
+    }
+  });
 
   // ===== STEP 9: Initialize prompt request state =====
   // Step 9a: Initialize prompt request state from pending prompt (if any)
-  const [promptReq, setPromptReq] = useState(() => getPendingPrompt());
+  const [promptReq, setPromptReq] = useState(() => {
+    try {
+      return getPendingPrompt();
+    } catch {
+      return null;
+    }
+  });
 
   const [approvalSelected, setApprovalSelected] = useState(0);
   const [promptDraft, setPromptDraft] = useState<PromptDraft>(emptyPromptDraft);
@@ -440,69 +462,102 @@ export const AppProvider: React.FC<AppProviderProps> = ({
     (line: string) => Promise<void>
   >(async () => {});
 
-  const inputDisabled = busy || approval !== null || promptReq !== null;
+  const inputDisabled = useMemo(
+    () => busy || approval !== null || promptReq !== null,
+    [busy, approval, promptReq],
+  );
 
   useEffect(() => {
     if (approval !== null) {
       setApprovalSelected(0);
     }
-  }, [approval]);
+  }, [approval, setApprovalSelected]);
 
   useEffect(() => {
     if (promptReq !== null) {
       setPromptDraft(emptyPromptDraft());
     }
-  }, [promptReq]);
+  }, [promptReq, setPromptDraft]);
 
-  // ===== STEP 14: Create context value =====
-  // Step 14a: Create context value with all state and setters
-  const contextValue: AppContextValue = {
-    history,
-    setHistory,
-    streamingText,
-    setStreamingText,
-    spinner,
-    setSpinner,
-    bannerEntries,
-    setBannerEntries,
-    input,
-    setInput,
-    inputHistory,
-    setInputHistory,
-    histIdx,
-    setHistIdx,
-    prompt,
-    setPrompt,
-    activeIndex,
-    setActiveIndex,
-    scrollOffset,
-    setScrollOffset,
-    busy,
-    setBusy,
-    approval,
-    setApproval,
-    promptReq,
-    setPromptReq,
-    approvalSelected,
-    setApprovalSelected,
-    promptDraft,
-    setPromptDraft,
-    agentStatuses,
-    setAgentStatuses,
-    agentBoards,
-    setAgentBoards,
-    sigintBusy,
-    setSigintBusy,
-    handleSubmit,
-    setHandleSubmit,
-    inputDisabled,
-    connection,
-    commandHandler,
-    fileProxy,
-    onSaveHistory,
-    registerExit,
-    onInputHistoryRef,
-  };
+  // ===== STEP 14: Create memoized context value =====
+  // Step 14a: Create context value with all state and setters, memoized to prevent unnecessary re-renders
+  const contextValue: AppContextValue = useMemo(
+    () => ({
+      history,
+      setHistory,
+      streamingText,
+      setStreamingText,
+      spinner,
+      setSpinner,
+      bannerEntries,
+      setBannerEntries,
+      input,
+      setInput,
+      inputHistory,
+      setInputHistory,
+      histIdx,
+      setHistIdx,
+      prompt,
+      setPrompt,
+      activeIndex,
+      setActiveIndex,
+      scrollOffset,
+      setScrollOffset,
+      busy,
+      setBusy,
+      approval,
+      setApproval,
+      promptReq,
+      setPromptReq,
+      approvalSelected,
+      setApprovalSelected,
+      promptDraft,
+      setPromptDraft,
+      agentStatuses,
+      setAgentStatuses,
+      agentBoards,
+      setAgentBoards,
+      sigintBusy,
+      setSigintBusy,
+      handleSubmit,
+      setHandleSubmit,
+      inputDisabled,
+      connection,
+      commandHandler,
+      fileProxy,
+      onSaveHistory,
+      registerExit,
+      onInputHistoryRef,
+    }),
+    [
+      history,
+      streamingText,
+      spinner,
+      bannerEntries,
+      input,
+      inputHistory,
+      histIdx,
+      prompt,
+      activeIndex,
+      scrollOffset,
+      busy,
+      approval,
+      promptReq,
+      approvalSelected,
+      promptDraft,
+      agentStatuses,
+      agentBoards,
+      sigintBusy,
+      handleSubmit,
+      inputDisabled,
+      connection,
+      commandHandler,
+      fileProxy,
+      onSaveHistory,
+      registerExit,
+      onInputHistoryRef,
+    ],
+  );
 
   // ===== STEP 15: Render provider with context value =====
   // Step 15a: Render the AppContext.Provider with the context value and children

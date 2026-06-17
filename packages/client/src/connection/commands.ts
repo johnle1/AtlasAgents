@@ -37,10 +37,10 @@ import type {
  *   - sendCommand — uses this to get raw bytes before JSON parsing.
  * </Summary>
  */
-export function requestResponseBuffer(
+export const requestResponseBuffer = (
   rsocket: RSocket,
   payload: Payload,
-): Promise<Buffer> {
+): Promise<Buffer> => {
   // ===== STEP 1: Create Promise Wrapper =====
   // Wrap RSocket's callback-based API into a Promise for async/await use
   return new Promise((resolve, reject) => {

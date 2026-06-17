@@ -1,5 +1,6 @@
 import type { Payload } from "@rsocket/core";
 import type { LocalFileProxy } from "../localFileProxy.js";
+import { formatErrorMessage } from "../commands/utils.js";
 
 /**
  * <Summary>
@@ -63,9 +64,9 @@ type RequestResponseResponder = (
  *   - Connection.connect — passes this to RSocketConnector.responder.
  * </Summary>
  */
-export function createFileResponder(
+export const createFileResponder = (
   fileProxy: LocalFileProxy | null,
-): { requestResponse: RequestResponseResponder } {
+): { requestResponse: RequestResponseResponder } => {
   return {
     requestResponse: (payload, responderStream) => {
       // ===== STEP 1: Handle Request Asynchronously =====
@@ -116,7 +117,7 @@ export function createFileResponder(
         } catch (err) {
           // ===== STEP 6: Send Error Response =====
           // Step 6a: Extract error message from Error object or stringify unknown values
-          const message = err instanceof Error ? err.message : String(err);
+          const message = formatErrorMessage(err);
 
           // Step 6b: Send error envelope back to server with COMPLETE flag
           responderStream.onNext(

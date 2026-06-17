@@ -87,9 +87,9 @@ const thinkingSpinner = (label: string): SpinnerState => ({
  * - null: clear spinner
  * - undefined: leave current spinner unchanged
  */
-export function spinnerForStatusFrame(
+export const spinnerForStatusFrame = (
   frame: TaskFrame,
-): SpinnerState | null | undefined {
+): SpinnerState | null | undefined => {
   // ===== STEP 1: Validate frame type =====
   // Step 1a: Check if the frame is a status frame
   // Step 1b: If not a status frame, return undefined to leave spinner unchanged

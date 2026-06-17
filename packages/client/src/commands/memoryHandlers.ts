@@ -7,6 +7,7 @@
 
 import type { Connection } from "../connection/index.js";
 import { printMemory, printError, printSuccess } from "../renderer.js";
+import { formatErrorMessage } from "./utils.js";
 
 /**
  * <Summary>
@@ -50,7 +51,7 @@ export const handleMemory = async (
         printMemory(entries);
       } catch (err) {
         printError(
-          `Could not fetch memory: ${err instanceof Error ? err.message : err}`,
+          `Could not fetch memory: ${formatErrorMessage(err)}`,
         );
       }
       break;
@@ -66,7 +67,7 @@ export const handleMemory = async (
         await conn.forgetMemory(topic);
         printSuccess(`Forgot topic "${topic}".`);
       } catch (err) {
-        printError(`Failed: ${err instanceof Error ? err.message : err}`);
+        printError(`Failed: ${formatErrorMessage(err)}`);
       }
       break;
     }
@@ -76,7 +77,7 @@ export const handleMemory = async (
         await conn.clearMemory();
         printSuccess("All memories cleared.");
       } catch (err) {
-        printError(`Failed: ${err instanceof Error ? err.message : err}`);
+        printError(`Failed: ${formatErrorMessage(err)}`);
       }
       break;
     }

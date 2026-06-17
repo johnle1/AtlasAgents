@@ -149,7 +149,7 @@ export const isWorkingStage = (stage?: AgentStage | AdvisorStage): boolean =>
  * </Summary>
  */
 /** True when worker circle-pulse should run (showSpinner on, not CI/dumb). */
-export function shouldAnimateWorker(): boolean {
+export const shouldAnimateWorker = (): boolean => {
   return loadConfig().ui.showSpinner !== false && !isScreenReaderLikely();
 }
 
@@ -195,7 +195,7 @@ export const shouldAnimate = shouldAnimateWorker;
  *   - Animation loop components — use this to set frame timing.
  * </Summary>
  */
-export function getWorkingFrameMs(): number {
+export const getWorkingFrameMs = (): number => {
   return inTmux() ? TMUX_FRAME_MS : FRAME_MS;
 }
 
@@ -219,7 +219,7 @@ export function getWorkingFrameMs(): number {
  *   - getWorkingFrame — uses this to get the frame array.
  * </Summary>
  */
-export function getWorkingFrames(): readonly string[] {
+export const getWorkingFrames = (): readonly string[] => {
   return inTmux() ? TMUX_WORKING_FRAMES : WORKING_FRAMES;
 }
 
@@ -247,7 +247,7 @@ export function getWorkingFrames(): readonly string[] {
  *   - resolveTaskLifecycleVisual — uses this to get the current frame for animation.
  * </Summary>
  */
-export function getWorkingFrame(pulseIndex: number): string {
+export const getWorkingFrame = (pulseIndex: number): string => {
   const frames = getWorkingFrames();
   return frames[pulseIndex % frames.length]!;
 }

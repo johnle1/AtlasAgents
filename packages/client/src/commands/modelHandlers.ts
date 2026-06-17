@@ -19,6 +19,8 @@
  */
 
 import type { Connection } from "../connection/index.js";
+import { formatErrorMessage } from "./utils.js";
+import { logger } from "../utils/logger.js";
 import {
   printInstalledModels,
   printModelFind,
@@ -98,7 +100,7 @@ export const handleModels = async (
       } catch (error) {
         // Step 1a-4: Handle errors by printing error message
         // Step 1a-5: Extract error message if it's an Error object, otherwise use the error itself
-        printError(`Failed: ${error instanceof Error ? error.message : error}`);
+        printError(`Failed: ${formatErrorMessage(error)}`);
       }
       break;
     }
@@ -128,7 +130,7 @@ export const handleModels = async (
         printModelFind(modelName, foundModel, models);
       } catch (error) {
         // Step 1b-4: Handle errors by printing error message
-        printError(`Failed: ${error instanceof Error ? error.message : error}`);
+        printError(`Failed: ${formatErrorMessage(error)}`);
       }
       break;
     }
@@ -155,7 +157,7 @@ export const handleModels = async (
         );
 
         // Step 1b-3: Add a blank line for better visual separation
-        console.log();
+        logger.blank();
 
         // Step 1b-4: Initialize progress tracking for this model pull
         resetPullProgress(modelName);
@@ -199,7 +201,7 @@ export const handleModels = async (
       } catch (error) {
         // Step 1b-9: Handle errors by finalizing progress and printing error message
         finishPullProgress(modelName);
-        printError(`Failed: ${error instanceof Error ? error.message : error}`);
+        printError(`Failed: ${formatErrorMessage(error)}`);
       }
       break;
     }
@@ -224,7 +226,7 @@ export const handleModels = async (
         printSuccess(`Deleted ${modelName}`);
       } catch (error) {
         // Step 1b-3: Handle errors by printing error message
-        printError(`Failed: ${error instanceof Error ? error.message : error}`);
+        printError(`Failed: ${formatErrorMessage(error)}`);
       }
       break;
     }
@@ -252,7 +254,7 @@ export const handleModels = async (
         printLine(JSON.stringify(modelInfo, null, 2));
       } catch (error) {
         // Step 1b-3: Handle errors by printing error message
-        printError(`Failed: ${error instanceof Error ? error.message : error}`);
+        printError(`Failed: ${formatErrorMessage(error)}`);
       }
       break;
     }
@@ -273,7 +275,7 @@ export const handleModels = async (
         printLine(JSON.stringify(response.models ?? [], null, 2));
       } catch (error) {
         // Step 1a-4: Handle errors by printing error message
-        printError(`Failed: ${error instanceof Error ? error.message : error}`);
+        printError(`Failed: ${formatErrorMessage(error)}`);
       }
       break;
     }

@@ -13,6 +13,7 @@ import {
 } from "../skills.js";
 import { printSkills, printError, printSuccess } from "../renderer.js";
 import type { Connection } from "../connection/index.js";
+import { formatErrorMessage } from "./utils.js";
 
 /**
  * <Summary>
@@ -71,7 +72,7 @@ export const handleSkills = async (
         }
         printSuccess(`Skill "${skillName}" created.`);
       } catch (err) {
-        printError(err instanceof Error ? err.message : String(err));
+        printError(formatErrorMessage(err));
       }
       break;
     }
@@ -87,7 +88,7 @@ export const handleSkills = async (
           printSuccess(`Synced ${syncedCount} skill(s) to server.`);
         } catch (err) {
           printError(
-            `Sync failed: ${err instanceof Error ? err.message : err}`,
+            `Sync failed: ${formatErrorMessage(err)}`,
           );
         }
         break;
@@ -102,7 +103,7 @@ export const handleSkills = async (
         await conn.syncSkills(skillList);
         printSuccess(`Synced ${skillList.length} skill(s) to server.`);
       } catch (err) {
-        printError(`Sync failed: ${err instanceof Error ? err.message : err}`);
+        printError(`Sync failed: ${formatErrorMessage(err)}`);
       }
       break;
     }

@@ -10,6 +10,8 @@
 import type { Connection } from "../connection/index.js";
 import { printLine, printError, printSuccess } from "../renderer.js";
 import { appendLog, setStreamingText } from "../ui/uiBridge.js";
+import { formatErrorMessage } from "./utils.js";
+import { logger } from "../utils/logger.js";
 
 /**
  * <Summary>
@@ -62,7 +64,7 @@ export const handleExplore = async (conn: Connection): Promise<void> => {
       appendLog(explorationBuffer, "assistant");
     }
   } catch (err) {
-    printError(`Failed: ${err instanceof Error ? err.message : err}`);
+    printError(`Failed: ${formatErrorMessage(err)}`);
   }
 };
 
@@ -98,7 +100,7 @@ export const handleNew = async (conn: Connection): Promise<void> => {
     );
     printSuccess(response.message ?? "Session cleared");
   } catch (err) {
-    printError(`Failed: ${err instanceof Error ? err.message : err}`);
+    printError(`Failed: ${formatErrorMessage(err)}`);
   }
 };
 
@@ -132,8 +134,8 @@ export const handleExit = (onExit: (() => void) | undefined): void => {
     return;
   }
   // Default exit behavior: print goodbye message and exit process
-  console.log();
-  console.log("  Goodbye!");
-  console.log();
+  logger.blank();
+  logger.info("  Goodbye!");
+  logger.blank();
   process.exit(0);
 };

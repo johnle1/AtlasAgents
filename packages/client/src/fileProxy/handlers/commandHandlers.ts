@@ -11,6 +11,7 @@ import {
 } from "../../renderer.js";
 import { requestApproval } from "../../ui/uiBridge.js";
 import type { DispatchContext } from "../types.js";
+import { logger } from "../../utils/logger.js";
 
 /**
  * <Summary>
@@ -200,17 +201,17 @@ export const handleCommandRun = async (
       beginBlockOutput();
 
       // Step 6a-1c: Add spacing before the warning
-      console.log();
+      logger.blank();
 
       // Step 6a-1d: Get the current theme for colored warning message
       {
         const theme = getTheme();
         // Step 6a-1e: Print warning with theme colors for visibility
-        console.log(`  ${theme.warning}⚠${theme.reset}  Dangerous command.`);
+        logger.info(`  ${theme.warning}⚠${theme.reset}  Dangerous command.`);
       }
 
       // Step 6a-1f: Add spacing after the warning
-      console.log();
+      logger.blank();
     }
 
     // ===== STEP 6a-2: Request user approval =====
