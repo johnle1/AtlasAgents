@@ -6,7 +6,8 @@
  *
  * How it fits in the system:
  *   Implements IExperienceRecorder; called by AdvisorOrchestrator and future
- *   workspace/terminal/agent hooks.
+ *   workspace/terminal/agent hooks. Provides fire-and-forget learning that doesn't
+ *   block the user's workflow while pattern extraction runs in the background.
  *
  * Dependencies:
  *   - PatternExtractor — fire-and-forget after finish.
@@ -17,134 +18,33 @@
  * </Summary>
  */
 
+// ===== CRYPTO IMPORTS =====
 import { randomUUID } from "node:crypto";
+
+// ===== FILESYSTEM IMPORTS =====
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
+// ===== INTERFACE IMPORTS =====
 import type {
   IExperienceRecorder,
   IPatternExtractor,
-} from "../orchestration/interfaces.js";
-import type { OrchestrationOutcome } from "../orchestration/types.js";
+} from "../../orchestration/interfaces.js";
+
+// ===== TYPE DEFINITION IMPORTS =====
+import type { OrchestrationOutcome } from "../../orchestration/types.js";
 import type {
   CommandOutput,
   ExperienceRecord,
   SessionSummary,
   TaskOutcome,
-} from "./types.js";
+} from "../types.js";
 
-/** Relative path under rootDir for persisted experience JSON files. */
-const EXPERIENCES_DIR = "user-data/experiences";
+// ===== CONSTANTS IMPORTS =====
+import { EXPERIENCES_DIR, SNAPSHOTS_DIR } from "./experienceConstants.js";
 
-/** Relative path under rootDir for rollback snapshot files (cleaned on success). */
-const SNAPSHOTS_DIR = "user-data/snapshots";
-
-/**
- * @async
- * <Summary>
- * What it does:
- *   Ensures a directory exists before writing experience or temp files inside it.
- *
- * How it does it (step by step):
- *   1. Call fs.mkdir with recursive true so parent directories are created as needed.
- *   2. Complete when the directory exists (no-op if already present).
- *
- * Parameters:
- *   @param {string} dir — Absolute directory path.
- *
- * Returns:
- *   @returns {Promise<void>} — Completes after mkdir -p.
- *
- * Dependencies:
- *   - node:fs/promises.mkdir.
- *
- * Dependants:
- *   - ExperienceRecorder.finish — before atomic experience write.
- * </Summary>
- */
-const ensureDir = async (dir: string): Promise<void> => {
-  // Step 1: Create directory tree (mkdir -p semantics)
-  await fs.mkdir(dir, { recursive: true });
-};
-
-/**
- * <Summary>
- * What it does:
- *   Returns whether the experience record captured any observable activity
- *   (reads, writes, commands, escalations, or user edits).
- *
- * How it does it (step by step):
- *   1. Check filesRead length.
- *   2. Check filesWritten length.
- *   3. Check commandsRun length.
- *   4. Check escalations length.
- *   5. Check userEdits length.
- *   6. Return true if any array is non-empty.
- *
- * Parameters:
- *   @param {ExperienceRecord} record — In-memory task record.
- *
- * Returns:
- *   @returns {boolean} — True when at least one log category has entries.
- *
- * Dependencies:
- *   None.
- *
- * Dependants:
- *   - deriveOutcome — distinguishes partial vs bare failure.
- * </Summary>
- */
-const hasActivity = (record: ExperienceRecord): boolean => {
-  // Step 1–5: Any non-empty log array means the task did something worth recording
-  return (
-    record.filesRead.length > 0 ||
-    record.filesWritten.length > 0 ||
-    record.commandsRun.length > 0 ||
-    record.escalations.length > 0 ||
-    record.userEdits.length > 0
-  );
-};
-
-/**
- * <Summary>
- * What it does:
- *   Maps orchestrator success/failure plus logged activity into a stored
- *   TaskOutcome label (success, partial, or failure).
- *
- * How it does it (step by step):
- *   1. If orchestration.ok is true, return success.
- *   2. Else if the record has any logged activity, return partial.
- *   3. Else return failure (task failed without meaningful attempt data).
- *
- * Parameters:
- *   @param {OrchestrationOutcome} orchestration — Result from AdvisorOrchestrator.
- *   @param {ExperienceRecord} record — Same task's in-memory log arrays.
- *
- * Returns:
- *   @returns {TaskOutcome} — success | partial | failure.
- *
- * Dependencies:
- *   - hasActivity.
- *
- * Dependants:
- *   - ExperienceRecorder.finish.
- * </Summary>
- */
-const deriveOutcome = (
-  orchestration: OrchestrationOutcome,
-  record: ExperienceRecord,
-): TaskOutcome => {
-  // Step 1: Orchestrator completed the DAG and emitted user-visible output
-  if (orchestration.ok) {
-    return "success";
-  }
-  // Step 2: Failed but we still have reads/writes/commands/etc. for learning
-  if (hasActivity(record)) {
-    return "partial";
-  }
-  // Step 3: Hard failure with no activity (e.g. plan error before any log* calls)
-  return "failure";
-};
+// ===== HELPER FUNCTIONS IMPORTS =====
+import { deriveOutcome, ensureDir } from "./experienceHelpers.js";
 
 /**
  * <Summary>
@@ -165,17 +65,30 @@ const deriveOutcome = (
  * </Summary>
  */
 export class ExperienceRecorder implements IExperienceRecorder {
-  /** Base directory for user-data paths (defaults to process.cwd()). */
-  private readonly rootDir: string;
+  /**
+   * Base directory for user-data paths (defaults to process.cwd()).
+   * Used as the root for constructing paths to experiences and snapshots directories.
+   */
+  private readonly rootDirectory: string;
 
-  /** Absolute path to user-data/experiences/. */
-  private readonly experiencesDir: string;
+  /**
+   * Absolute path to user-data/experiences/.
+   * Location where finished task records are persisted as JSON files.
+   */
+  private readonly experiencesDirectory: string;
 
-  /** Absolute path to user-data/snapshots/. */
-  private readonly snapshotsDir: string;
+  /**
+   * Absolute path to user-data/snapshots/.
+   * Location where temporary snapshots are stored for rollback capability.
+   */
+  private readonly snapshotsDirectory: string;
 
-  /** Active in-flight records keyed by taskId until finish removes them. */
-  private readonly records = new Map<string, ExperienceRecord>();
+  /**
+   * Active in-flight records keyed by taskId until finish removes them.
+   * Map stores ExperienceRecord objects for tasks currently in progress.
+   * Key is the taskId (UUID), value is the in-memory record object.
+   */
+  private readonly activeRecords = new Map<string, ExperienceRecord>();
 
   /**
    * <Summary>
@@ -198,7 +111,7 @@ export class ExperienceRecorder implements IExperienceRecorder {
    * </Summary>
    */
   constructor(
-    private readonly deps: {
+    private readonly dependencies: {
       rootDir?: string;
       patternExtractor: IPatternExtractor;
       sessionManager?: {
@@ -207,10 +120,10 @@ export class ExperienceRecorder implements IExperienceRecorder {
     },
   ) {
     // Step 1: Resolve data root (where user-data/ lives)
-    this.rootDir = deps.rootDir ?? process.cwd();
+    this.rootDirectory = dependencies.rootDir ?? process.cwd();
     // Step 2: Build absolute paths for experience files and snapshot cleanup
-    this.experiencesDir = path.join(this.rootDir, EXPERIENCES_DIR);
-    this.snapshotsDir = path.join(this.rootDir, SNAPSHOTS_DIR);
+    this.experiencesDirectory = path.join(this.rootDirectory, EXPERIENCES_DIR);
+    this.snapshotsDirectory = path.join(this.rootDirectory, SNAPSHOTS_DIR);
   }
 
   /**
@@ -255,7 +168,7 @@ export class ExperienceRecorder implements IExperienceRecorder {
       sessionSummary: null,
     };
     // Step 4: Register so log* and finish can find this task
-    this.records.set(taskId, record);
+    this.activeRecords.set(taskId, record);
   };
 
   /**
@@ -281,7 +194,7 @@ export class ExperienceRecorder implements IExperienceRecorder {
    */
   logRead = (taskId: string, filePath: string): void => {
     // Step 1: Find in-flight record
-    const record = this.records.get(taskId);
+    const record = this.activeRecords.get(taskId);
     // Step 2: Unknown or already finished task — ignore silently
     if (!record) {
       return;
@@ -306,7 +219,7 @@ export class ExperienceRecorder implements IExperienceRecorder {
    * Parameters:
    *   @param {string} taskId — Task id from start().
    *   @param {string} filePath — Path that was written.
-   *   @param {string} diff — Unified diff or change summary.
+   *   @param {string} diffContent — Unified diff or change summary.
    *
    * Returns:
    *   void — called for side effects only.
@@ -315,9 +228,9 @@ export class ExperienceRecorder implements IExperienceRecorder {
    *   - Future WorkspaceManager.write paths.
    * </Summary>
    */
-  logWrite = (taskId: string, filePath: string, diff: string): void => {
+  logWrite = (taskId: string, filePath: string, diffContent: string): void => {
     // Step 1: Find in-flight record
-    const record = this.records.get(taskId);
+    const record = this.activeRecords.get(taskId);
     // Step 2: No active record — no-op
     if (!record) {
       return;
@@ -325,7 +238,7 @@ export class ExperienceRecorder implements IExperienceRecorder {
     // Step 3: Store path and diff for PatternExtractor and replay
     record.filesWritten.push({
       path: filePath,
-      diff,
+      diff: diffContent,
       timestamp: new Date().toISOString(),
     });
   };
@@ -358,7 +271,7 @@ export class ExperienceRecorder implements IExperienceRecorder {
     output: CommandOutput,
   ): void => {
     // Step 1: Find in-flight record
-    const record = this.records.get(taskId);
+    const record = this.activeRecords.get(taskId);
     // Step 2: No active record — no-op
     if (!record) {
       return;
@@ -398,7 +311,7 @@ export class ExperienceRecorder implements IExperienceRecorder {
    */
   logEscalation = (taskId: string, reason: string, guidance: string): void => {
     // Step 1: Find in-flight record
-    const record = this.records.get(taskId);
+    const record = this.activeRecords.get(taskId);
     // Step 2: No active record — no-op
     if (!record) {
       return;
@@ -442,7 +355,7 @@ export class ExperienceRecorder implements IExperienceRecorder {
     after: string,
   ): void => {
     // Step 1: Find in-flight record
-    const record = this.records.get(taskId);
+    const record = this.activeRecords.get(taskId);
     // Step 2: No active record — no-op
     if (!record) {
       return;
@@ -497,7 +410,7 @@ export class ExperienceRecorder implements IExperienceRecorder {
     sessionSummary?: SessionSummary,
   ): Promise<void> => {
     // Step 1: Load in-memory record (missing if start never ran or double-finish)
-    const record = this.records.get(taskId);
+    const record = this.activeRecords.get(taskId);
     if (!record) {
       return;
     }
@@ -507,65 +420,73 @@ export class ExperienceRecorder implements IExperienceRecorder {
     // Step 3: Fill final fields on the record before serialisation
     record.outcome = taskOutcome;
     record.duration = Date.now() - record.startTime;
-    record.sessionSummary = sessionSummary ?? null;
+    const summary: SessionSummary = sessionSummary ?? {
+      task: record.task,
+      filesWritten: record.filesWritten.map((w) => w.path),
+      commandsRun: record.commandsRun.map((c) => c.command),
+      outcome: taskOutcome,
+    };
+    record.sessionSummary = summary;
     record.ok = outcome.ok;
     record.error = outcome.error;
 
     // Step 4a: Build destination filename (timestamp prefix aids sort-by-time)
-    const ts = Date.now();
-    const fileName = `${ts}-${taskId}.json`;
-    const destPath = path.join(this.experiencesDir, fileName);
+    const timestampValue = Date.now();
+    const fileName = `${timestampValue}-${taskId}.json`;
+    const destinationPath = path.join(this.experiencesDirectory, fileName);
 
     try {
       // Step 4b: Ensure experiences directory exists
-      await ensureDir(this.experiencesDir);
+      await ensureDir(this.experiencesDirectory);
       // Step 4c: Write to a unique temp file first (atomic publish pattern)
       const tempPath = path.join(
-        this.experiencesDir,
+        this.experiencesDirectory,
         `.experience-${randomUUID()}.tmp`,
       );
-      const payload = `${JSON.stringify(record, null, 2)}\n`;
-      await fs.writeFile(tempPath, payload, "utf-8");
+      const jsonPayload = `${JSON.stringify(record, null, 2)}\n`;
+      await fs.writeFile(tempPath, jsonPayload, "utf-8");
       // Step 4d: Rename temp to final name — readers never see a half-written file
-      await fs.rename(tempPath, destPath);
-    } catch (err) {
+      await fs.rename(tempPath, destinationPath);
+    } catch (error) {
       // Persist failure must not break orchestrator; log and continue cleanup/learning
-      console.error("[ExperienceRecorder] failed to persist experience:", err);
+      console.error(
+        "[ExperienceRecorder] failed to persist experience:",
+        error,
+      );
     }
 
     // Step 5: Successful tasks no longer need rollback snapshots (background)
     if (taskOutcome === "success") {
-      void this.cleanupSnapshots(taskId).catch((err) => {
-        console.error("[ExperienceRecorder] snapshot cleanup failed:", err);
+      void this.cleanupSnapshots(taskId).catch((error) => {
+        console.error("[ExperienceRecorder] snapshot cleanup failed:", error);
       });
     }
 
     // Step 6: Append session summary when task ended usefully and manager is wired
     if (
       (taskOutcome === "success" || taskOutcome === "partial") &&
-      sessionSummary &&
-      this.deps.sessionManager
+      this.dependencies.sessionManager
     ) {
       try {
-        await Promise.resolve(this.deps.sessionManager.append(sessionSummary));
-      } catch (err) {
+        await Promise.resolve(this.dependencies.sessionManager.append(summary));
+      } catch (error) {
         console.error(
           "[ExperienceRecorder] sessionManager.append failed:",
-          err,
+          error,
         );
       }
     }
 
     // Step 7: Drop from Map so taskId can be reused and memory is freed
-    this.records.delete(taskId);
+    this.activeRecords.delete(taskId);
 
     // Step 8: Trigger learning asynchronously (extract schedules its own async work)
     try {
-      this.deps.patternExtractor.extract(record);
-    } catch (err) {
+      this.dependencies.patternExtractor.extract(record);
+    } catch (error) {
       console.error(
         "[ExperienceRecorder] patternExtractor.extract failed:",
-        err,
+        error,
       );
     }
     // Step 9: Return immediately — PatternExtractor and snapshot cleanup are not awaited
@@ -597,30 +518,34 @@ export class ExperienceRecorder implements IExperienceRecorder {
    * </Summary>
    */
   private cleanupSnapshots = async (taskId: string): Promise<void> => {
-    let names: string[];
+    let snapshotFilenames: string[];
     try {
       // Step 1: List all files in the snapshots directory
-      names = await fs.readdir(this.snapshotsDir);
-    } catch (err) {
+      snapshotFilenames = await fs.readdir(this.snapshotsDirectory);
+    } catch (error) {
       // Step 2: No snapshots folder yet — nothing to clean (expected on fresh install)
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === "ENOENT") {
+      const errorCode = (error as NodeJS.ErrnoException).code;
+      if (errorCode === "ENOENT") {
         return;
       }
-      throw err;
+      throw error;
     }
 
     // Step 3: Only delete files tied to this task (filename contains taskId)
-    const matching = names.filter((name) => name.includes(taskId));
+    const matchingFilenames = snapshotFilenames.filter((filename) =>
+      filename.includes(taskId),
+    );
     // Step 4: Delete in parallel; one failure does not stop others
     await Promise.all(
-      matching.map((name) =>
-        fs.unlink(path.join(this.snapshotsDir, name)).catch((unlinkErr) => {
-          console.error(
-            `[ExperienceRecorder] failed to delete snapshot ${name}:`,
-            unlinkErr,
-          );
-        }),
+      matchingFilenames.map((filename) =>
+        fs
+          .unlink(path.join(this.snapshotsDirectory, filename))
+          .catch((unlinkError) => {
+            console.error(
+              `[ExperienceRecorder] failed to delete snapshot ${filename}:`,
+              unlinkError,
+            );
+          }),
       ),
     );
   };

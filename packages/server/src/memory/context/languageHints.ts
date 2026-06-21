@@ -5,6 +5,8 @@
  *
  * How it fits in the system:
  *   Seeded from packages/server/default-data on first server start; read by ContextBuilder.
+ *   Provides language/framework detection for keyword extraction, enabling the system
+ *   to recognize programming languages and frameworks mentioned in task descriptions.
  *
  * Dependencies:
  *   - node:fs/promises, node:path — read JSON from disk.
@@ -15,10 +17,12 @@
  * </Summary>
  */
 
+// ===== FILESYSTEM IMPORTS =====
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import type { LanguageHint } from "../orchestration/interfaces.js";
+// ===== TYPE DEFINITION IMPORTS =====
+import type { LanguageHint } from "../../orchestration/interfaces.js";
 
 export const LANGUAGE_HINTS_FILENAME = "language-hints.json";
 
@@ -43,6 +47,9 @@ export const LANGUAGE_HINTS_FILENAME = "language-hints.json";
  *
  * Returns:
  *   @returns {LanguageHint[]} — Normalised hints (invalid rows dropped).
+ *
+ * Dependencies:
+ *   - None (pure function).
  *
  * Dependants:
  *   - loadLanguageHints.
@@ -127,17 +134,22 @@ export const parseLanguageHints = (rawInput: unknown): LanguageHint[] => {
  *   8. If JSON parsing fails, return empty array (corrupted file handled).
  *
  * Parameters:
- *   @param {string} rootDir — Server data root (usually process.cwd()).
+ *   @param {string} rootDirectory — Server data root (usually process.cwd()).
  *
  * Returns:
  *   @returns {Promise<LanguageHint[]>} — Parsed hints, or empty when file missing/unreadable.
+ *
+ * Dependencies:
+ *   - fs.promises.readFile — file reading.
+ *   - path.join — path construction.
+ *   - parseLanguageHints — JSON validation.
  *
  * Dependants:
  *   - ContextBuilder.build — keyword extraction.
  * </Summary>
  */
 export const loadLanguageHints = async (
-  rootDir: string,
+  rootDirectory: string,
 ): Promise<LanguageHint[]> => {
   // Step 1: Construct absolute file path from rootDir and filename
   // rootDir: base directory for server data (e.g., '/home/user')
@@ -145,7 +157,7 @@ export const loadLanguageHints = async (
   // path.join() combines them with OS-appropriate separators
   // Result example: '/home/user/user-data/language-hints.json'
   const absoluteFilePath = path.join(
-    rootDir,
+    rootDirectory,
     "user-data",
     LANGUAGE_HINTS_FILENAME,
   );

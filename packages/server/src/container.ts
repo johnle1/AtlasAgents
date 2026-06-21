@@ -18,35 +18,42 @@
  * </Summary>
  */
 
-import { Advisor } from "./orchestration/advisor.js";
-import { parseMaxAgentsPayload } from "./orchestration/maxAgents.js";
-import { AdvisorOrchestrator } from "./orchestration/orchestrator.js";
+// ===== ORCHESTRATION LAYER IMPORTS =====
+import { Advisor } from "./orchestration/advisor/advisor.js";
+import { AdvisorOrchestrator } from "./orchestration/orchestrator/orchestrator.js";
 import type { PreferenceRule } from "./orchestration/interfaces.js";
+
+// ===== CONFIGURATION IMPORTS =====
 import { ConfigManager } from "./config/configManager.js";
-import { ContextBuilder } from "./memory/contextBuilder.js";
-import { ExperienceRecorder } from "./memory/experienceRecorder.js";
-import { PatternExtractor } from "./memory/patternExtractor.js";
-import { PreferenceStore } from "./memory/preferenceStore.js";
-import { SessionManager } from "./memory/sessionManager.js";
+
+// ===== MEMORY AND LEARNING IMPORTS =====
+import { ContextBuilder } from "./memory/context/contextBuilder.js";
+import { ExperienceRecorder } from "./memory/experience/experienceRecorder.js";
+import { PatternExtractor } from "./memory/pattern/patternExtractor.js";
+import { PreferenceStore } from "./memory/preference/preferenceStore.js";
+import { SessionManager } from "./memory/session/sessionManager.js";
+
+// ===== OLLAMA CLIENT IMPORTS =====
 import { OllamaClient } from "./ollama/client.js";
-import {
-  Router,
-  type CommandHandler,
-  type RouteId,
-  type Session,
-  type StreamHandler,
-  type StreamKind,
-} from "./routing/router.js";
-import { SkillManager } from "./skills/skillManager.js";
-import { encodeFrame, type TaskFrame } from "./transport/frames.js";
-import { createStreamTransports } from "./transport/rsocketPlanReviewTransport.js";
-import type { PerConnection } from "./container/types.js";
-import { PlanReviewBroker } from "./workspace/planReviewBroker.js";
-import type { PlanDecision } from "./orchestration/types.js";
-import { TerminalExecutor } from "./workspace/terminalExecutor.js";
+
+// ===== ROUTING IMPORTS =====
+import { Router } from "./routing/router.js";
+import { buildRouter as buildRouterFromDeps } from "./routing/routerBuilder.js";
+
+// ===== SKILLS MANAGEMENT IMPORTS =====
+import { SkillManager } from "./skills/manager/skillManager.js";
+
+// ===== TRANSPORT LAYER IMPORTS =====
+import { type TaskFrame } from "./transport/frames.js";
 import { ClientBridge } from "./transport/clientBridge.js";
-import { exploreCodebase } from "./orchestration/exploreCodebase.js";
-import { WorkspaceManager } from "./workspace/workspaceManager.js";
+
+// ===== MEMORY CONSOLIDATION IMPORTS =====
+import { scheduleConsolidation as scheduleConsolidationFromDeps } from "./memory/consolidation/consolidationScheduler.js";
+
+// ===== CONTAINER INTERNAL IMPORTS =====
+import type { PerConnection } from "./container/types.js";
+import { createServices } from "./container/serviceFactory.js";
+import { createPerConnection as createPerConnectionFromDeps } from "./container/perConnectionFactory.js";
 
 export type { PerConnection } from "./container/types.js";
 
@@ -63,16 +70,35 @@ export type { PerConnection } from "./container/types.js";
  * </Summary>
  */
 export type ContainerOptions = {
-  /** Root directory for data storage (preferences, sessions, patterns). */
+  /**
+   * Root directory for data storage.
+   * This directory stores user preferences, session data, and pattern information.
+   * If not provided, the service factory will use a default location.
+   */
   dataRoot?: string;
 
-  /** Root directory for workspace operations (file access, git operations). */
+  /**
+   * Root directory for workspace operations.
+   * All file system operations and git commands will be executed within this directory.
+   * Defaults to the current working directory if not specified.
+   */
   workspaceRoot?: string;
 
-  /** Base URL for OLLAMA API endpoint. */
+  /**
+   * Base URL for OLLAMA API endpoint.
+   * Specifies where the OLLAMA LLM service can be accessed.
+   * Required for model inference and generation tasks.
+   */
   ollamaBaseUrl?: string;
 
-  /** Function to retrieve RSocket peer connection for a given requester ID. */
+  /**
+   * Function to retrieve RSocket peer connection for a given requester ID.
+   * This callback enables the container to establish communication channels with specific clients.
+   * The requester ID uniquely identifies each client connection.
+   *
+   * @param requesterId - Unique identifier for the client requester
+   * @returns RSocket connection if available, undefined otherwise
+   */
   getClientPeer?: (
     requesterId: string,
   ) => import("@rsocket/core").RSocket | undefined;
@@ -91,49 +117,111 @@ export type ContainerOptions = {
  * </Summary>
  */
 export type AppContainer = {
-  /** OLLAMA client for model communication. */
+  /**
+   * OLLAMA client for model communication.
+   * Provides methods for sending prompts to LLM models and receiving responses.
+   * Handles all API interactions with the OLLAMA service.
+   */
   ollama: OllamaClient;
 
-  /** Configuration manager for server settings. */
+  /**
+   * Configuration manager for server settings.
+   * Manages server-wide configuration including model settings, timeouts, and feature flags.
+   * Provides methods for reading and updating configuration values.
+   */
   config: ConfigManager;
 
-  /** Preference store for user preferences and memory. */
+  /**
+   * Preference store for user preferences and memory.
+   * Persists user-specific preferences, rules, and learned patterns.
+   * Enables the system to adapt to individual user needs over time.
+   */
   prefs: PreferenceStore;
 
-  /** Skill manager for loading and managing skills. */
+  /**
+   * Skill manager for loading and managing skills.
+   * Handles discovery, loading, and execution of user-defined skills.
+   * Skills extend the agent's capabilities with custom behaviors.
+   */
   skills: SkillManager;
 
-  /** Session manager for conversation state. */
+  /**
+   * Session manager for conversation state.
+   * Maintains conversation history and context across interactions.
+   * Enables multi-turn conversations with proper context preservation.
+   */
   session: SessionManager;
 
-  /** Pattern extractor for identifying code patterns. */
+  /**
+   * Pattern extractor for identifying code patterns.
+   * Analyzes code to identify recurring patterns and idioms.
+   * Helps the agent understand code structure and conventions.
+   */
   patternExtractor: PatternExtractor;
 
-  /** Experience recorder for tracking agent learning. */
+  /**
+   * Experience recorder for tracking agent learning.
+   * Records successful patterns, solutions, and outcomes for future reference.
+   * Enables the agent to learn from past interactions and improve over time.
+   */
   experienceRecorder: ExperienceRecorder;
 
-  /** Context builder for preparing LLM context. */
+  /**
+   * Context builder for preparing LLM context.
+   * Constructs appropriate context windows for LLM prompts.
+   * Manages token limits and context prioritization.
+   */
   contextBuilder: ContextBuilder;
 
-  /** Advisor for planning and agent coordination. */
+  /**
+   * Advisor for planning and agent coordination.
+   * Plans complex tasks and coordinates multiple agent instances.
+   * Breaks down complex requests into manageable subtasks.
+   */
   advisor: Advisor;
 
-  /** Orchestrator for managing agent execution. */
+  /**
+   * Orchestrator for managing agent execution.
+   * Executes planned tasks and manages agent lifecycle.
+   * Handles task delegation and result aggregation.
+   */
   orchestrator: AdvisorOrchestrator;
 
-  /** Map of requester IDs to per-connection resources. */
+  /**
+   * Map of requester IDs to per-connection resources.
+   * Maintains separate state and resources for each connected client.
+   * Key is the requester ID, value is the PerConnection object.
+   */
   brokerByRequester: Map<string, PerConnection>;
 
-  /** Factory function for creating per-connection resources. */
+  /**
+   * Factory function for creating per-connection resources.
+   * Called when a new client connects to establish connection-specific state.
+   *
+   * @param requesterId - Unique identifier for the connecting client
+   * @param emit - Callback function to send frames to the client
+   * @returns PerConnection object with connection-specific services
+   */
   createPerConnection: (
     requesterId: string,
     emit: (frame: TaskFrame) => void,
   ) => PerConnection;
 
-  /** Router factory for command and stream handlers. */
+  /**
+   * Router factory for command and stream handlers.
+   * Creates a router with all command and stream handlers registered.
+   * The router directs incoming requests to appropriate handlers.
+   *
+   * @returns Configured Router instance with all handlers
+   */
   buildRouter: () => Router;
 
-  /** Schedules periodic memory consolidation tasks. */
+  /**
+   * Schedules periodic memory consolidation tasks.
+   * Sets up timers to run consolidation operations at regular intervals.
+   * Consolidation optimizes memory storage and removes redundant data.
+   * Called for side effects (timer setup), return value is not used.
+   */
   scheduleConsolidation: () => void;
 };
 
@@ -165,23 +253,34 @@ export type AppContainer = {
 const preferenceRulesToMemoryEntries = (
   rules: PreferenceRule[],
 ): Array<{ topic: string; rules: string[] }> => {
-  // Create map to group rules by topic
+  // Step 1: Create a map to organize rules by their topics
+  // Using Map allows efficient lookups and avoids duplicate topic entries
   const rulesByTopic = new Map<string, string[]>();
 
-  // Group each rule under its associated topics
+  // Step 2: Iterate through each preference rule to categorize it
   for (const rule of rules) {
-    // Use "general" as default topic if no topics specified
+    // Step 3: Determine which topics this rule belongs to
+    // If the rule has no topics specified, assign it to "general" by default
+    // This ensures every rule has at least one topic classification
     const topics = rule.topics.length > 0 ? rule.topics : ["general"];
 
-    // Add rule text to each associated topic
+    // Step 4: Add the rule text to each associated topic in the map
     for (const topic of topics) {
+      // Step 4a: Get existing rules for this topic, or initialize empty array if topic doesn't exist yet
+      // The nullish coalescing operator (??) provides a default empty array
       const topicRules = rulesByTopic.get(topic) ?? [];
+
+      // Step 4b: Add the current rule's text to the topic's rule list
       topicRules.push(rule.text);
+
+      // Step 4c: Update the map with the modified rule list for this topic
       rulesByTopic.set(topic, topicRules);
     }
   }
 
-  // Convert map entries to array format
+  // Step 5: Convert the Map structure to an array of objects for easier consumption
+  // Spread operator converts Map entries to array, then map transforms each entry
+  // Result format: [{ topic: "general", rules: ["rule1", "rule2"] }, ...]
   return [...rulesByTopic.entries()].map(([topic, ruleTexts]) => ({
     topic,
     rules: ruleTexts,
@@ -221,140 +320,52 @@ const preferenceRulesToMemoryEntries = (
 export const createContainer = (
   options: ContainerOptions = {},
 ): AppContainer => {
-  // ===== DIRECTORY CONFIGURATION =====
-  // Use provided data root or default to current working directory
-  const dataRoot = options.dataRoot ?? process.cwd();
-  const workspaceRoot = options.workspaceRoot ?? process.cwd();
-
-  // ===== CORE INFRASTRUCTURE SERVICES =====
-  // Initialize OLLAMA client for model communication
-  const ollama = new OllamaClient({ baseUrl: options.ollamaBaseUrl });
-
-  // Initialize configuration manager for server settings
-  const config = new ConfigManager({ rootDir: dataRoot });
-
-  // Initialize preference store with OLLAMA and config dependencies
-  const prefs = new PreferenceStore(dataRoot, { ollama, config });
-
-  // ===== MEMORY AND LEARNING SERVICES =====
-  // Initialize skill manager for loading and managing skills
-  const skills = new SkillManager({ rootDir: dataRoot });
-
-  // Initialize session manager for conversation state
-  const session = new SessionManager({ rootDir: dataRoot });
-
-  // Initialize pattern extractor for identifying code patterns
-  const patternExtractor = new PatternExtractor({
-    ollama,
-    config,
-    prefs,
+  // Step 1: Create and initialize all core services using the service factory
+  // The service factory handles dependency injection and proper initialization order
+  // Destructuring extracts each service for direct access in the container
+  const {
+    ollama, // OLLAMA API client for LLM communication
+    config, // Configuration manager for server settings
+    prefs, // Preference store for user preferences and memory
+    skills, // Skill manager for loading and managing skills
+    session, // Session manager for conversation state tracking
+    patternExtractor, // Pattern extractor for identifying code patterns
+    experienceRecorder, // Experience recorder for tracking agent learning
+    contextBuilder, // Context builder for preparing LLM context
+    advisor, // Advisor for planning and agent coordination
+    orchestrator, // Orchestrator for managing agent execution
+  } = createServices({
+    dataRoot: options.dataRoot, // Root directory for persistent data storage
+    ollamaBaseUrl: options.ollamaBaseUrl, // Base URL for OLLAMA API endpoint
   });
 
-  // Initialize experience recorder for tracking agent learning
-  const experienceRecorder = new ExperienceRecorder({
-    rootDir: dataRoot,
-    patternExtractor,
-    sessionManager: session,
-  });
+  // ===== CONNECTION MANAGEMENT SECTION =====
 
-  // ===== CONTEXT BUILDING =====
-  // Initialize context builder with all required dependencies
-  const contextBuilder = new ContextBuilder({
-    prefs,
-    ollama,
-    config,
-    rootDir: dataRoot,
-    session,
-  });
-
-  // Set up cache invalidation when model configuration changes
-  config.setOnModelChanged((oldModel) => {
-    contextBuilder.clearContextWindowCache(oldModel);
-  });
-
-  // ===== ORCHESTRATION SERVICES =====
-  // Initialize advisor for planning and agent coordination
-  const advisor = new Advisor({ ollama, config });
-
-  // Initialize orchestrator for managing agent execution
-  const orchestrator = new AdvisorOrchestrator({
-    contextBuilder,
-    skillManager: skills,
-    sessionManager: session,
-    experienceRecorder,
-    advisor,
-    ollama,
-    config,
-  });
-
-  // ===== CONNECTION MANAGEMENT =====
-  // Map to track per-connection resources by requester ID
+  // Step 3: Create a map to track per-connection resources by requester ID
+  // This map maintains state for each connected client/requester
+  // Key: requesterId (string), Value: PerConnection object with connection-specific resources
   const brokerByRequester = new Map<string, PerConnection>();
 
-  // Initialize client bridge for RSocket communication
+  // Step 4: Create client bridge for communication between server and clients
+  // The bridge provides a callback to retrieve RSocket peer connections
+  // This enables bidirectional communication with connected clients
   const clientBridge = new ClientBridge((requesterId) =>
     options.getClientPeer?.(requesterId),
   );
 
-  /**
-   * <Summary>
-   * What it does:
-   *   Factory function that creates per-connection resources for a specific client.
-   *
-   * How it does it (step by step):
-   *   1. Create stream transports for plan review communication.
-   *   2. Initialize plan review broker with plan transport.
-   *   3. Initialize workspace manager and bind to requester ID.
-   *   4. Initialize terminal executor and bind to requester ID.
-   *   5. Return object with all per-connection resources and utilities.
-   *
-   * Parameters:
-   *   @param {string} requesterId — Unique identifier for the requesting client.
-   *   @param {function} emit — Function to emit task frames to the client.
-   *
-   * Returns:
-   *   @returns {PerConnection} — Object containing connection-specific resources.
-   *
-   * Dependencies:
-   *   - createStreamTransports — creates RSocket stream transports.
-   *   - PlanReviewBroker — handles plan review workflow.
-   *   - WorkspaceManager — manages workspace operations.
-   *   - TerminalExecutor — executes terminal commands.
-   *   - clientBridge — provides client communication.
-   *
-   * Dependants:
-   *   - buildRouter — calls this to set up resources for new connections.
-   *   - task stream handler — calls this when processing task requests.
-   * </Summary>
-   */
+  // Step 5: Create factory function for per-connection resource instantiation
+  // This function is called when a new client connects, creating connection-specific resources
+  // Parameters:
+  //   - requesterId: Unique identifier for the connecting client
+  //   - emit: Callback function to send frames back to the client
+  // Returns: PerConnection object with connection-specific services and state
   const createPerConnection = (
     requesterId: string,
     emit: (frame: TaskFrame) => void,
   ): PerConnection => {
-    // Create stream transports for plan review and general communication
-    const streamTransports = createStreamTransports(emit);
-
-    // Initialize plan review broker with plan transport
-    const planBroker = new PlanReviewBroker({
-      transport: streamTransports.plan,
-    });
-
-    // Initialize workspace manager and bind to this specific requester
-    const workspace = new WorkspaceManager(clientBridge);
-    workspace.bindRequester(requesterId);
-
-    // Initialize terminal executor and bind to this specific requester
-    const terminal = new TerminalExecutor(clientBridge);
-    terminal.bindRequester(requesterId);
-
-    // Return per-connection resources with utility functions
-    return {
-      planBroker,
-      workspace,
-      terminal,
-      resolvePlan: streamTransports.resolvePlan,
-      rebindStreamEmit: streamTransports.rebindEmit,
-    };
+    // Delegate to the per-connection factory with required dependencies
+    // This isolates connection-specific logic and maintains clean separation
+    return createPerConnectionFromDeps({ clientBridge }, requesterId, emit);
   };
 
   /**
@@ -384,272 +395,29 @@ export const createContainer = (
    * </Summary>
    */
   const buildRouter = (): Router => {
-    // ===== COMMAND HANDLERS =====
-    // Handlers for individual request/response operations
-    const commands: Partial<Record<RouteId, CommandHandler>> = {
-      // List available OLLAMA models
-      "models.list": async () => {
-        const models = await ollama.listModelsDetailed();
-        return { models };
-      },
+    // Step 1: Build the router by injecting all required dependencies
+    // The router builder function creates command and stream handlers
+    // that need access to various container services
+    return buildRouterFromDeps({
+      // Core infrastructure services
+      ollama, // For LLM API communication
+      config, // For accessing configuration settings
 
-      // Delete a specific OLLAMA model
-      "models.delete": async (_session, payload) => {
-        const body = payload as { name?: string };
-        const modelName = String(body.name ?? "");
-        await ollama.deleteModel(modelName);
-        return { ok: true };
-      },
+      // Memory and preference services
+      skills, // For skill management and invocation
+      prefs, // For user preference storage and retrieval
+      session, // For conversation session management
 
-      // Show detailed information about a specific model
-      "models.show": async (_session, payload) => {
-        const body = payload as { name?: string };
-        return ollama.showModel(String(body.name ?? ""));
-      },
+      // Orchestration services
+      orchestrator, // For agent execution and coordination
 
-      // List currently running OLLAMA models
-      "models.running": async () => {
-        const models = await ollama.listRunning();
-        return { models };
-      },
+      // Connection management
+      brokerByRequester, // Map of active connections for resource access
+      createPerConnection, // Factory for creating new connection resources
 
-      // Get all configuration values
-      "config.get": async () => config.getAll(),
-
-      // Set a configuration value
-      "config.set": async (_session, payload) => {
-        const body = payload as { key?: string; value?: unknown };
-        const configKey = String(body.key ?? "");
-        const configValue = body.value;
-
-        // Handle model configuration specially
-        if (configKey === "advisorModel") {
-          await config.setModel("advisor", String(configValue ?? ""));
-        } else if (configKey === "agentModel") {
-          await config.setModel("agent", String(configValue ?? ""));
-        } else {
-          // Handle general configuration
-          await config.set(configKey, configValue);
-
-          // Update OLLAMA timeout if timeout configuration changed
-          if (configKey === "timeout" && typeof configValue === "number") {
-            ollama.setTimeoutMs(configValue);
-          }
-        }
-        return { ok: true };
-      },
-
-      // Sync skills from client to server
-      "skills.sync": async (_session, payload) => {
-        const body = payload as {
-          skills?: Array<{ name: string; content: string }>;
-        };
-        const savedCount = await skills.saveAll(body.skills ?? []);
-        return { saved: savedCount };
-      },
-
-      // Get all memory/preferences entries
-      "memory.get": async () => {
-        const rules = await prefs.getAll();
-        return { entries: preferenceRulesToMemoryEntries(rules) };
-      },
-
-      // Forget (delete) memory entries for a specific topic
-      "memory.forget": async (_session, payload) => {
-        const body = payload as { topic?: string };
-        const removedCount = await prefs.deleteByTopic(
-          String(body.topic ?? ""),
-        );
-        return { removed: removedCount };
-      },
-
-      // Clear all memory/preferences
-      "memory.clear": async () => {
-        await prefs.clear();
-        return { ok: true };
-      },
-
-      // Check if session exists
-      "session.exists": async () => session.exists(),
-
-      // Clear session state
-      "session.clear": async () => {
-        const message = await session.clear();
-        return { message };
-      },
-
-      // Respond to plan review request
-      "plan.respond": async (session, payload) => {
-        const body = payload as {
-          id?: string;
-          decision?: string;
-          steps?: string[];
-        };
-
-        // Get per-connection resources for this requester
-        const perConnection = brokerByRequester.get(session.requesterId);
-        if (!perConnection) {
-          throw new Error("No active plan review broker for this connection");
-        }
-
-        // Validate plan decision
-        const decision = body.decision as PlanDecision | undefined;
-        if (
-          decision !== "implement" &&
-          decision !== "skip" &&
-          decision !== "edit"
-        ) {
-          throw new Error("Invalid plan decision");
-        }
-
-        // Resolve plan with user decision and optional edited steps
-        perConnection.resolvePlan(String(body.id ?? ""), {
-          decision,
-          steps: Array.isArray(body.steps)
-            ? body.steps.map((step) => String(step))
-            : undefined,
-        });
-        return { ok: true };
-      },
-    };
-
-    // ===== STREAM HANDLERS =====
-    // Handlers for long-running operations with progress updates
-    const streams: Partial<Record<StreamKind, StreamHandler>> = {
-      // Handle task execution stream with model overrides and multi-agent support
-      task: async (session, payload, emit, signal) => {
-        const body = payload as {
-          text?: string;
-          maxAgents?: unknown;
-          advisorModel?: string;
-          agentModel?: string;
-          advisorTemp?: number;
-          agentTemp?: number;
-          debug?: boolean;
-        };
-
-        // Extract and validate task parameters
-        const taskText = String(body.text ?? "");
-        const maxAgents = parseMaxAgentsPayload(body.maxAgents);
-
-        // Build model overrides object with validation
-        const modelOverrides: {
-          advisorModel?: string;
-          agentModel?: string;
-          advisorTemp?: number;
-          agentTemp?: number;
-          debug?: boolean;
-        } = {};
-
-        // Add advisor model override if provided
-        if (
-          typeof body.advisorModel === "string" &&
-          body.advisorModel.length > 0
-        ) {
-          modelOverrides.advisorModel = body.advisorModel;
-        }
-
-        // Add agent model override if provided
-        if (typeof body.agentModel === "string" && body.agentModel.length > 0) {
-          modelOverrides.agentModel = body.agentModel;
-        }
-
-        // Add advisor temperature override if valid
-        if (
-          typeof body.advisorTemp === "number" &&
-          Number.isFinite(body.advisorTemp)
-        ) {
-          modelOverrides.advisorTemp = body.advisorTemp;
-        }
-
-        // Add agent temperature override if valid
-        if (
-          typeof body.agentTemp === "number" &&
-          Number.isFinite(body.agentTemp)
-        ) {
-          modelOverrides.agentTemp = body.agentTemp;
-        }
-
-        // Enable debug mode if requested
-        if (body.debug === true) {
-          modelOverrides.debug = true;
-        }
-
-        // Get or create per-connection resources for this requester
-        let perConnection = brokerByRequester.get(session.requesterId);
-        if (!perConnection) {
-          perConnection = createPerConnection(session.requesterId, emit);
-          brokerByRequester.set(session.requesterId, perConnection);
-        } else {
-          // Rebind emit function for existing connection
-          perConnection.rebindStreamEmit(emit);
-        }
-
-        try {
-          // Execute task through orchestrator with all parameters
-          await orchestrator.runTask(
-            session,
-            taskText,
-            emit,
-            signal,
-            perConnection,
-            Object.keys(modelOverrides).length > 0 ? modelOverrides : undefined,
-            maxAgents,
-          );
-          emit({ kind: "done" });
-        } catch (error) {
-          // Emit error message and re-throw for proper error handling
-          const errorMessage =
-            error instanceof Error ? error.message : String(error);
-          emit({ kind: "error", message: errorMessage });
-          throw error;
-        }
-      },
-
-      // Handle model pulling stream with progress updates
-      "models.pull": async (_session, payload, emit, signal) => {
-        const body = payload as { name?: string };
-        const modelName = String(body.name ?? "");
-
-        // Stream pull progress updates
-        for await (const progress of ollama.pullModel(modelName)) {
-          if (signal.aborted) {
-            throw new Error("Aborted");
-          }
-          emit({ kind: "progress", data: progress });
-        }
-        emit({ kind: "done" });
-      },
-
-      // Handle codebase exploration stream
-      explore: async (connection, _payload, emit, signal) => {
-        // Get or create per-connection resources for this requester
-        let perConnection = brokerByRequester.get(connection.requesterId);
-        if (!perConnection) {
-          perConnection = createPerConnection(connection.requesterId, emit);
-          brokerByRequester.set(connection.requesterId, perConnection);
-        }
-
-        // Stream exploration progress
-        emit({ kind: "token", text: "  Exploring codebase...\n" });
-
-        // Perform codebase exploration
-        const explored = await exploreCodebase(
-          perConnection.workspace,
-          emit,
-          signal,
-        );
-
-        // Save exploration snapshot to session
-        await session.saveSnapshot(explored.snapshot);
-
-        emit({ kind: "token", text: "  ✓ Codebase snapshot updated.\n" });
-        emit({ kind: "done" });
-      },
-    };
-
-    // Create and return router with all handlers
-    return new Router({ commands, streams });
+      // Utility functions
+      preferenceRulesToMemoryEntries, // Helper for formatting preference rules
+    });
   };
 
   /**
@@ -658,13 +426,8 @@ export const createContainer = (
    *   Schedules periodic memory consolidation to run weekly.
    *
    * How it does it (step by step):
-   *   1. Define weekly interval in milliseconds.
-   *   2. Create async function to check if consolidation is due.
-   *   3. Check last consolidation timestamp from config.
-   *   4. If overdue (more than a week) or never run, perform consolidation.
-   *   5. Update last consolidation timestamp after successful run.
-   *   6. Run immediately on startup, then set interval for weekly execution.
-   *   7. Unref timer to allow process to exit if needed.
+   *   1. Passes config and prefs to scheduleConsolidation function.
+   *   2. Returns void (called for side effects).
    *
    * Parameters:
    *   None — uses container services through closure.
@@ -675,102 +438,50 @@ export const createContainer = (
    * Dependencies:
    *   - config — stores last consolidation timestamp.
    *   - prefs — performs consolidation operation.
+   *   - scheduleConsolidation — scheduler function from memory/consolidationScheduler.ts.
    *
    * Dependants:
    *   - createContainer — calls this to set up periodic consolidation.
    * </Summary>
    */
   const scheduleConsolidation = (): void => {
-    const weekInMilliseconds = 7 * 24 * 60 * 60 * 1000;
-
-    /**
-     * <Summary>
-     * What it does:
-     *   Runs consolidation if it's been more than a week since last run.
-     *
-     * How it does it (step by step):
-     *   1. Get current configuration to check last consolidation time.
-     *   2. Parse last consolidation timestamp to milliseconds.
-     *   3. Calculate if consolidation is due (more than a week ago or never run).
-     *   4. If due, run consolidation and update timestamp.
-     *   5. Log errors if consolidation fails.
-     *
-     * Parameters:
-     *   None — uses config and prefs through closure.
-     *
-     * Returns:
-     *   void — called for side effects (consolidation and timestamp update).
-     *
-     * Dependencies:
-     *   - config — stores last consolidation timestamp.
-     *   - prefs — performs consolidation operation.
-     *
-     * Dependants:
-     *   - scheduleConsolidation — calls this periodically.
-     * </Summary>
-     */
-    const runIfDue = async (): Promise<void> => {
-      try {
-        // Get current configuration
-        const currentConfig = await config.getAll();
-
-        // Extract last consolidation timestamp
-        const lastConsolidatedAt = (currentConfig as Record<string, unknown>)
-          .lastConsolidatedAt;
-
-        // Parse timestamp to milliseconds (NaN if invalid)
-        const lastConsolidatedMs =
-          typeof lastConsolidatedAt === "string"
-            ? Date.parse(lastConsolidatedAt)
-            : Number.NaN;
-
-        // Check if consolidation is due (never run or more than a week ago)
-        const isDue =
-          !Number.isFinite(lastConsolidatedMs) ||
-          Date.now() - lastConsolidatedMs >= weekInMilliseconds;
-
-        if (!isDue) {
-          return;
-        }
-
-        // Perform consolidation
-        await prefs.consolidate();
-
-        // Update last consolidation timestamp
-        await config.set("lastConsolidatedAt", new Date().toISOString());
-      } catch (error) {
-        console.error("[Consolidate]", error);
-      }
-    };
-
-    // Run immediately on startup
-    void runIfDue();
-
-    // Set up weekly interval for consolidation
-    const timer = setInterval(() => {
-      void runIfDue();
-    }, weekInMilliseconds);
-
-    // Unref timer to allow process to exit naturally
-    timer.unref();
+    // Step 1: Schedule periodic memory consolidation task
+    // This sets up a timer to run consolidation operations at regular intervals
+    // The scheduler uses config to track last run time and prefs to perform consolidation
+    return scheduleConsolidationFromDeps({
+      config, // Configuration manager for storing consolidation timestamps
+      prefs, // Preference store for performing the actual consolidation
+    });
   };
 
   // ===== RETURN CONTAINER OBJECT =====
-  // Return fully initialized container with all services and factory functions
+
+  // Step 6: Return the fully initialized application container
+  // This object provides access to all services and factory functions
+  // The container serves as the composition root for the entire application
   return {
-    ollama,
-    config,
-    prefs,
-    skills,
-    session,
-    patternExtractor,
-    experienceRecorder,
-    contextBuilder,
-    advisor,
-    orchestrator,
-    brokerByRequester,
-    createPerConnection,
-    buildRouter,
-    scheduleConsolidation,
+    // Core infrastructure services
+    ollama, // OLLAMA client for model communication
+    config, // Configuration manager for server settings
+
+    // Memory and learning services
+    prefs, // Preference store for user preferences and memory
+    skills, // Skill manager for loading and managing skills
+    session, // Session manager for conversation state
+    patternExtractor, // Pattern extractor for identifying code patterns
+    experienceRecorder, // Experience recorder for tracking agent learning
+    contextBuilder, // Context builder for preparing LLM context
+
+    // Orchestration services
+    advisor, // Advisor for planning and agent coordination
+    orchestrator, // Orchestrator for managing agent execution
+
+    // Connection management
+    brokerByRequester, // Map of requester IDs to per-connection resources
+
+    // Factory functions
+    createPerConnection, // Factory for creating per-connection resources
+    buildRouter, // Router factory for command and stream handlers
+    scheduleConsolidation, // Schedules periodic memory consolidation tasks
   };
 };
