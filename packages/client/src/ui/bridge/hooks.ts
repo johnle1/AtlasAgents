@@ -7,15 +7,6 @@
  *   This module manages the bridge hooks system that allows server-side code to
  *   communicate with the Ink-based UI by registering callback functions for various
  *   state updates like history, streaming, agent status, and approvals.
- *
- * Dependencies:
- *   - getInkUIActive/setInkUIActiveValue — manages Ink UI active state.
- *   - setBridgeHooks — registers bridge hooks for state updates.
- *   - BridgeHooks type definition — defines the hook interface.
- *
- * Dependants:
- *   - useBridgeSetup hook — registers bridge hooks during component mount.
- *   - Component setup functions — configure bridge communication.
  * </Summary>
  */
 
@@ -49,17 +40,10 @@ export type { BridgeHooks } from "./state.js";
  *   1. Calls the internal function to update the Ink UI active state.
  *
  * Parameters:
- *   @param {boolean} isActive — Whether the Ink UI is active (true) or inactive (false).
+ *   @param isActive - Whether the Ink UI is active (true) or inactive (false).
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - setInkUIActiveValue — updates the internal Ink UI active state.
- *
- * Dependants:
- *   - useBridgeSetup hook — activates Ink UI on component mount.
- *   - Cleanup functions — deactivates Ink UI on component unmount.
  * </Summary>
  */
 export const setInkActive = (isActive: boolean): void => {
@@ -78,14 +62,7 @@ export const setInkActive = (isActive: boolean): void => {
  *   1. Calls the internal function to check the Ink UI active state.
  *
  * Returns:
- *   @returns {boolean} — True if Ink UI is active, false otherwise.
- *
- * Dependencies:
- *   - getInkUIActive — retrieves the internal Ink UI active state.
- *
- * Dependants:
- *   - Approval request functions — check this to determine auto-resolution behavior.
- *   - Prompt request functions — check this to determine auto-resolution behavior.
+ *   @returns True if Ink UI is active, false otherwise.
  * </Summary>
  */
 export const isInkActive = (): boolean => getInkUIActive();
@@ -99,17 +76,10 @@ export const isInkActive = (): boolean => getInkUIActive();
  *   1. Calls the internal function to set the bridge hooks.
  *
  * Parameters:
- *   @param {BridgeHooks} newBridgeHooks — The bridge hooks to register.
+ *   @param newBridgeHooks - The bridge hooks to register.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - setBridgeHooks — updates the internal bridge hooks state.
- *
- * Dependants:
- *   - useBridgeSetup hook — registers hooks during component mount.
- *   - Component setup functions — configure bridge communication.
  * </Summary>
  */
 export const registerBridgeHooks = (newBridgeHooks: BridgeHooks): void => {

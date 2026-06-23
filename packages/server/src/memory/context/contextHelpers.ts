@@ -8,14 +8,6 @@
  *   Provides utility functions for token budgeting, keyword matching, and rule prioritization.
  *   These functions encapsulate complex logic for context building, making the main
  *   ContextBuilder class cleaner and more maintainable.
- *
- * Dependencies:
- *   - contextConstants.ts - uses HIGHLIGHT_WORDS, TASK_TYPE_WORDS, DEFAULT_CONTEXT_WINDOW.
- *   - ../ollama/types.js - ModelInfo for context_length extraction.
- *   - ../orchestration/interfaces.js - LanguageHint, PreferenceRule types.
- *
- * Dependants:
- *   - contextBuilder.ts - uses these helpers in the build process.
  * </Summary>
  */
 
@@ -46,18 +38,15 @@ import {
  *   3. Round up the result to ensure conservative budget estimates.
  *
  * Parameters:
- *   @param {string} textContent — Text content to measure and estimate tokens for.
+ *   @param textContent - Text content to measure and estimate tokens for.
  *
  * Returns:
- *   @returns {number} — Estimated token count (>= 0).
+ *   @returns Estimated token count (>= 0).
  *
  * Note:
  *   Uses 1 token per 4 characters as a common LLM tokenizer approximation.
  *   This is a rough estimate and may vary by actual tokenizer implementation.
  *   Conservative rounding up ensures we never exceed actual token limits.
- *
- * Dependants:
- *   - ContextBuilder.build — for calculating context budget consumption.
  * </Summary>
  */
 export const approxTokens = (textContent: string): number => {
@@ -94,14 +83,11 @@ export const approxTokens = (textContent: string): number => {
  *   7. Return the deduplicated set of all keywords found.
  *
  * Parameters:
- *   @param {string} taskText — Raw user task (may have mixed case, punctuation).
- *   @param {LanguageHint[]} languageHints — Rows from user-data/language-hints.json.
+ *   @param taskText - Raw user task (may have mixed case, punctuation).
+ *   @param languageHints - Rows from user-data/language-hints.json.
  *
  * Returns:
- *   @returns {Set<string>} — Keywords for overlap scoring against preference rules.
- *
- * Dependants:
- *   - ContextBuilder.build — to filter and match preference rules.
+ *   @returns Keywords for overlap scoring against preference rules.
  * </Summary>
  */
 export const extractKeywords = (
@@ -194,13 +180,10 @@ export const extractKeywords = (
  *   8. Final fallback: Return DEFAULT_CONTEXT_WINDOW (128k) when nothing available.
  *
  * Parameters:
- *   @param {ModelInfo} ollamaModelInfo — Parsed /api/show response from Ollama.
+ *   @param ollamaModelInfo - Parsed /api/show response from Ollama.
  *
  * Returns:
- *   @returns {number} — Context length in tokens (always positive).
- *
- * Dependants:
- *   - ContextBuilder.getContextWindow — used to determine token budget.
+ *   @returns Context length in tokens (always positive).
  * </Summary>
  */
 export const resolveContextLength = (ollamaModelInfo: ModelInfo): number => {
@@ -274,17 +257,14 @@ export const resolveContextLength = (ollamaModelInfo: ModelInfo): number => {
  *   5. Return new sorted array with original unchanged.
  *
  * Parameters:
- *   @param {PreferenceRule[]} rules — Unsorted preference rules to prioritize.
+ *   @param rules - Unsorted preference rules to prioritize.
  *
  * Returns:
- *   @returns {PreferenceRule[]} — New sorted array (original unmodified).
+ *   @returns New sorted array (original unmodified).
  *
  * Note:
  *   Stable sort by creation date ensures predictable ordering when frequencies match.
  *   Most-used rules appear first; within same usage level, older rules come first.
- *
- * Dependants:
- *   - ContextBuilder.build — uses to prioritize which rules fit in token budget.
  * </Summary>
  */
 export const sortRules = (rules: PreferenceRule[]): PreferenceRule[] => {

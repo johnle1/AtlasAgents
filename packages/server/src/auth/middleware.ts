@@ -6,17 +6,11 @@
  *
  * How it fits in the system:
  *   Used by RSocketServer on every frame with JSON metadata `{ password }`.
- *
- * Dependencies:
- *   - None (pure string comparison).
- *
- * Dependants:
- *   - RSocketServer — calls validate per request.
  * </Summary>
  */
 export class AuthMiddleware {
   /**
-   * @param {string} expectedPassword — Password typed at server startup; empty string enables dev mode (allow all).
+   * @param expectedPassword - Password typed at server startup; empty string enables dev mode (allow all).
    */
   constructor(private readonly expectedPassword: string) {}
 
@@ -32,16 +26,10 @@ export class AuthMiddleware {
    *   3. Returns `shared` on match, null on mismatch.
    *
    * Parameters:
-   *   @param {string} metadataPassword — Value from JSON metadata `{ password: "..." }`.
+   *   @param metadataPassword - Value from JSON metadata `{ password: "..." }`.
    *
    * Returns:
-   *   @returns {string | null} — `"shared"` when allowed, null when Unauthorized.
-   *
-   * Dependencies:
-   *   - None.
-   *
-   * Dependants:
-   *   - RSocketServer — attaches userId to routed requests.
+   *   @returns `"shared"` when allowed, null when Unauthorized.
    * </Summary>
    */
   validate = (metadataPassword: string): string | null => {

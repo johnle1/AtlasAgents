@@ -38,16 +38,6 @@ type Props = {
  *   Provides visual feedback during long-running operations (thinking, working).
  *   Adapts to terminal capabilities: uses dots for tmux, simple text for
  *   screen readers, and animated spinner for standard terminals.
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering.
- *   - ink-spinner — provides standard spinner animation.
- *   - loadConfig — checks if spinner display is enabled.
- *   - inTmux — detects if running in tmux environment.
- *   - isScreenReaderLikely — detects if screen reader is likely in use.
- *
- * Dependants:
- *   - Main UI components — render StatusSpinner during active operations.
  * </Summary>
  */
 export const StatusSpinner: React.FC<Props> = ({ state }) => {
@@ -77,11 +67,6 @@ export const StatusSpinner: React.FC<Props> = ({ state }) => {
    * Returns:
    *   void — called for side effects (timer management and state updates).
    *
-   * Dependencies:
-   *   - inTmux — detects tmux environment.
-   *   - isScreenReaderLikely — detects screen reader usage.
-   *
-   * Dependants:
    *   None (React useEffect hook, called by React on render).
    * </Summary>
    */

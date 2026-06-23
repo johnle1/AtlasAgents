@@ -11,17 +11,10 @@ import type { HistoryVariant } from "../ui/types.js";
  *   2. Append the history entry to the UI bridge for display.
  *
  * Parameters:
- *   @param {string[]} lines — Array of styled strings to display as a block.
+ *   @param lines - Array of styled strings to display as a block.
  *
  * Returns:
- *   @returns {void} — Returns after appending the block to history.
- *
- * Dependencies:
- *   - appendHistory — adds the history entry to the UI display system.
- *
- * Dependants:
- *   - All renderer functions — use this to display styled line blocks.
- *   - appendStyledLines — calls this after adding spacing lines.
+ *   @returns Returns after appending the block to history.
  * </Summary>
  */
 export const appendBlock = (lines: string[]): void => {
@@ -41,18 +34,11 @@ export const appendBlock = (lines: string[]): void => {
  *   2. Use the default "system" variant if no variant is provided.
  *
  * Parameters:
- *   @param {string} text — The text line to append to the log.
- *   @param {HistoryVariant} variant — The styling variant (e.g., "system", "error", "secondary"). Defaults to "system".
+ *   @param text - The text line to append to the log.
+ *   @param variant - The styling variant (e.g., "system", "error", "secondary"). Defaults to "system".
  *
  * Returns:
- *   @returns {void} — Returns after appending the text to the log.
- *
- * Dependencies:
- *   - appendLog — adds the text line to the UI log display.
- *
- * Dependants:
- *   - Progress display functions — use this for real-time progress updates.
- *   - Error display functions — use this with error variant.
+ *   @returns Returns after appending the text to the log.
  * </Summary>
  */
 export const appendText = (
@@ -75,17 +61,11 @@ export const appendText = (
  *   2. Append the history entry to the UI bridge for display.
  *
  * Parameters:
- *   @param {string} path — The file path that the diff applies to.
- *   @param {string} body — The styled diff content (with syntax highlighting).
+ *   @param path - The file path that the diff applies to.
+ *   @param body - The styled diff content (with syntax highlighting).
  *
  * Returns:
- *   @returns {void} — Returns after appending the diff to history.
- *
- * Dependencies:
- *   - appendHistory — adds the history entry to the UI display system.
- *
- * Dependants:
- *   - File write operations — use this to display file change diffs.
+ *   @returns Returns after appending the diff to history.
  * </Summary>
  */
 export const appendDiff = (path: string, body: string): void => {
@@ -110,19 +90,11 @@ export const appendDiff = (path: string, body: string): void => {
  *   4. Append the resulting lines as a block to the output history.
  *
  * Parameters:
- *   @param {string[]} lines — Array of styled strings to display.
- *   @param {{ leadingBlank?: boolean; trailingBlank?: boolean }} options — Optional configuration for spacing. Defaults to adding both leading and trailing blanks.
+ *   @param lines - Array of styled strings to display.
+ *   @param options - Optional configuration for spacing. Defaults to adding both leading and trailing blanks.
  *
  * Returns:
- *   @returns {void} — Returns after appending the styled lines with spacing.
- *
- * Dependencies:
- *   - appendBlock — appends the final lines to the output history.
- *
- * Dependants:
- *   - Configuration display functions — use this for config tables.
- *   - Model display functions — use this for model lists.
- *   - Memory display functions — use this for memory entries.
+ *   @returns Returns after appending the styled lines with spacing.
  * </Summary>
  */
 export const appendStyledLines = (

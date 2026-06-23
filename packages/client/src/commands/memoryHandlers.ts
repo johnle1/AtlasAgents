@@ -23,19 +23,12 @@ import { formatErrorMessage } from "./utils.js";
  *   5. Prints success or error messages for each operation.
  *
  * Parameters:
- *   @param {string} sub — Subcommand: "show", "forget", or "clear".
- *   @param {string} arg — Argument for forget subcommand (topic name).
- *   @param {Connection} conn — RSocket connection for server communication.
+ *   @param sub - Subcommand: "show", "forget", or "clear".
+ *   @param arg - Argument for forget subcommand (topic name).
+ *   @param conn - RSocket connection for server communication.
  *
  * Returns:
- *   @returns {Promise<void>} — called for side effects only.
- *
- * Dependencies:
- *   - Connection.getMemory, forgetMemory, clearMemory — server-side preference store.
- *   - renderer.printMemory, printError, printSuccess — display output.
- *
- * Dependants:
- *   - CommandHandler.handle — calls this for /memory commands.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const handleMemory = async (

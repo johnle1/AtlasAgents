@@ -11,13 +11,6 @@
  * Used by:
  *   - PerConnectionFactory — creates objects of this type.
  *   - Container — stores instances in brokerByRequester map.
- *
- * Dependencies:
- *   - TaskFrame — frame type for stream communication.
- *   - PlanReviewResponse — plan review response type.
- *   - PlanReviewBroker — plan review service.
- *   - TerminalExecutor — terminal execution service.
- *   - WorkspaceManager — workspace management service.
  * </Summary>
  */
 

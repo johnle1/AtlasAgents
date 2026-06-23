@@ -8,13 +8,6 @@
  *   Implements IExperienceRecorder; called by AdvisorOrchestrator and future
  *   workspace/terminal/agent hooks. Provides fire-and-forget learning that doesn't
  *   block the user's workflow while pattern extraction runs in the background.
- *
- * Dependencies:
- *   - PatternExtractor — fire-and-forget after finish.
- *   - Optional SessionManager — append session summary when present.
- *
- * Dependants:
- *   - AdvisorOrchestrator.runTask.
  * </Summary>
  */
 
@@ -55,13 +48,6 @@ import { deriveOutcome, ensureDir } from "./experienceHelpers.js";
  * How it fits in the system:
  *   Brackets AdvisorOrchestrator.runTask; future workspace/terminal/agent code
  *   call log* methods between start and finish.
- *
- * Dependencies:
- *   - IPatternExtractor — required at construction.
- *   - Optional sessionManager.append — session file updates.
- *
- * Dependants:
- *   - AdvisorOrchestrator — start/finish only today.
  * </Summary>
  */
 export class ExperienceRecorder implements IExperienceRecorder {
@@ -101,13 +87,10 @@ export class ExperienceRecorder implements IExperienceRecorder {
    *   3. Store patternExtractor and optional sessionManager from deps.
    *
    * Parameters:
-   *   @param {{ rootDir?: string; patternExtractor: IPatternExtractor; sessionManager?: { append: (summary: SessionSummary) => Promise<void> | void } }} deps — Injected services.
+   *   @param deps - Injected services.
    *
    * Returns:
    *   void — instance fields are set for later method calls.
-   *
-   * Dependants:
-   *   - All ExperienceRecorder instance methods.
    * </Summary>
    */
   constructor(
@@ -139,17 +122,12 @@ export class ExperienceRecorder implements IExperienceRecorder {
    *   4. Store the record in this.records keyed by taskId.
    *
    * Parameters:
-   *   @param {string} taskId — Unique id for this orchestration run (UUID).
-   *   @param {string} taskText — Original user task string.
+   *   @param taskId - Unique id for this orchestration run (UUID).
+   *   @param taskText - Original user task string.
    *
    * Returns:
-   *   @returns {Promise<void>} — Completes when the record is in the Map.
-   *
-   * Dependencies:
-   *   None.
-   *
-   * Dependants:
-   *   - AdvisorOrchestrator.runTask — before advisor.plan.
+   *   @returns Completes when the record is in the Map.
+   
    * </Summary>
    */
   start = async (taskId: string, taskText: string): Promise<void> => {
@@ -182,14 +160,11 @@ export class ExperienceRecorder implements IExperienceRecorder {
    *   3. Push { path, timestamp } onto filesRead.
    *
    * Parameters:
-   *   @param {string} taskId — Task id from start().
-   *   @param {string} filePath — Path that was read.
+   *   @param taskId - Task id from start().
+   *   @param filePath - Path that was read.
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependants:
-   *   - Future WorkspaceManager.read paths.
    * </Summary>
    */
   logRead = (taskId: string, filePath: string): void => {
@@ -217,15 +192,12 @@ export class ExperienceRecorder implements IExperienceRecorder {
    *   3. Push { path, diff, timestamp } onto filesWritten.
    *
    * Parameters:
-   *   @param {string} taskId — Task id from start().
-   *   @param {string} filePath — Path that was written.
-   *   @param {string} diffContent — Unified diff or change summary.
+   *   @param taskId - Task id from start().
+   *   @param filePath - Path that was written.
+   *   @param diffContent - Unified diff or change summary.
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependants:
-   *   - Future WorkspaceManager.write paths.
    * </Summary>
    */
   logWrite = (taskId: string, filePath: string, diffContent: string): void => {
@@ -254,15 +226,12 @@ export class ExperienceRecorder implements IExperienceRecorder {
    *   3. Push command, stdout, stderr, exitCode, and timestamp onto commandsRun.
    *
    * Parameters:
-   *   @param {string} taskId — Task id from start().
-   *   @param {string} command — Shell command string that ran.
-   *   @param {CommandOutput} output — Captured stdout, stderr, and exit code.
+   *   @param taskId - Task id from start().
+   *   @param command - Shell command string that ran.
+   *   @param output - Captured stdout, stderr, and exit code.
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependants:
-   *   - Future TerminalExecutor after command completes.
    * </Summary>
    */
   logCommand = (
@@ -297,16 +266,12 @@ export class ExperienceRecorder implements IExperienceRecorder {
    *   3. Push { reason, guidance, timestamp } onto escalations.
    *
    * Parameters:
-   *   @param {string} taskId — Task id from start().
-   *   @param {string} reason — Why the agent escalated (ESCALATE reason).
-   *   @param {string} guidance — Advisor text that unblocked the agent.
+   *   @param taskId - Task id from start().
+   *   @param reason - Why the agent escalated (ESCALATE reason).
+   *   @param guidance - Advisor text that unblocked the agent.
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependants:
-   *   - Future Agent.run escalation handler.
-   *   - PatternExtractor — builds fix rules from escalations.
    * </Summary>
    */
   logEscalation = (taskId: string, reason: string, guidance: string): void => {
@@ -335,17 +300,13 @@ export class ExperienceRecorder implements IExperienceRecorder {
    *   3. Push { path, before, after, timestamp } onto userEdits.
    *
    * Parameters:
-   *   @param {string} taskId — Task id from start().
-   *   @param {string} filePath — File the user edited.
-   *   @param {string} before — Content before user change.
-   *   @param {string} after — Content after user change.
+   *   @param taskId - Task id from start().
+   *   @param filePath - File the user edited.
+   *   @param before - Content before user change.
+   *   @param after - Content after user change.
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependants:
-   *   - Future client/workspace user-edit detection.
-   *   - PatternExtractor — builds style rules from userEdits.
    * </Summary>
    */
   logUserEdit = (
@@ -389,19 +350,12 @@ export class ExperienceRecorder implements IExperienceRecorder {
    *   9. Return (user never waits for steps 5–8 completion).
    *
    * Parameters:
-   *   @param {string} taskId — Same id passed to start().
-   *   @param {OrchestrationOutcome} outcome — Plan, results, ok flag, optional error.
+   *   @param taskId - Same id passed to start().
+   *   @param outcome - Plan, results, ok flag, optional error.
    *   @param {SessionSummary} [sessionSummary] — Optional blob for session file append.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves after persist attempt; does not await extraction.
-   *
-   * Dependencies:
-   *   - deriveOutcome, ensureDir, fs.writeFile, fs.rename.
-   *   - cleanupSnapshots, deps.sessionManager, deps.patternExtractor.
-   *
-   * Dependants:
-   *   - AdvisorOrchestrator.runTask — finally block.
+   *   @returns Resolves after persist attempt; does not await extraction.
    * </Summary>
    */
   finish = async (
@@ -505,16 +459,10 @@ export class ExperienceRecorder implements IExperienceRecorder {
    *   4. Unlink each matching file in parallel (log per-file failures).
    *
    * Parameters:
-   *   @param {string} taskId — Task id embedded in snapshot filenames.
+   *   @param taskId - Task id embedded in snapshot filenames.
    *
    * Returns:
-   *   @returns {Promise<void>} — Completes after best-effort deletes.
-   *
-   * Dependencies:
-   *   - fs.readdir, fs.unlink.
-   *
-   * Dependants:
-   *   - ExperienceRecorder.finish — only on success outcome.
+   *   @returns Completes after best-effort deletes.
    * </Summary>
    */
   private cleanupSnapshots = async (taskId: string): Promise<void> => {

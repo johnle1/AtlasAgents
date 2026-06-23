@@ -34,13 +34,7 @@ export const resetPullProgress = (operationId?: string): void => {
  *   2. Reset the last pull percentage to an empty string.
  *
  * Returns:
- *   @returns {void} — Returns after finalizing the progress display.
- *
- * Dependencies:
- *   - appendText — displays the blank line for spacing.
- *
- * Dependants:
- *   - Model pull operations — call this when pull operation completes.
+ *   @returns Returns after finalizing the progress display.
  * </Summary>
  */
 export const finishPullProgress = (operationId?: string): void => {
@@ -64,17 +58,10 @@ export const finishPullProgress = (operationId?: string): void => {
  *   8. Append the complete lines to the output block.
  *
  * Parameters:
- *   @param {Array<{ name: string; size?: number; modified_at?: string; details?: { family?: string; parameter_size?: string; quantization_level?: string; } }>} models — Array of installed model objects with metadata.
+ *   @param models - Array of installed model objects with metadata.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the model list.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *   - appendBlock — displays the styled lines to the user.
- *
- * Dependants:
- *   - Model listing commands — use this to display installed models.
+ *   @returns Returns after displaying the model list.
  * </Summary>
  */
 export const printInstalledModels = (
@@ -190,19 +177,12 @@ export const printInstalledModels = (
  *   8. Append the complete lines to the output block.
  *
  * Parameters:
- *   @param {string} query — The model name that was searched for.
- *   @param {{ name: string; size?: number; modified_at?: string; details?: { family?: string; parameter_size?: string; quantization_level?: string; } } | undefined} found — The found model object or undefined if not found.
- *   @param {Array<{ name: string }>} all — Array of all available model names.
+ *   @param query - The model name that was searched for.
+ *   @param found - The found model object or undefined if not found.
+ *   @param all - Array of all available model names.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the search results.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *   - appendBlock — displays the styled lines to the user.
- *
- * Dependants:
- *   - Model search commands — use this to display search results.
+ *   @returns Returns after displaying the search results.
  * </Summary>
  */
 export const printModelFind = (
@@ -334,17 +314,10 @@ export const printModelFind = (
  *   10. If no numeric progress, display the status message or default "pulling…".
  *
  * Parameters:
- *   @param {{ status?: string; completed?: number; total?: number; error?: string; digest?: string }} progress — Progress information object containing status, completion data, error, and digest.
+ *   @param progress - Progress information object containing status, completion data, error, and digest.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the progress information.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *   - appendText — displays the progress to the user.
- *
- * Dependants:
- *   - Model pull operations — use this to display download progress.
+ *   @returns Returns after displaying the progress information.
  * </Summary>
  */
 export const printProgress = (

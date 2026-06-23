@@ -7,12 +7,6 @@ import { AppError } from "./appError.js";
  *
  * How it fits in the system:
  *   Used when an operation is aborted by user request or signal.
- *
- * Dependencies:
- *   - AppError - base error class.
- *
- * Dependants:
- *   - AbortSignal handling throughout the application.
  * </Summary>
  */
 export class AbortError extends AppError {

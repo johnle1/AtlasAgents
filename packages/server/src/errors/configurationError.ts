@@ -7,12 +7,6 @@ import { AppError } from "./appError.js";
  *
  * How it fits in the system:
  *   Used when configuration is missing, invalid, or inaccessible.
- *
- * Dependencies:
- *   - AppError - base error class.
- *
- * Dependants:
- *   - Configuration loading and validation logic.
  * </Summary>
  */
 export class ConfigurationError extends AppError {

@@ -17,16 +17,10 @@ import { appendStyledLines } from "./sink.js";
  *   5. Otherwise, return the last 4 characters with an ellipsis prefix and secondary styling.
  *
  * Parameters:
- *   @param {string} secret — The secret value to format (e.g., password, API key).
+ *   @param secret - The secret value to format (e.g., password, API key).
  *
  * Returns:
- *   @returns {string} — The formatted secret string with theme styling applied.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *
- * Dependants:
- *   - buildConfigLines — uses this to safely display the password configuration.
+ *   @returns The formatted secret string with theme styling applied.
  * </Summary>
  */
 const formatSecretDisplay = (secret: string): string => {
@@ -75,18 +69,10 @@ const formatSecretDisplay = (secret: string): string => {
  *   8. Return the complete array of styled lines.
  *
  * Parameters:
- *   @param {Config} config — The configuration object containing all settings.
+ *   @param config - The configuration object containing all settings.
  *
  * Returns:
- *   @returns {string[]} — Array of styled strings ready for display.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *   - THEMES — provides theme name lookup.
- *   - formatSecretDisplay — safely formats the password for display.
- *
- * Dependants:
- *   - printConfig — calls this to get the lines for configuration display.
+ *   @returns Array of styled strings ready for display.
  * </Summary>
  */
 export const buildConfigLines = (config: Config): string[] => {
@@ -159,17 +145,11 @@ export const buildConfigLines = (config: Config): string[] => {
  *   7. Return the complete array of styled lines.
  *
  * Parameters:
- *   @param {string[]} models — Array of model names to display.
- *   @param {string} label — Category label for the models (e.g., "advisor", "agent").
+ *   @param models - Array of model names to display.
+ *   @param label - Category label for the models (e.g., "advisor", "agent").
  *
  * Returns:
- *   @returns {string[]} — Array of styled strings ready for display.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *
- * Dependants:
- *   - printModels — calls this to get the lines for model display.
+ *   @returns Array of styled strings ready for display.
  * </Summary>
  */
 const buildModelsLines = (models: string[], label: string): string[] => {
@@ -223,16 +203,10 @@ const buildModelsLines = (models: string[], label: string): string[] => {
  *   9. Return the complete array of styled lines.
  *
  * Parameters:
- *   @param {string[]} names — Array of skill names to display.
+ *   @param names - Array of skill names to display.
  *
  * Returns:
- *   @returns {string[]} — Array of styled strings ready for display.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *
- * Dependants:
- *   - printSkills — calls this to get the lines for skill display.
+ *   @returns Array of styled strings ready for display.
  * </Summary>
  */
 const buildSkillsLines = (names: string[]): string[] => {
@@ -293,16 +267,10 @@ const buildSkillsLines = (names: string[]): string[] => {
  *   10. Return the complete array of styled lines.
  *
  * Parameters:
- *   @param {MemoryEntry[]} entries — Array of memory entries to display.
+ *   @param entries - Array of memory entries to display.
  *
  * Returns:
- *   @returns {string[]} — Array of styled strings ready for display.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *
- * Dependants:
- *   - printMemory — calls this to get the lines for memory display.
+ *   @returns Array of styled strings ready for display.
  * </Summary>
  */
 const buildMemoryLines = (entries: MemoryEntry[]): string[] => {
@@ -361,17 +329,10 @@ const buildMemoryLines = (entries: MemoryEntry[]): string[] => {
  *   2. Append the styled lines to the output sink for display.
  *
  * Parameters:
- *   @param {Config} config — The configuration object to display.
+ *   @param config - The configuration object to display.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the configuration.
- *
- * Dependencies:
- *   - buildConfigLines — generates the styled configuration lines.
- *   - appendStyledLines — displays the styled lines to the user.
- *
- * Dependants:
- *   - Configuration commands — use this to display current settings.
+ *   @returns Returns after displaying the configuration.
  * </Summary>
  */
 export const printConfig = (config: Config): void => {
@@ -394,18 +355,11 @@ export const printConfig = (config: Config): void => {
  *   2. Append the styled lines to the output sink with blank lines before and after.
  *
  * Parameters:
- *   @param {string[]} models — Array of model names to display.
- *   @param {string} label — Category label for the models (e.g., "advisor", "agent").
+ *   @param models - Array of model names to display.
+ *   @param label - Category label for the models (e.g., "advisor", "agent").
  *
  * Returns:
- *   @returns {void} — Returns after displaying the models.
- *
- * Dependencies:
- *   - buildModelsLines — generates the styled models lines.
- *   - appendStyledLines — displays the styled lines to the user.
- *
- * Dependants:
- *   - Model listing commands — use this to display available models.
+ *   @returns Returns after displaying the models.
  * </Summary>
  */
 export const printModels = (models: string[], label: string): void => {
@@ -431,17 +385,10 @@ export const printModels = (models: string[], label: string): void => {
  *   2. Append the styled lines to the output sink with blank lines before and after.
  *
  * Parameters:
- *   @param {string[]} names — Array of skill names to display.
+ *   @param names - Array of skill names to display.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the skills.
- *
- * Dependencies:
- *   - buildSkillsLines — generates the styled skills lines.
- *   - appendStyledLines — displays the styled lines to the user.
- *
- * Dependants:
- *   - Skill listing commands — use this to display available skills.
+ *   @returns Returns after displaying the skills.
  * </Summary>
  */
 export const printSkills = (names: string[]): void => {
@@ -467,17 +414,10 @@ export const printSkills = (names: string[]): void => {
  *   2. Append the styled lines to the output sink with blank lines before and after.
  *
  * Parameters:
- *   @param {MemoryEntry[]} entries — Array of memory entries to display.
+ *   @param entries - Array of memory entries to display.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the memories.
- *
- * Dependencies:
- *   - buildMemoryLines — generates the styled memory lines.
- *   - appendStyledLines — displays the styled lines to the user.
- *
- * Dependants:
- *   - Memory listing commands — use this to display stored memories.
+ *   @returns Returns after displaying the memories.
  * </Summary>
  */
 export const printMemory = (entries: MemoryEntry[]): void => {

@@ -13,17 +13,11 @@
  *   7. Records outcome.
  *
  * Parameters:
- *   @param {OrchestratorPipelineDeps} deps - Orchestrator dependencies.
- *   @param {OrchestratorPipelineParams} params - Task parameters.
+ *   @param deps - Orchestrator dependencies.
+ *   @param params - Task parameters.
  *
  * Returns:
- *   @returns {Promise<OrchestrationOutcome>} - Task execution outcome.
- *
- * Dependencies:
- *   - All orchestrator services.
- *
- * Dependants:
- *   - AdvisorOrchestrator.runTask - uses these extracted phases.
+ *   @returns Task execution outcome.
  * </Summary>
  */
 

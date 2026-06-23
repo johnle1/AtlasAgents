@@ -6,12 +6,6 @@
  * How it fits in the system:
  *   Provides type definitions for the on-disk file format and functions
  *   to normalize and validate preference rule objects.
- *
- * Dependencies:
- *   - ../../orchestration/interfaces.js - PreferenceRule and related types.
- *
- * Dependants:
- *   - preferenceStore.ts - uses these parsers to validate and normalize rules.
  * </Summary>
  */
 
@@ -33,11 +27,6 @@ import type {
  * Fields:
  *   version — File format version (currently 1).
  *   rules — Array of preference rules to persist.
- *
- * Dependants:
- *   - load — parses JSON into this type.
- *   - save — serializes this type to JSON.
- *   - normaliseFile — validates and normalizes to this type.
  * </Summary>
  */
 export type PreferencesFile = {
@@ -53,9 +42,6 @@ export type PreferencesFile = {
  * How it fits in the system:
  *   Used by higherConfidence to determine which of two confidence levels is higher.
  *   The numeric ranks allow simple comparison: higher rank = higher confidence.
- *
- * Dependants:
- *   - higherConfidence — compares confidence levels using these ranks.
  * </Summary>
  */
 const CONFIDENCE_RANK: Record<PreferenceConfidence, number> = {
@@ -76,16 +62,10 @@ const CONFIDENCE_RANK: Record<PreferenceConfidence, number> = {
  *   3. Otherwise, default to 'medium' for safety.
  *
  * Parameters:
- *   @param {unknown} raw — Untrusted value from advisor or file.
+ *   @param raw - Untrusted value from advisor or file.
  *
  * Returns:
- *   @returns {PreferenceConfidence} — One of 'high'|'medium'|'low'.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - normaliseRule — validates confidence field.
+ *   @returns One of 'high'|'medium'|'low'.
  * </Summary>
  */
 export const parseConfidence = (raw: unknown): PreferenceConfidence => {
@@ -111,16 +91,10 @@ export const parseConfidence = (raw: unknown): PreferenceConfidence => {
  *   3. Otherwise, default to 'explicit' for safety.
  *
  * Parameters:
- *   @param {unknown} raw — Untrusted value from advisor or file.
+ *   @param raw - Untrusted value from advisor or file.
  *
  * Returns:
- *   @returns {PreferenceSource} — One of 'explicit'|'outcome'|'fix'|'style'.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - normaliseRule — validates source field.
+ *   @returns One of 'explicit'|'outcome'|'fix'|'style'.
  * </Summary>
  */
 export const parseSource = (raw: unknown): PreferenceSource => {
@@ -157,18 +131,10 @@ export const parseSource = (raw: unknown): PreferenceSource => {
  *   5. Return normalized PreferenceRule or null if invalid.
  *
  * Parameters:
- *   @param {unknown} unknownRule — Untrusted rule object from file or advisor.
+ *   @param unknownRule - Untrusted rule object from file or advisor.
  *
  * Returns:
- *   @returns {PreferenceRule | null} — Normalized rule or null if invalid.
- *
- * Dependencies:
- *   - parseConfidence — validates confidence field.
- *   - parseSource — validates source field.
- *
- * Dependants:
- *   - normaliseFile — validates each rule in the file.
- *   - consolidate — validates advisor-returned rules.
+ *   @returns Normalized rule or null if invalid.
  * </Summary>
  */
 export const normaliseRule = (unknownRule: unknown): PreferenceRule | null => {
@@ -258,16 +224,10 @@ export const normaliseRule = (unknownRule: unknown): PreferenceRule | null => {
  *   4. Return normalized file or empty file if input is invalid.
  *
  * Parameters:
- *   @param {unknown} raw — Untrusted file object from disk.
+ *   @param raw - Untrusted file object from disk.
  *
  * Returns:
- *   @returns {PreferencesFile} — Normalized file with valid rules.
- *
- * Dependencies:
- *   - normaliseRule — validates each rule.
- *
- * Dependants:
- *   - load — validates loaded file before returning.
+ *   @returns Normalized file with valid rules.
  * </Summary>
  */
 export const normaliseFile = (raw: unknown): PreferencesFile => {
@@ -303,17 +263,11 @@ export const normaliseFile = (raw: unknown): PreferencesFile => {
  *   2. Return the confidence with the higher rank.
  *
  * Parameters:
- *   @param {PreferenceConfidence} confidenceA — First confidence level.
- *   @param {PreferenceConfidence} confidenceB — Second confidence level.
+ *   @param confidenceA - First confidence level.
+ *   @param confidenceB - Second confidence level.
  *
  * Returns:
- *   @returns {PreferenceConfidence} — The higher confidence level.
- *
- * Dependencies:
- *   - CONFIDENCE_RANK — maps confidence to numeric ranks.
- *
- * Dependants:
- *   - add — merges confidence when updating similar rules.
+ *   @returns The higher confidence level.
  * </Summary>
  */
 export const higherConfidence = (

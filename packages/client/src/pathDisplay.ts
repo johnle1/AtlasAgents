@@ -17,10 +17,6 @@
  *   - renderer.ts — displays paths in CLI output and prompts.
  *   - index.ts — shows working directory in prompt.
  *   - error handlers — displays user-friendly error messages.
- *
- * Dependencies:
- *   - node:os — os.homedir() to get user home directory.
- *   - node:path — path.resolve() and path.sep for path manipulation.
  */
 
 import * as os from "node:os";
@@ -45,20 +41,10 @@ const home = os.homedir();
  *   6. If not under home, returns the full resolved path unchanged.
  *
  * Parameters:
- *   @param {string} absolutePath — File system path (absolute or relative).
+ *   @param absolutePath - File system path (absolute or relative).
  *
  * Returns:
- *   @returns {string} — Display path with ~ substitution e.g. "~/Documents/file.txt".
- *
- * Dependencies:
- *   - os.homedir() — cached at module load (home constant).
- *   - path.resolve() — normalizes path to absolute form.
- *   - path.sep — OS-specific path separator (/ or \\).
- *
- * Dependants:
- *   - truncatePathMiddle — uses output for further truncation.
- *   - buildPromptLabel — uses output in prompt.
- *   - formatHumanError — uses output in error messages.
+ *   @returns Display path with ~ substitution e.g. "~/Documents/file.txt".
  * </Summary>
  */
 export const formatDisplayPath = (absolutePath: string): string => {
@@ -89,18 +75,11 @@ export const formatDisplayPath = (absolutePath: string): string => {
  *   6. Returns the truncated path e.g. "~/Doc…file.txt".
  *
  * Parameters:
- *   @param {string} displayPath — Path to potentially truncate (e.g., from formatDisplayPath).
- *   @param {number} maxLen — Maximum length after truncation (default 40 characters).
+ *   @param displayPath - Path to potentially truncate (e.g., from formatDisplayPath).
+ *   @param maxLen - Maximum length after truncation (default 40 characters).
  *
  * Returns:
- *   @returns {string} — Path truncated to maxLen if needed, otherwise unchanged.
- *
- * Dependencies:
- *   - Math.ceil, Math.floor — for calculating head/tail split (rounded).
- *
- * Dependants:
- *   - buildPromptLabel — uses output in prompt construction.
- *   - renderer.ts — may use for display purposes.
+ *   @returns Path truncated to maxLen if needed, otherwise unchanged.
  * </Summary>
  */
 export const truncatePathMiddle = (
@@ -147,17 +126,10 @@ export const truncatePathMiddle = (
  *   1. Returns a fixed `> ` string (cwd is ignored; path is not shown in the prompt).
  *
  * Parameters:
- *   @param {string} cwd — Current working directory (unused; kept for call-site compatibility).
+ *   @param cwd - Current working directory (unused; kept for call-site compatibility).
  *
  * Returns:
- *   @returns {string} — Prompt string `> `.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - ui/App.tsx — uses output as the readline prompt.
- *   - ui/bootstrap/BootstrapApp.tsx — uses output for prompt refresh.
+ *   @returns Prompt string `> `.
  * </Summary>
  */
 export const buildPromptLabel = (cwd: string): string => "> ";
@@ -180,19 +152,13 @@ export const buildPromptLabel = (cwd: string): string => "> ";
  *   5. For unknown errors, extracts the error message and includes it.
  *
  * Parameters:
- *   @param {string} op — Operation name e.g. "read", "write", "delete".
- *   @param {string} filePath — File system path where error occurred.
- *   @param {unknown} err — Error object from file system operation.
+ *   @param op - Operation name e.g. "read", "write", "delete".
+ *   @param filePath - File system path where error occurred.
+ *   @param err - Error object from file system operation.
  *
  * Returns:
- *   @returns {string} — User-friendly error message e.g.
+ *   @returns User-friendly error message e.g.
  *     "Cannot read ~/file.txt — file or directory does not exist."
- *
- * Dependencies:
- *   - formatDisplayPath — converts filePath to display format.
- *
- * Dependants:
- *   - error handlers throughout codebase — formats errors for user display.
  * </Summary>
  */
 export const formatHumanError = (

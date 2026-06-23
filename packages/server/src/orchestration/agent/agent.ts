@@ -10,19 +10,6 @@
  * requirements. It manages retry logic for common model mistakes and can escalate
  *   to the advisor when stuck. The agent enforces command classification rules
  *   (setup/verify/run-project) from the advisor's command plan.
- *
- * Dependencies:
- *   - Advisor — provides escalation guidance when agent is stuck.
- *   - commandClassifier.js — hasCommandPlanSection for validation.
- *   - toolProtocol.js — thinking extraction, tool parsing, stream parser.
- *   - toolHandlers — specialized handlers for each tool type.
- *   - agentMessageBuilder.js — builds initial system/user messages.
- *   - agentRetryHandler.js — handles retry logic for model mistakes.
- *   - interfaces.js — IOllamaClient, IConfigManager, IExperienceRecorder.
- *   - workspace — WorkspaceManager, TerminalExecutor for file/terminal operations.
- *
- * Dependants:
- *   - AdvisorOrchestrator — creates Agent instances for subtask execution.
  * </Summary>
  */
 
@@ -65,12 +52,6 @@ import { AbortError } from "../../errors/index.js";
  * How it fits in the system:
  *   Prevents infinite loops when the agent gets stuck or makes repeated mistakes.
  *   After this many tool call attempts, the agent fails with a timeout error.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Agent.run — limits the main execution loop.
  * </Summary>
  */
 const MAX_TOOL_ITERATIONS = 16;
@@ -100,9 +81,6 @@ const MAX_TOOL_ITERATIONS = 16;
  *   modelOverrides — Optional model/temperature overrides.
  *   commandPlan — Command plan for shell classification.
  *   debug — Whether to emit debug logs to stderr.
- *
- * Dependants:
- *   - Agent.run — accepts this type as parameters.
  * </Summary>
  */
 export type AgentRunParams = {
@@ -160,15 +138,9 @@ export type AgentRunParams = {
  *   3. If enabled, emit formatted debug message to stderr.
  *
  * Parameters:
- *   @param {boolean} debug — Whether debug mode is enabled.
- *   @param {string} label — Label for the debug message.
- *   @param {unknown} data — Data to log.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Agent.run — logs debug information during execution.
+ *   @param debug - Whether debug mode is enabled.
+ *   @param label - Label for the debug message.
+ *   @param data - Data to log.
  * </Summary>
  */
 const agentDebugLog = (debug: boolean, label: string, data: unknown): void => {
@@ -193,17 +165,11 @@ const agentDebugLog = (debug: boolean, label: string, data: unknown): void => {
  *   4. Add prompt for next action.
  *
  * Parameters:
- *   @param {AgentToolCall} tool — The tool call that produced the result.
- *   @param {string} result — The result string from tool execution.
+ *   @param tool - The tool call that produced the result.
+ *   @param result - The result string from tool execution.
  *
  * Returns:
  *   {string} — Formatted observation message.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Agent.executeTool — formats tool results for the conversation.
  * </Summary>
  */
 const formatObservation = (tool: AgentToolCall, result: string): string => {
@@ -239,10 +205,6 @@ const formatObservation = (tool: AgentToolCall, result: string): string => {
  *   firstThinkSeen — Whether the first think block has been seen.
  *   commandPlanRetryUsed — Whether command plan retry has been used.
  *   lastThinkText — The most recent think block text.
- *
- * Dependants:
- *   - Agent.run — maintains trackers throughout execution.
- *   - Tool handlers — update trackers when tools execute.
  * </Summary>
  */
 type TaskTrackers = {
@@ -278,15 +240,6 @@ type TaskTrackers = {
  *   It streams responses from the model, parses tool calls, executes them through
  *   specialized handlers, manages retry logic for common mistakes, and tracks
  *   verification requirements. It can escalate to the advisor when stuck.
- *
- * Dependencies:
- *   - IOllamaClient — for streaming chat with the model.
- *   - IConfigManager — for model configuration.
- *   - Advisor — for escalation guidance.
- *   - Tool handlers — for executing specific tools.
- *
- * Dependants:
- *   - AdvisorOrchestrator — creates Agent instances for subtask execution.
  * </Summary>
  */
 export class Agent {
@@ -301,7 +254,7 @@ export class Agent {
    *   2. Initialize tool handler map with all available tool handlers.
    *   3. Inject advisor dependency into escalate handler.
    *
-   * @param {{ ollama: IOllamaClient; config: IConfigManager; advisor: Advisor }} dependencies — Dependencies for model IO and escalation.
+   * @param dependencies - Dependencies for model IO and escalation.
    */
   constructor(
     private readonly dependencies: {
@@ -340,23 +293,13 @@ export class Agent {
    *   9. Return final result or failure message on timeout.
    *
    * Parameters:
-   *   @param {AgentRunParams} params — All parameters for agent execution.
+   *   @param params - All parameters for agent execution.
    *
    * Returns:
-   *   @returns {Promise<string>} — Final result summary or failure message.
+   *   @returns Final result summary or failure message.
    *
    * Throws:
    *   @throws {AbortError} — When execution is aborted via signal.
-   *
-   * Dependencies:
-   *   - buildAgentMessages — builds initial system/user messages.
-   *   - handleAgentRetry — handles retry logic for model mistakes.
-   *   - executeTool — executes individual tool calls.
-   *   - extractThinking, stripThinking — parse model thinking blocks.
-   *   - parseAllToolCalls — parse tool calls from model response.
-   *
-   * Dependants:
-   *   - AdvisorOrchestrator — calls this for each subtask in the plan.
    * </Summary>
    */
   run = async (params: AgentRunParams): Promise<string> => {
@@ -601,18 +544,11 @@ export class Agent {
    *   4. Return the handler's result.
    *
    * Parameters:
-   *   @param {AgentToolCall} tool — The tool call to execute.
-   *   @param {object} context — Execution context with all dependencies.
+   *   @param tool - The tool call to execute.
+   *   @param context - Execution context with all dependencies.
    *
    * Returns:
-   *   @returns {Promise<{done: boolean, summary: string, feedback: string, escalationCount: number}>} — Execution result.
-   *
-   * Dependencies:
-   *   - Tool handlers — specialized execution for each tool type.
-   *   - formatObservation — formats error for unknown tools.
-   *
-   * Dependants:
-   *   - Agent.run — executes each tool call in the main loop.
+   *   @returns Execution result.
    * </Summary>
    */
   private executeTool = async (

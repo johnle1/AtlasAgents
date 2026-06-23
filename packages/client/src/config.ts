@@ -166,13 +166,7 @@ const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
  *   None.
  *
  * Returns:
- *   @returns {boolean} — true if config.json exists, false otherwise.
- *
- * Dependencies:
- *   - fs.existsSync — checks file existence.
- *
- * Dependants:
- *   - index.ts — uses this before loadConfig to avoid creating file on first run.
+ *   @returns true if config.json exists, false otherwise.
  * </Summary>
  */
 export const hasConfigFile = (): boolean => fs.existsSync(CONFIG_FILE);
@@ -191,13 +185,7 @@ export const hasConfigFile = (): boolean => fs.existsSync(CONFIG_FILE);
  *   None.
  *
  * Returns:
- *   @returns {Config} — A deep copy of the default configuration object.
- *
- * Dependencies:
- *   - None (object spreading only).
- *
- * Dependants:
- *   - index.ts — uses this for first-run config merging.
+ *   @returns A deep copy of the default configuration object.
  * </Summary>
  */
 export const getDefaultConfig = (): Config => ({
@@ -232,15 +220,6 @@ export const SKILLS_DIR = path.join(CONFIG_DIR, "skills");
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - fs.mkdirSync — Node.js filesystem API.
- *
- * Dependants:
- *   - loadConfig — calls this before reading config.json.
- *   - saveConfig — calls this before writing config.json.
- *   - index.ts saveHistory — ensures HISTORY_FILE parent exists.
- *   - skills.ts ensureSkillsDir — uses CONFIG_DIR parent; skills dir is separate.
  * </Summary>
  */
 export const ensureDirs = (): void => {
@@ -262,16 +241,10 @@ export const ensureDirs = (): void => {
  *   5. Merges ui objects with defaults as base.
  *
  * Parameters:
- *   @param {Partial<Config>} parsedConfig — Config object parsed from config.json.
+ *   @param parsedConfig - Config object parsed from config.json.
  *
  * Returns:
- *   @returns {Config} — The merged configuration with all required fields.
- *
- * Dependencies:
- *   - None (object spreading and type validation only).
- *
- * Dependants:
- *   - loadConfig — merges disk config with defaults.
+ *   @returns The merged configuration with all required fields.
  * </Summary>
  */
 const mergeConfigFromDisk = (parsedConfig: Partial<Config>): Config => ({
@@ -308,17 +281,11 @@ const mergeConfigFromDisk = (parsedConfig: Partial<Config>): Config => ({
  *   5. Returns true if any corrections are needed, false otherwise.
  *
  * Parameters:
- *   @param {Record<string, unknown>} storedConfig — Raw config object read from disk.
- *   @param {Partial<Config>} parsedConfig — Parsed config with type information.
+ *   @param storedConfig - Raw config object read from disk.
+ *   @param parsedConfig - Parsed config with type information.
  *
  * Returns:
- *   @returns {boolean} — true if config should be persisted, false otherwise.
- *
- * Dependencies:
- *   - None (comparison logic only).
- *
- * Dependants:
- *   - loadConfig — checks if merged config needs to be written back to disk.
+ *   @returns true if config should be persisted, false otherwise.
  * </Summary>
  */
 const configNeedsPersist = (
@@ -382,22 +349,7 @@ const configNeedsPersist = (
  *   None.
  *
  * Returns:
- *   @returns {Config} — The loaded or default configuration object.
- *
- * Dependencies:
- *   - ensureDirs — creates directories before reading.
- *   - fs.existsSync — checks if config.json exists.
- *   - fs.readFileSync — reads config.json from disk.
- *   - saveConfig — writes default config on first run.
- *   - mergeConfigFromDisk — merges disk config with defaults.
- *   - configNeedsPersist — checks if config needs to be written back.
- *
- * Dependants:
- *   - index.ts main() — loads config on CLI startup.
- *   - updateConfig — loads existing config before merging changes.
- *   - CommandHandler.handleConfig — displays current config to user.
- *   - getConfig — reads current config for single field access.
- *   - setConfig — reads current config for single field update.
+ *   @returns The loaded or default configuration object.
  * </Summary>
  */
 export const loadConfig = (): Config => {
@@ -434,18 +386,10 @@ export const loadConfig = (): Config => {
  *   3. Writes the JSON string to config.json, replacing any existing file.
  *
  * Parameters:
- *   @param {Config} config — The configuration object to save to disk.
+ *   @param config - The configuration object to save to disk.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - ensureDirs — ensures CONFIG_DIR exists before writing.
- *   - fs.writeFileSync — writes JSON to disk.
- *
- * Dependants:
- *   - loadConfig — saves DEFAULT_CONFIG on first run.
- *   - updateConfig — saves merged config after user changes a setting.
  * </Summary>
  */
 export const saveConfig = (config: Config): void => {
@@ -473,17 +417,10 @@ export const saveConfig = (config: Config): void => {
  *   4. Returns the updated config.
  *
  * Parameters:
- *   @param {Partial<Config>} patch — Fields to update (e.g. { advisorModel: "gemma3:27b" }).
+ *   @param patch - Fields to update (e.g. { advisorModel: "gemma3:27b" }).
  *
  * Returns:
- *   @returns {Config} — The updated configuration after merging and saving.
- *
- * Dependencies:
- *   - loadConfig — reads current config from disk.
- *   - saveConfig — writes updated config back to disk.
- *
- * Dependants:
- *   - CommandHandler.handleSet — updates advisorModel or agentModel after user picks.
+ *   @returns The updated configuration after merging and saving.
  * </Summary>
  */
 export const updateConfig = (patch: Partial<Config>): Config => {
@@ -508,15 +445,11 @@ export const updateConfig = (patch: Partial<Config>): Config => {
  *   2. Returns the value at the requested key.
  *
  * Parameters:
- *   @param {K} key — A key of the Config interface e.g. "server", "advisorModel".
+ *   @param key - A key of the Config interface e.g. "server", "advisorModel".
  *
  * Returns:
- *   @returns {Config[K]} — The value for that key, typed to match the field.
+ *   @returns The value for that key, typed to match the field.
  *
- * Dependencies:
- *   - loadConfig — reads and merges config from disk.
- *
- * Dependants:
  *   None (utility accessor, available for any caller that needs one field).
  * </Summary>
  */
@@ -539,17 +472,12 @@ export const getConfig = <K extends keyof Config>(key: K): Config[K] => {
  *   4. Returns the updated config.
  *
  * Parameters:
- *   @param {K} key — The config field to update.
- *   @param {Config[K]} value — The new value for that field.
+ *   @param key - The config field to update.
+ *   @param value - The new value for that field.
  *
  * Returns:
- *   @returns {Config} — The full updated configuration after saving.
+ *   @returns The full updated configuration after saving.
  *
- * Dependencies:
- *   - loadConfig — reads current config from disk.
- *   - saveConfig — writes updated config back to disk.
- *
- * Dependants:
  *   None (utility accessor, available for any caller that needs to set one field).
  * </Summary>
  */

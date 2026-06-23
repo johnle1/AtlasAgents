@@ -5,12 +5,6 @@
  *
  * How it fits in the system:
  *   Selects the single best-matching skill document for a natural-language task.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - AdvisorOrchestrator.
  * </Summary>
  */
 
@@ -34,16 +28,10 @@ export interface ISkillManager {
    *   Chooses one skill file by relevance to the task text, or returns null.
    *
    * Parameters:
-   *   @param {string} taskText — User task for matching.
+   *   @param taskText - User task for matching.
    *
    * Returns:
-   *   @returns {Promise<Array<{ name: string; content: string }>>} — Skill metadata and body.
-   *
-   * Dependencies:
-   *   None.
-   *
-   * Dependants:
-   *   - AdvisorOrchestrator.runTask.
+   *   @returns Skill metadata and body.
    * </Summary>
    */
   selectForTask(
@@ -58,9 +46,7 @@ export interface ISkillManager {
    * </Summary>
    */
   saveAll(
-    skills:
-      | Array<{ name: string; content: string }>
-      | Record<string, string>,
+    skills: Array<{ name: string; content: string }> | Record<string, string>,
   ): Promise<number>;
 
   /**

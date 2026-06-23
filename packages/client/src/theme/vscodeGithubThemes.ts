@@ -62,9 +62,6 @@ const diffBackgroundLightRemoved = "\x1b[48;5;217m";
  *
  * How it fits in the system:
  *   Replicates the VS Code Dark+ theme for consistency with the popular editor.
- *
- * Dependencies:
- *   - fg — converts hex colors to terminal escape sequences.
  * </Summary>
  */
 export const vscodeTheme: Theme = {
@@ -108,9 +105,6 @@ export const vscodeTheme: Theme = {
  * How it fits in the system:
  *   Provides a modern purple variant of the VS Code theme for users who prefer
  *   a different color scheme than the classic blue/purple.
- *
- * Dependencies:
- *   - fg — converts hex colors to terminal escape sequences.
  * </Summary>
  */
 export const vscodeDarkModernTheme: Theme = {
@@ -153,9 +147,6 @@ export const vscodeDarkModernTheme: Theme = {
  * How it fits in the system:
  *   Replicates the GitHub Dark theme for consistency with the popular code hosting platform,
  *   making the CLI feel familiar to GitHub users.
- *
- * Dependencies:
- *   - fg — converts hex colors to terminal escape sequences.
  * </Summary>
  */
 export const githubDarkTheme: Theme = {
@@ -198,9 +189,6 @@ export const githubDarkTheme: Theme = {
  * How it fits in the system:
  *   Replicates the GitHub Dimmed theme for users who prefer GitHub's softer, less saturated
  *   color scheme while maintaining the familiar GitHub aesthetic.
- *
- * Dependencies:
- *   - fg — converts hex colors to terminal escape sequences.
  * </Summary>
  */
 export const githubDimmedTheme: Theme = {
@@ -244,9 +232,6 @@ export const githubDimmedTheme: Theme = {
  * How it fits in the system:
  *   Replicates the GitHub Light theme for users who prefer light mode or work in
  *   light terminal environments, maintaining GitHub's familiar aesthetic.
- *
- * Dependencies:
- *   - fg — converts hex colors to terminal escape sequences.
  * </Summary>
  */
 export const githubLightTheme: Theme = {

@@ -63,15 +63,6 @@ import { printError } from "../renderer.js";
  *
  * How it fits in the system:
  *   Sits between index.ts readline and Connection: slash lines stop here; plain text is sent as tasks from index.
- *
- * Dependencies (classes this class imports):
- *   - Connection — listModels, syncSkills, getMemory, forgetMemory, clearMemory, reload.
- *   - config — loadConfig, updateConfig.
- *   - skills — listSkills, addSkill, readAllSkills, SkillManager.
- *   - renderer — printConfig, printModels, printSkills, printMemory, printError, printSuccess, printHelp.
- *
- * Dependants (classes that instantiate or import this class):
- *   - index.ts — constructs one CommandHandler per session after connect.
  * </Summary>
  */
 export class CommandHandler {
@@ -96,16 +87,12 @@ export class CommandHandler {
    *   1. Stores conn, prompts, and optional dependencies on the instance for handler methods.
    *
    * Parameters:
-   *   @param {CommandHandlerDeps} deps — Object containing all CommandHandler dependencies.
+   *   @param deps - Object containing all CommandHandler dependencies.
    *
    * Returns:
    *   void — constructor side effects only.
    *
-   * Dependencies:
    *   None (field assignment only).
-   *
-   * Dependants:
-   *   - index.ts — constructs CommandHandler after Connection.connect.
    * </Summary>
    */
   constructor(deps: CommandHandlerDeps) {
@@ -132,17 +119,10 @@ export class CommandHandler {
    *   5. Returns true if a command was handled.
    *
    * Parameters:
-   *   @param {string} input — Raw user input from the readline interface.
+   *   @param input - Raw user input from the readline interface.
    *
    * Returns:
-   *   @returns {Promise<boolean>} — true if command was handled, false if plain text.
-   *
-   * Dependencies:
-   *   - Handler functions from specialized modules — execute specific command logic.
-   *   - renderer.printError — for unknown commands.
-   *
-   * Dependants:
-   *   - index.ts rl.on('line') — calls this to route each line of input.
+   *   @returns true if command was handled, false if plain text.
    * </Summary>
    */
   handle = async (input: string): Promise<boolean> => {

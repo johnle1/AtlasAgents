@@ -9,12 +9,6 @@
  *   services (OLLAMA client, config manager, orchestrator, etc.) with proper
  *   dependencies and exposing them through a clean interface. Handles per-connection
  *   resource creation and router configuration for request handling.
- *
- * Dependencies:
- *   - All server modules (advisor, orchestrator, config, memory, routing, etc.).
- *
- * Dependants:
- *   - Server entry point — calls createContainer to bootstrap the application.
  * </Summary>
  */
 
@@ -238,16 +232,10 @@ export type AppContainer = {
  *   5. Convert map entries to array of topic/rules objects.
  *
  * Parameters:
- *   @param {PreferenceRule[]} rules — Array of preference rules to convert.
+ *   @param rules - Array of preference rules to convert.
  *
  * Returns:
- *   @returns {Array<{topic: string, rules: string[]}>} — Memory entries grouped by topic.
- *
- * Dependencies:
- *   - None (pure function).
- *
- * Dependants:
- *   - buildRouter — uses this to format memory entries for client responses.
+ *   @returns Memory entries grouped by topic.
  * </Summary>
  */
 const preferenceRulesToMemoryEntries = (
@@ -304,17 +292,10 @@ const preferenceRulesToMemoryEntries = (
  *   9. Return container object with all services and factories.
  *
  * Parameters:
- *   @param {ContainerOptions} options — Configuration options for container setup.
+ *   @param options - Configuration options for container setup.
  *
  * Returns:
- *   @returns {AppContainer} — Fully initialized container with all services.
- *
- * Dependencies:
- *   - All imported service classes.
- *   - ContainerOptions for configuration.
- *
- * Dependants:
- *   - Server entry point — calls this to bootstrap the application.
+ *   @returns Fully initialized container with all services.
  * </Summary>
  */
 export const createContainer = (
@@ -383,15 +364,7 @@ export const createContainer = (
    *   None — uses container services through closure.
    *
    * Returns:
-   *   @returns {Router} — Configured router with all handlers registered.
-   *
-   * Dependencies:
-   *   - Container services (ollama, config, prefs, skills, session, etc.).
-   *   - brokerByRequester — for per-connection resource access.
-   *   - Router — for request routing infrastructure.
-   *
-   * Dependants:
-   *   - createContainer — calls this to create router for container.
+   *   @returns Configured router with all handlers registered.
    * </Summary>
    */
   const buildRouter = (): Router => {
@@ -434,14 +407,6 @@ export const createContainer = (
    *
    * Returns:
    *   void — called for side effects (timer setup and consolidation scheduling).
-   *
-   * Dependencies:
-   *   - config — stores last consolidation timestamp.
-   *   - prefs — performs consolidation operation.
-   *   - scheduleConsolidation — scheduler function from memory/consolidationScheduler.ts.
-   *
-   * Dependants:
-   *   - createContainer — calls this to set up periodic consolidation.
    * </Summary>
    */
   const scheduleConsolidation = (): void => {

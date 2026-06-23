@@ -7,14 +7,6 @@
  *   Central command catalog that the CLI autocomplete system uses to suggest commands,
  *   display help text, and validate command syntax. This ensures all command information
  *   is consistent and maintained in one place.
- *
- * Dependencies:
- *   - None (data only, no external dependencies).
- *
- * Dependants:
- *   - Command input handlers — use this for autocomplete suggestions.
- *   - Help display functions — use this to show command descriptions.
- *   - Command validation functions — use this to validate command syntax.
  * </Summary>
  */
 
@@ -61,14 +53,6 @@ export type CommandEntry = {
  *   Serves as the central registry for all slash commands that users can execute.
  *   Includes configuration commands, skill management, model operations, memory management,
  *   and system controls. This is the single source of truth for command information.
- *
- * Dependencies:
- *   - None (static data only).
- *
- * Dependants:
- *   - catalogByCommand — builds a Map from this array for efficient lookup.
- *   - getCommandSuggestions — filters this array for autocomplete.
- *   - All command helpers — lookup information by command string.
  * </Summary>
  */
 export const COMMAND_CATALOG: CommandEntry[] = [
@@ -623,16 +607,10 @@ const catalogByCommand = new Map(
  *   3. Return the matching command entries.
  *
  * Parameters:
- * @param {string} input — The user's current input string to match against commands.
+ * @param input - The user's current input string to match against commands.
  *
  * Returns:
- * @returns {CommandEntry[]} — Array of command entries that start with the input string.
- *
- * Dependencies:
- *   - COMMAND_CATALOG — provides the command registry to filter.
- *
- * Dependants:
- *   - Input autocomplete handlers — use this for command suggestions.
+ * @returns Array of command entries that start with the input string.
  * </Summary>
  */
 export const getCommandSuggestions = (input: string): CommandEntry[] => {
@@ -662,16 +640,10 @@ export const getCommandSuggestions = (input: string): CommandEntry[] => {
  *   3. If not found, return the input command string as fallback.
  *
  * Parameters:
- * @param {string} command — The command string to get the label for.
+ * @param command - The command string to get the label for.
  *
  * Returns:
- * @returns {string} — The display label for the command, or the command string if not found.
- *
- * Dependencies:
- *   - catalogByCommand — provides the command lookup Map.
- *
- * Dependants:
- *   - Command display functions — use this to show user-friendly command labels.
+ * @returns The display label for the command, or the command string if not found.
  * </Summary>
  */
 export const getCommandLabel = (command: string): string =>
@@ -688,16 +660,10 @@ export const getCommandLabel = (command: string): string =>
  *   3. If not found, return empty string as fallback.
  *
  * Parameters:
- * @param {string} command — The command string to get the description for.
+ * @param command - The command string to get the description for.
  *
  * Returns:
- * @returns {string} — The description of the command, or empty string if not found.
- *
- * Dependencies:
- *   - catalogByCommand — provides the command lookup Map.
- *
- * Dependants:
- *   - Help display functions — use this to show command descriptions.
+ * @returns The description of the command, or empty string if not found.
  * </Summary>
  */
 export const getCommandDescription = (command: string): string =>
@@ -714,17 +680,10 @@ export const getCommandDescription = (command: string): string =>
  *   3. Return true if requiresArgs is true, false otherwise.
  *
  * Parameters:
- * @param {string} command — The command string to check for argument requirements.
+ * @param command - The command string to check for argument requirements.
  *
  * Returns:
- * @returns {boolean} — True if the command requires arguments, false otherwise.
- *
- * Dependencies:
- *   - catalogByCommand — provides the command lookup Map.
- *
- * Dependants:
- *   - Command validation functions — use this to determine if arguments are required.
- *   - Command prompt handlers — use this to decide when to prompt for missing arguments.
+ * @returns True if the command requires arguments, false otherwise.
  * </Summary>
  */
 export const commandRequiresArgs = (command: string): boolean =>

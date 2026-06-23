@@ -107,16 +107,10 @@ export type StatusVisual = {
  *   5. Return true if any condition matches, false otherwise.
  *
  * Parameters:
- * @param {AgentStage | AdvisorStage | undefined} stage — The stage to evaluate.
+ * @param stage - The stage to evaluate.
  *
  * Returns:
- * @returns {boolean} — True if the stage represents working state, false otherwise.
- *
- * Dependencies:
- *   - None (simple boolean logic).
- *
- * Dependants:
- *   - resolveWorkerVisual — uses this to determine when to animate the worker indicator.
+ * @returns True if the stage represents working state, false otherwise.
  * </Summary>
  */
 export const isWorkingStage = (stage?: AgentStage | AdvisorStage): boolean =>
@@ -137,15 +131,7 @@ export const isWorkingStage = (stage?: AgentStage | AdvisorStage): boolean =>
  *   4. Return true if animation should run, false otherwise.
  *
  * Returns:
- * @returns {boolean} — True if worker animation should run, false otherwise.
- *
- * Dependencies:
- *   - loadConfig — provides the configuration for spinner settings.
- *   - isScreenReaderLikely — detects screen reader usage for accessibility.
- *
- * Dependants:
- *   - resolveWorkerVisual — uses this to determine animation state.
- *   - resolveTaskLifecycleVisual — uses this to determine animation state.
+ * @returns True if worker animation should run, false otherwise.
  * </Summary>
  */
 /** True when worker circle-pulse should run (showSpinner on, not CI/dumb). */
@@ -163,13 +149,7 @@ export const shouldAnimateWorker = (): boolean => {
  *   2. Return the result directly.
  *
  * Returns:
- * @returns {boolean} — True if animation should run, false otherwise.
- *
- * Dependencies:
- *   - shouldAnimateWorker — provides the animation eligibility check.
- *
- * Dependants:
- *   - Plan visualization functions — use this alias for consistent naming.
+ * @returns True if animation should run, false otherwise.
  * </Summary>
  */
 /** Alias for plan naming. */
@@ -186,13 +166,7 @@ export const shouldAnimate = shouldAnimateWorker;
  *   3. If not tmux, return the standard frame interval for normal terminals.
  *
  * Returns:
- * @returns {number} — The frame interval in milliseconds for the current environment.
- *
- * Dependencies:
- *   - inTmux — detects tmux environment.
- *
- * Dependants:
- *   - Animation loop components — use this to set frame timing.
+ * @returns The frame interval in milliseconds for the current environment.
  * </Summary>
  */
 export const getWorkingFrameMs = (): number => {
@@ -210,13 +184,7 @@ export const getWorkingFrameMs = (): number => {
  *   3. If not tmux, return the full 4-frame pulse for normal terminals.
  *
  * Returns:
- * @returns {readonly string[]} — The array of animation frames for the current environment.
- *
- * Dependencies:
- *   - inTmux — detects tmux environment.
- *
- * Dependants:
- *   - getWorkingFrame — uses this to get the frame array.
+ * @returns The array of animation frames for the current environment.
  * </Summary>
  */
 export const getWorkingFrames = (): readonly string[] => {
@@ -234,17 +202,10 @@ export const getWorkingFrames = (): readonly string[] => {
  *   3. Return the frame at the calculated index.
  *
  * Parameters:
- * @param {number} pulseIndex — The current pulse index for animation timing.
+ * @param pulseIndex - The current pulse index for animation timing.
  *
  * Returns:
- * @returns {string} — The current animation frame glyph.
- *
- * Dependencies:
- *   - getWorkingFrames — provides the frame array for the current environment.
- *
- * Dependants:
- *   - resolveWorkerVisual — uses this to get the current frame for animation.
- *   - resolveTaskLifecycleVisual — uses this to get the current frame for animation.
+ * @returns The current animation frame glyph.
  * </Summary>
  */
 export const getWorkingFrame = (pulseIndex: number): string => {
@@ -267,21 +228,13 @@ export const getWorkingFrame = (pulseIndex: number): string => {
  *   7. Otherwise, return dimmed default indicator.
  *
  * Parameters:
- * @param {AgentStage | AdvisorStage | undefined} stage — The current stage of the worker.
- * @param {StatusIcon} frameIcon — The status icon to display.
- * @param {number} pulseIndex — The current pulse index for animation timing.
- * @param {boolean} isAdvisor — Whether this is an advisor status.
+ * @param stage - The current stage of the worker.
+ * @param frameIcon - The status icon to display.
+ * @param pulseIndex - The current pulse index for animation timing.
+ * @param isAdvisor - Whether this is an advisor status.
  *
  * Returns:
- * @returns {StatusVisual} — The visual properties for the worker status indicator.
- *
- * Dependencies:
- *   - isWorkingStage — determines if the stage represents working state.
- *   - shouldAnimateWorker — determines if animation should run.
- *   - getWorkingFrame — provides the current animation frame.
- *
- * Dependants:
- *   - Worker status display components — use this to render worker indicators.
+ * @returns The visual properties for the worker status indicator.
  * </Summary>
  */
 export const resolveWorkerVisual = (
@@ -352,16 +305,10 @@ export const resolveWorkerVisual = (
  *   3. If not blocked, return cyan available indicator (○).
  *
  * Parameters:
- * @param {boolean} blocked — Whether the queue is blocked and unable to process tasks.
+ * @param blocked - Whether the queue is blocked and unable to process tasks.
  *
  * Returns:
- * @returns {StatusVisual} — The visual properties for the queue status indicator.
- *
- * Dependencies:
- *   - None (simple conditional logic).
- *
- * Dependants:
- *   - Queue status display components — use this to render queue indicators.
+ * @returns The visual properties for the queue status indicator.
  * </Summary>
  */
 export const resolveQueueVisual = (blocked: boolean): StatusVisual =>
@@ -380,18 +327,11 @@ export const resolveQueueVisual = (blocked: boolean): StatusVisual =>
  *   5. If blocked, return dimmed blocked indicator (□).
  *
  * Parameters:
- * @param {TaskLifecycleState} state — The current state of the task lifecycle.
- * @param {number} pulseIndex — The current pulse index for animation timing.
+ * @param state - The current state of the task lifecycle.
+ * @param pulseIndex - The current pulse index for animation timing.
  *
  * Returns:
- * @returns {StatusVisual} — The visual properties for the task lifecycle indicator.
- *
- * Dependencies:
- *   - shouldAnimateWorker — determines if animation should run.
- *   - getWorkingFrame — provides the current animation frame.
- *
- * Dependants:
- *   - Task lifecycle display components — use this to render task indicators.
+ * @returns The visual properties for the task lifecycle indicator.
  * </Summary>
  */
 export const resolveTaskLifecycleVisual = (

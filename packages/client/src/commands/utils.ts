@@ -18,16 +18,10 @@
  *   5. Returns null if validation fails, otherwise returns the valid port number.
  *
  * Parameters:
- *   @param {string} portString — The port number as a string (e.g., "8080", "3000").
+ *   @param portString - The port number as a string (e.g., "8080", "3000").
  *
  * Returns:
- *   @returns {number | null} — The parsed port number if valid, null if invalid.
- *
- * Dependencies:
- *   - None (uses built-in parseInt and Number.isNaN).
- *
- * Dependants:
- *   - configHandlers.handleSet — uses this to validate user-provided port numbers.
+ *   @returns The parsed port number if valid, null if invalid.
  * </Summary>
  */
 export const parsePort = (portString: string): number | null => {
@@ -68,17 +62,10 @@ export const parsePort = (portString: string): number | null => {
  *   4. Returns the formatted error message string.
  *
  * Parameters:
- *   @param {unknown} error — The error value to format (can be Error, string, object, etc.).
+ *   @param error - The error value to format (can be Error, string, object, etc.).
  *
  * Returns:
- *   @returns {string} — A human-readable error message string.
- *
- * Dependencies:
- *   - None (uses instanceof and String conversion).
- *
- * Dependants:
- *   - modelHandlers.handleModels — uses this to format error messages from server operations.
- *   - Other command handlers — use this for consistent error message formatting.
+ *   @returns A human-readable error message string.
  * </Summary>
  */
 export const formatErrorMessage = (error: unknown): string => {

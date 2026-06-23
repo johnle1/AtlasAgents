@@ -9,18 +9,6 @@
  *   input handling, approval requests, prompt overlays, and command autocomplete. It also
  *   provides setter functions for updating the state. The actual logic and effects are
  *   implemented in App.tsx to keep this context focused on state storage only.
- *
- * Dependencies:
- *   - React — provides the context API for state management.
- *   - loadConfig — provides configuration for initialization.
- *   - buildPromptLabel — creates the prompt label from current directory.
- *   - buildBannerLines — creates banner lines for display.
- *   - uiBridge — provides pending state functions.
- *
- * Dependants:
- *   - App — uses AppProvider to wrap the application.
- *   - AppContent — uses useAppContext to access application state.
- *   - All child components — use useAppContext to access state and setter functions.
  * </Summary>
  */
 
@@ -74,16 +62,10 @@ export const emptyPromptDraft = (): PromptDraft => ({
  *   2. Map each banner line to a static entry with a unique key.
  *
  * Parameters:
- * @param {Config} configuration — The application configuration.
+ * @param configuration - The application configuration.
  *
  * Returns:
- * @returns {StaticEntry[]} — Array of static banner entries.
- *
- * Dependencies:
- *   - buildBannerLines — creates banner lines from configuration.
- *
- * Dependants:
- *   - AppProvider — uses this to initialize banner entries.
+ * @returns Array of static banner entries.
  * </Summary>
  */
 const buildBannerEntries = (configuration: Config): StaticEntry[] =>
@@ -275,14 +257,7 @@ const AppContext = createContext<AppContextValue | null>(null);
  *   4. Return the context value.
  *
  * Returns:
- * @returns {AppContextValue} — The application context value.
- *
- * Dependencies:
- *   - AppContext — provides the React context.
- *   - useContext — provides access to context value.
- *
- * Dependants:
- *   - All child components — use this to access application state.
+ * @returns The application context value.
  * </Summary>
  */
 export const useAppContext = (): AppContextValue => {
@@ -331,20 +306,10 @@ type AppProviderProps = AppProps & {
  *   14. Render AppContext.Provider with the value and children.
  *
  * Parameters:
- * @param {AppProviderProps} props — Provider props including app props and children.
+ * @param props - Provider props including app props and children.
  *
  * Returns:
- * @returns {JSX.Element} — The AppContext.Provider component with context value and children.
- *
- * Dependencies:
- *   - React — provides useState for state management.
- *   - loadConfig — provides configuration for initialization.
- *   - buildPromptLabel — creates prompt from current directory.
- *   - buildBannerEntries — creates banner entries.
- *   - uiBridge — provides pending state functions.
- *
- * Dependants:
- *   - App — wraps application content with this provider.
+ * @returns The AppContext.Provider component with context value and children.
  * </Summary>
  */
 export const AppProvider: React.FC<AppProviderProps> = ({

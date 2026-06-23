@@ -11,17 +11,6 @@
  *   state. It manages keyboard navigation through autocomplete menus and command
  *   history, as well as handling special key combinations for exit, clear, and
  *   directory expansion.
- *
- * Dependencies:
- *   - React hooks — useCallback for memoization.
- *   - formatErrorMessage — formats error messages for display.
- *   - commandRequiresArgs — checks if a command requires arguments.
- *   - getCommandSuggestions — fetches command autocomplete suggestions.
- *   - AUTOCOMPLETE_SCROLL_TRIGGER_OFFSET — scroll offset for autocomplete.
- *   - AUTOCOMPLETE_VISIBLE_COUNT — number of visible suggestions.
- *
- * Dependants:
- *   - AppContent component — uses this hook to handle keyboard input.
  * </Summary>
  */
 
@@ -101,18 +90,11 @@ type KeyboardInputHandlers = {
  *   5. Updates input, active index, scroll offset, and history index.
  *
  * Parameters:
- *   @param {KeyboardInputContext} keyboardInputDependencies — State and setters from context.
- *   @param {KeyboardInputHandlers} keyboardInputHandlers — External handlers like exit.
+ *   @param keyboardInputDependencies - State and setters from context.
+ *   @param keyboardInputHandlers - External handlers like exit.
  *
  * Returns:
- *   @returns {(inputChar: string, key: Object) => void} — The keyboard input handler function.
- *
- * Dependencies:
- *   - React hooks — useCallback for memoization.
- *   - Command utilities — for autocomplete and command handling.
- *
- * Dependants:
- *   - AppContent component — uses this to handle keyboard input.
+ *   @returns The keyboard input handler function.
  * </Summary>
  */
 export const useKeyboardInput = (

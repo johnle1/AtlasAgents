@@ -9,14 +9,6 @@
  *   as well as real-time streaming of text output from server operations. It manages
  *   the display of user input, system messages, errors, and streaming output through
  *   the global application state.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *   - getStreamingTokenHandler/setStreamingTokenHandler — manages streaming token handler.
- *
- * Dependants:
- *   - Server streaming handlers — call these to add history items and stream text.
- *   - Text display functions — use this to show messages in the terminal.
  * </Summary>
  */
 
@@ -38,17 +30,10 @@ import {
  *   3. The hook adds the item to the history array and triggers UI re-render.
  *
  * Parameters:
- *   @param {HistoryItem} historyItem — The history item to add (text, think, plan, etc.).
+ *   @param historyItem - The history item to add (text, think, plan, etc.).
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *
- * Dependants:
- *   - Server streaming handlers — call this to add output to history.
- *   - Message display functions — use this to show messages to users.
  * </Summary>
  */
 export const appendHistory = (historyItem: HistoryItem): void => {
@@ -73,19 +58,11 @@ export const appendHistory = (historyItem: HistoryItem): void => {
  *   2. Calls appendHistory to add the item to the history.
  *
  * Parameters:
- *   @param {string} text — The message text to display.
- * @param {string} textVariant — The display variant (system, error, success, secondary, user, assistant).
+ *   @param text - The message text to display.
+ * @param textVariant - The display variant (system, error, success, secondary, user, assistant).
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - appendHistory — handles the actual history addition.
- *
- * Dependants:
- *   - Server communication functions — use this to display text messages.
- *   - Error handling functions — use this to show error messages.
- *   - Success notification functions — use this to show success messages.
  * </Summary>
  */
 export const appendLog = (
@@ -120,17 +97,10 @@ export const appendLog = (
  *   3. The hook updates the streaming text state and triggers UI re-render.
  *
  * Parameters:
- *   @param {string | null} streamingText — The streaming text to display (null to clear).
+ *   @param streamingText - The streaming text to display (null to clear).
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *
- * Dependants:
- *   - Server streaming handlers — call this to show/hide streaming text.
- *   - Model output functions — use this to display model generation progress.
  * </Summary>
  */
 export const setStreamingText = (streamingText: string | null): void => {
@@ -157,18 +127,10 @@ export const setStreamingText = (streamingText: string | null): void => {
  *   3. Calls the handler with the new token if it exists.
  *
  * Parameters:
- *   @param {string} streamingToken — The token to append to the streaming text.
+ *   @param streamingToken - The token to append to the streaming text.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - setStreamingText — clears the streaming text state.
- *   - getStreamingTokenHandler — retrieves the streaming token handler.
- *
- * Dependants:
- *   - Server streaming handlers — call this to append streaming tokens.
- *   - Model output functions — use this to append model generation tokens.
  * </Summary>
  */
 export const appendStreamingToken = (streamingToken: string): void => {
@@ -199,17 +161,11 @@ export const appendStreamingToken = (streamingToken: string): void => {
  *   2. The handler is called by appendStreamingToken for each token.
  *
  * Parameters:
- *   @param {((token: string) => void) | null} handlerFunction — The handler function (null to clear).
+ *   @param handlerFunction - The handler function (null to clear).
  *
  * Returns:
  *   void — called for side effects only.
  *
- * Dependencies:
- *   - setStreamingTokenHandler — stores the streaming token handler in state.
- *
- * Dependants:
- *   - Component setup functions — register custom token processing logic.
- *   - Streaming initialization functions — configure streaming behavior.
  * </summary>
  */
 export const registerStreamingHandler = (

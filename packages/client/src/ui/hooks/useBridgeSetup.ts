@@ -10,19 +10,6 @@
  *   bridge between server-side code and the React UI. It registers callbacks for
  * all state updates (history, streaming, agent status, approvals, etc.) and manages
  *   terminal mode settings for the Ink UI.
- *
- * Dependencies:
- *   - React hooks — useEffect, useRef for lifecycle management.
- *   - loadConfig — loads application configuration.
- *   - buildPromptLabel — builds the prompt label for display.
- *   - buildBannerLines — generates the UI banner lines.
- *   - enterAlternateScreen/exitAlternateScreen — manage terminal alternate screen.
- *   - registerBridgeHooks — registers state update callbacks.
- *   - registerStreamingHandler — registers streaming token handler.
- *   - setInkActive — manages Ink UI active state.
- *
- * Dependants:
- *   - AppContent component — calls this hook to set up the bridge system.
  * </Summary>
  */
 
@@ -83,18 +70,10 @@ type BridgeSetupContext = Pick<
  *   8. Exits alternate screen mode if it was used.
  *
  * Parameters:
- *   @param {BridgeSetupContext} bridgeSetupDependencies — State setter functions from context.
+ *   @param bridgeSetupDependencies - State setter functions from context.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - React hooks — useEffect, useRef for lifecycle management.
- *   - Configuration system — loads and checks config settings.
- *   - Bridge system — registers hooks and handlers.
- *
- * Dependants:
- *   - AppContent component — calls this hook during component render.
  * </Summary>
  */
 export const useBridgeSetup = ({

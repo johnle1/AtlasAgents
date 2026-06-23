@@ -89,16 +89,7 @@ let activeThemeKey = defaultTheme.key;
  *   7. If any error occurs, silently ignore (migration is non-fatal).
  *
  * Returns:
- *   @returns {void} — Returns after migration or if migration is not needed/possible.
- *
- * Dependencies:
- *   - node:fs — provides file existence check, reading, and deletion.
- *   - THEMES — provides the current theme map for validation.
- *   - loadConfig — loads the current configuration.
- *   - updateConfig — updates the configuration with the migrated theme.
- *
- * Dependants:
- *   - loadTheme — calls this to ensure legacy settings are migrated.
+ *   @returns Returns after migration or if migration is not needed/possible.
  * </Summary>
  */
 const migrateLegacyThemeFile = (): void => {
@@ -152,15 +143,7 @@ const migrateLegacyThemeFile = (): void => {
  *   5. If invalid, fall back to the default theme.
  *
  * Returns:
- *   @returns {void} — Returns after setting the active theme.
- *
- * Dependencies:
- *   - migrateLegacyThemeFile — ensures legacy settings are migrated.
- *   - loadConfig — loads the current configuration.
- *   - THEMES — provides the available theme map.
- *
- * Dependants:
- *   - Application initialization — calls this to set up the theme on startup.
+ *   @returns Returns after setting the active theme.
  * </Summary>
  */
 export const loadTheme = (): void => {
@@ -199,18 +182,10 @@ export const loadTheme = (): void => {
  *   5. Update the configuration with the new theme key.
  *
  * Parameters:
- *   @param {string} key — The theme key to activate (e.g., "default", "ocean", "github-dark").
+ *   @param key - The theme key to activate (e.g., "default", "ocean", "github-dark").
  *
  * Returns:
- *   @returns {void} — Returns after changing the theme and updating configuration.
- *
- * Dependencies:
- *   - THEMES — provides the available theme map for validation.
- *   - loadConfig — loads the current configuration.
- *   - updateConfig — updates the configuration with the new theme.
- *
- * Dependants:
- *   - Theme switching commands — use this to change the active theme.
+ *   @returns Returns after changing the theme and updating configuration.
  * </Summary>
  */
 export const setTheme = (key: string): void => {
@@ -245,14 +220,7 @@ export const setTheme = (key: string): void => {
  *   1. Return the activeTheme variable containing the theme object.
  *
  * Returns:
- *   @returns {Theme} — The active theme object with color codes for all UI elements.
- *
- * Dependencies:
- *   - None (simple variable access).
- *
- * Dependants:
- *   - All UI rendering functions — call this to get current theme colors.
- *   - All display functions — use this to apply theme styling.
+ *   @returns The active theme object with color codes for all UI elements.
  * </Summary>
  */
 export const getTheme = (): Theme => activeTheme;
@@ -266,14 +234,7 @@ export const getTheme = (): Theme => activeTheme;
  *   1. Return the activeThemeKey variable containing the theme key.
  *
  * Returns:
- *   @returns {string} — The key identifier of the active theme (e.g., "default", "ocean", "github-dark").
- *
- * Dependencies:
- *   - None (simple variable access).
- *
- * Dependants:
- *   - Theme display functions — use this to show the current theme name.
- *   - Configuration display functions — use this to show the current theme setting.
+ *   @returns The key identifier of the active theme (e.g., "default", "ocean", "github-dark").
  * </Summary>
  */
 export const getThemeKey = (): string => activeThemeKey;

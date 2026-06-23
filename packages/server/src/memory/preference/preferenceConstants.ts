@@ -6,13 +6,6 @@
  * How it fits in the system:
  *   Provides configuration values for similarity thresholds, consolidation rules,
  *   and stop words for text processing used throughout the preference store.
- *
- * Dependencies:
- *   - None (pure constants).
- *
- * Dependants:
- *   - preferenceHelpers.ts - uses STOP_WORDS for tokenization.
- *   - preferenceStore.ts - uses SIMILARITY_THRESHOLD and CONSOLIDATE_MIN_RULES.
  * </Summary>
  */
 
@@ -24,9 +17,6 @@
  * How it fits in the system:
  *   Used by the PreferenceStore constructor to determine where to persist rules.
  *   The file is stored under user-data/ to keep user-generated data separate from source code.
- *
- * Dependants:
- *   - PreferenceStore constructor — uses this to build the absolute file path.
  * </Summary>
  */
 export const DEFAULT_FILE = "user-data/preferences.json";
@@ -39,9 +29,6 @@ export const DEFAULT_FILE = "user-data/preferences.json";
  * How it fits in the system:
  *   When adding a new rule, the store checks if an existing rule has similarity >= 0.8.
  *   If so, the new rule is merged into the existing one instead of creating a duplicate.
- *
- * Dependants:
- *   - add — uses this threshold to decide whether to merge or create a new rule.
  * </Summary>
  */
 export const SIMILARITY_THRESHOLD = 0.8;
@@ -54,9 +41,6 @@ export const SIMILARITY_THRESHOLD = 0.8;
  * How it fits in the system:
  *   Consolidation uses an AI advisor to merge duplicate rules, which is expensive.
  *   This threshold ensures consolidation only runs when there are enough rules to benefit.
- *
- * Dependants:
- *   - consolidate — checks this threshold before attempting consolidation.
  * </Summary>
  */
 export const CONSOLIDATE_MIN_RULES = 20;
@@ -69,9 +53,6 @@ export const CONSOLIDATE_MIN_RULES = 20;
  * How it fits in the system:
  *   Used by the tokenise function to filter out noise words that don't contribute
  *   to meaningful similarity comparisons (e.g., "the", "and", "for").
- *
- * Dependants:
- *   - tokenise — filters out these words when extracting meaningful tokens.
  * </Summary>
  */
 export const STOP_WORDS = new Set([

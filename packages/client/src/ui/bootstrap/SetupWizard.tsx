@@ -44,14 +44,6 @@ type Step = "server" | "port" | "password";
  *   Sits between the App component and configuration storage. Guides users
  *   through three sequential steps (server address, port, password) to create
  *   initial configuration when no config file exists.
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering and state management.
- *   - getDefaultConfig — retrieves default configuration values.
- *   - saveConfig — persists completed configuration to disk.
- *
- * Dependants:
- *   - App component — renders SetupWizard when no existing config is found.
  * </Summary>
  */
 export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
@@ -86,17 +78,10 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
    *   6. Invoke completion callback to signal setup is finished.
    *
    * Parameters:
-   *   @param {string} passwordValue — The password string entered by user.
+   *   @param passwordValue - The password string entered by user.
    *
    * Returns:
    *   void — called for side effects (config save and callback invocation).
-   *
-   * Dependencies:
-   *   - getDefaultConfig — retrieves base configuration defaults.
-   *   - saveConfig — persists final configuration to disk.
-   *
-   * Dependants:
-   *   - SetupWizard password input onSubmit — triggers when user submits password.
    * </Summary>
    */
   const finish = (passwordValue: string): void => {

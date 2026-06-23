@@ -9,18 +9,6 @@
  *   coordination. It breaks down user tasks into executable DAG plans of subtasks,
  *   provides guidance when agents escalate, and synthesizes multi-agent results
  *   into a final coherent answer. This class never touches RSocket or TCP directly.
- *
- * Dependencies:
- *   - IOllamaClient — chat and chatStream for model interactions.
- *   - IConfigManager — advisor model and temperature settings.
- *   - advisorThink.js — parsing and validation functions.
- *   - advisorHelpers.js — JSON extraction and plan normalization.
- *   - planHelpers.js — DAG validation and constraint application.
- *   - advisorErrors.js — TaskSkippedError for plan review cancellation.
- *
- * Dependants:
- *   - AdvisorOrchestrator — uses Advisor.plan and Advisor.combine.
- *   - Agent — uses Advisor.advise on ESCALATE.
  * </Summary>
  */
 
@@ -69,14 +57,6 @@ export { TaskSkippedError } from "./advisorErrors.js";
  *   provides guidance when worker agents get stuck, and synthesizes results from multiple
  *   agent executions into a final answer. It uses a specialized Ollama model configured
  *   for planning and coordination rather than execution.
- *
- * Dependencies:
- *   - IOllamaClient — for model API calls.
- *   - IConfigManager — for model configuration.
- *
- * Dependants:
- *   - AdvisorOrchestrator — creates advisor instance and calls plan/combine.
- *   - Agent — calls advise method on escalation.
  * </Summary>
  */
 export class Advisor {
@@ -86,7 +66,7 @@ export class Advisor {
    * How it does it (step by step):
    *   1. Store dependencies (ollama client and config manager) as private readonly fields.
    *
-   * @param {{ ollama: IOllamaClient; config: IConfigManager }} deps — Collaborators for model IO and settings.
+   * @param deps - Collaborators for model IO and settings.
    */
   constructor(
     private readonly dependencies: {
@@ -112,30 +92,21 @@ export class Advisor {
    *   8. If all loops exhausted without success, throw error.
    *
    * Parameters:
-   *   @param {string} task — Original user task string.
-   *   @param {string} contextHeader — Memory context block (may be empty).
-   *   @param {string} skillContent — Selected skill file body (may be empty).
-   *   @param {TaskModelOverrides} overrides — Optional model/temperature overrides.
-   *   @param {AdvisorPlanHooks} hooks — Optional lifecycle hooks for observation.
-   *   @param {MaxAgentsParam} maxAgents — The max_agents constraint.
+   *   @param task - Original user task string.
+   *   @param contextHeader - Memory context block (may be empty).
+   *   @param skillContent - Selected skill file body (may be empty).
+   *   @param overrides - Optional model/temperature overrides.
+   *   @param hooks - Optional lifecycle hooks for observation.
+   *   @param maxAgents - The max_agents constraint.
    *
    * Returns:
-   *   @returns {Promise<AdvisorPlan>} — Executable subtask DAG.
+   *   @returns Executable subtask DAG.
    *
    * Throws:
    *   @throws {ValidationError} — When JSON is missing or invalid.
    *   @throws {OrchestrationError} — When maximum verification loops exceeded.
    *   @throws {TaskSkippedError} — When user skips task at plan review.
    *
-   * Dependencies:
- *   - IConfigManager.getAdvisorModel, getAdvisorTemperature — model settings.
-   *   - IOllamaClient.chat — blocking completion.
-   *   - extractJsonObject, normaliseAdvisorPlan — parse pipeline.
-   *   - parseVerifyGaps, parseCommandPlanGaps — validation helpers.
-   *   - applyMaxAgentsConstraint — applies agent count limit.
-   *
-   * Dependants:
- *   - AdvisorOrchestrator.runTask — first decomposition step.
    </Summary>
    */
   plan = async (
@@ -372,20 +343,14 @@ export class Advisor {
    *   4. Returns the guidance text for the agent to use.
    *
    * Parameters:
-   *   @param {string} subtask — The subtask the agent was executing.
-   *   @param {string} reason — Text after the ESCALATE: prefix.
-   *   @param {Message[]} history — Conversation turns built by the agent so far.
-   *   @param {TaskModelOverrides} overrides — Optional model/temperature overrides.
+   *   @param subtask - The subtask the agent was executing.
+   *   @param reason - Text after the ESCALATE: prefix.
+   *   @param history - Conversation turns built by the agent so far.
+   *   @param overrides - Optional model/temperature overrides.
    *
    * Returns:
-   *   @returns {Promise<string>} — Guidance to append as a new user turn.
+   *   @returns Guidance to append as a new user turn.
    *
-   * Dependencies:
-   *   - IConfigManager.getAdvisorModel, getAdvisorTemperature.
-   *   - IOllamaClient.chat.
-   *
-   * Dependants:
-   *   - Agent.run — escalation loop when agent gets stuck.
    </Summary>
    */
   advise = async (
@@ -439,18 +404,11 @@ export class Advisor {
    *   3. Streams Ollama chat tokens and yields each chunk to the caller.
    *
    * Parameters:
-   *   @param {string} originalTask — User's top-level task string.
-   *   @param {SubtaskResult[]} results — Completed subtask outputs in display order.
+   *   @param originalTask - User's top-level task string.
+   *   @param results - Completed subtask outputs in display order.
    *
    * Returns:
-   *   @returns {AsyncGenerator<string>} — Token strings for the client stream.
-   *
-   * Dependencies:
-   *   - IConfigManager.getAdvisorModel, getAdvisorTemperature.
-   *   - IOllamaClient.chatStream.
-   *
-   * Dependants:
-   *   - AdvisorOrchestrator.runTask — multi-subtask completion path.
+   *   @returns Token strings for the client stream.
    * </Summary>
    */
   async *combine(

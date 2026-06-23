@@ -9,14 +9,6 @@
  *   the advisor's command plan (for classifying shell commands), skill documentation,
  *   and session context. This module assembles all these components into a coherent
  *   system prompt and the initial user message containing the subtask.
- *
- * Dependencies:
- *   - formatCommandPlanBlock — formats command plan for display.
- *   - TOOL_SYSTEM_INSTRUCTION — tool usage rules from toolProtocol.
- *   - types.ts — Message, CommandPlan types.
- *
- * Dependants:
- *   - Agent.run — uses this to build initial messages before starting execution.
  * </Summary>
  */
 
@@ -41,21 +33,13 @@ import { emptyCommandPlan } from "../types.js";
  *   7. Return message array [system, user].
  *
  * Parameters:
- *   @param {string} subtask — The subtask description for the agent to execute.
- *   @param {string} skillContent — Selected skill documentation (may be empty).
- *   @param {string} sessionContext — Session context header (may be empty).
- *   @param {CommandPlan} commandPlan — Command plan with setup/verify/off-limits commands.
+ *   @param subtask - The subtask description for the agent to execute.
+ *   @param skillContent - Selected skill documentation (may be empty).
+ *   @param sessionContext - Session context header (may be empty).
+ *   @param commandPlan - Command plan with setup/verify/off-limits commands.
  *
  * Returns:
  *   {Message[]} — Initial message array [system, user] for agent.
- *
- * Dependencies:
- *   - formatCommandPlanBlock — formats command plan for display.
- *   - TOOL_SYSTEM_INSTRUCTION — tool system prompt with rules.
- *   - emptyCommandPlan — default if command plan not provided.
- *
- * Dependants:
- *   - Agent.run — uses this to build initial messages before starting execution.
  * </Summary>
  */
 export const buildAgentMessages = (

@@ -8,14 +8,6 @@
  *   temperatures, and agent retry limits. This abstraction allows the orchestration layer
  *   to operate without depending on concrete configuration implementations, enabling
  *   easier testing and configuration management.
- *
- * Dependencies:
- *   - None at interface level.
- *
- * Dependants:
- *   - Advisor — uses model and temperature settings for planning/advising.
- *   - Agent — uses model and temperature settings for execution.
- *   - Router command handlers — reads and updates configuration.
  * </Summary>
  */
 
@@ -51,15 +43,7 @@ export interface IConfigManager {
    *   3. Return the advisor model name string.
    *
    * Returns:
-   *   @returns {Promise<string>} — Advisor model id string (e.g., "llama3.1").
-   *
-   * Dependencies:
-   *   - ConfigManager implementation — reads from config storage.
-   *
-   * Dependants:
-   *   - Advisor.plan — uses for planning model.
-   *   - Advisor.advise — uses for escalation guidance model.
-   *   - Advisor.combine — uses for result synthesis model.
+   *   @returns Advisor model id string (e.g., "llama3.1").
    * </Summary>
    */
   getAdvisorModel(): Promise<string>;
@@ -76,13 +60,7 @@ export interface IConfigManager {
    *   3. Return the agent model name string.
    *
    * Returns:
-   *   @returns {Promise<string>} — Agent model id string (e.g., "llama3.1").
-   *
-   * Dependencies:
-   *   - ConfigManager implementation — reads from config storage.
-   *
-   * Dependants:
-   *   - Agent.run — uses for execution model.
+   *   @returns Agent model id string (e.g., "llama3.1").
    * </Summary>
    */
   getAgentModel(): Promise<string>;
@@ -99,14 +77,7 @@ export interface IConfigManager {
    *   3. Return the temperature value (typically low for consistency).
    *
    * Returns:
-   *   @returns {Promise<number>} — Temperature, typically low (e.g., 0.1-0.3 for consistent planning).
-   *
-   * Dependencies:
-   *   - ConfigManager implementation — reads from config storage.
-   *
-   * Dependants:
-   *   - Advisor.plan — uses for planning temperature.
-   *   - Advisor.advise — uses for escalation guidance temperature.
+   *   @returns Temperature, typically low (e.g., 0.1-0.3 for consistent planning).
    * </Summary>
    */
   getAdvisorTemperature(): Promise<number>;
@@ -123,13 +94,7 @@ export interface IConfigManager {
    *   3. Return the temperature value for agent execution.
    *
    * Returns:
-   *   @returns {Promise<number>} — Temperature for execution (typically 0.5-0.7 for creativity).
-   *
-   * Dependencies:
-   *   - ConfigManager implementation — reads from config storage.
-   *
-   * Dependants:
-   *   - Agent.run — uses for execution temperature.
+   *   @returns Temperature for execution (typically 0.5-0.7 for creativity).
    * </Summary>
    */
   getAgentTemperature(): Promise<number>;
@@ -147,13 +112,7 @@ export interface IConfigManager {
    *   4. Return the maximum retry count.
    *
    * Returns:
-   *   @returns {Promise<number>} — Max retry attempts (>= 1).
-   *
-   * Dependencies:
-   *   - ConfigManager implementation — reads from config storage.
-   *
-   * Dependants:
-   *   - Agent.run — uses for escalation retry limit.
+   *   @returns Max retry attempts (>= 1).
    * </Summary>
    */
   getMaxRetries(): Promise<number>;

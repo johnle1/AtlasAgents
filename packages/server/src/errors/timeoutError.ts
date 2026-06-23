@@ -7,12 +7,6 @@ import { AppError } from "./appError.js";
  *
  * How it fits in the system:
  *   Used when an operation exceeds its time limit.
- *
- * Dependencies:
- *   - AppError - base error class.
- *
- * Dependants:
- *   - Timeout handling in long-running operations.
  * </Summary>
  */
 export class TimeoutError extends AppError {

@@ -6,14 +6,6 @@
  *
  * How it fits in the system:
  *   Implements IPreferenceStore for ContextBuilder, PatternExtractor, and memory routes.
- *
- * Dependencies:
- *   - node:fs/promises, node:path, node:crypto — filesystem and ids.
- *   - ../orchestration/interfaces.js — contracts and rule types.
- *   - IOllamaClient, IConfigManager — consolidate only.
- *
- * Dependants:
- *   - ContextBuilder, PatternExtractor.
  * </Summary>
  */
 
@@ -51,13 +43,10 @@ import {
  *   1. Call fs.mkdir with recursive option to create directory and parents.
  *
  * Parameters:
- *   @param {string} dir — Directory path to create.
+ *   @param dir - Directory path to create.
  *
  * Returns:
- *   @returns {Promise<void>} — Resolves when directory exists.
- *
- * Dependants:
- *   - save — ensures target directory exists before writing.
+ *   @returns Resolves when directory exists.
  * </Summary>
  */
 const ensureDir = async (dir: string): Promise<void> => {
@@ -72,14 +61,6 @@ const ensureDir = async (dir: string): Promise<void> => {
  *
  * How it fits in the system:
  *   Implements IPreferenceStore for ContextBuilder, PatternExtractor, and memory routes.
- *
- * Dependencies:
- *   - node:fs/promises, node:path, node:crypto — filesystem and ids.
- *   - ../orchestration/interfaces.js — contracts and rule types.
- *   - IOllamaClient, IConfigManager — consolidate only.
- *
- * Dependants:
- *   - ContextBuilder, PatternExtractor.
  * </Summary>
  */
 export class PreferenceStore implements IPreferenceStore {
@@ -100,9 +81,6 @@ export class PreferenceStore implements IPreferenceStore {
    * Parameters:
    *   @param {string} [rootDir] — Base directory for preferences file.
    *   @param {{ ollama?: IOllamaClient; config?: IConfigManager }} [deps] — Optional advisor dependencies.
-   *
-   * Dependants:
-   *   - Instantiation by ContextBuilder, PatternExtractor, memory routes.
    * </Summary>
    */
   constructor(
@@ -128,13 +106,7 @@ export class PreferenceStore implements IPreferenceStore {
    *   2. Return the rules array (empty if file doesn't exist).
    *
    * Returns:
-   *   @returns {Promise<PreferenceRule[]>} — Array of all stored rules.
-   *
-   * Dependencies:
-   *   - load — reads the preferences file from disk.
-   *
-   * Dependants:
-   *   - ContextBuilder.build — loads all rules to filter for task relevance.
+   *   @returns Array of all stored rules.
    * </Summary>
    */
   getAll = async (): Promise<PreferenceRule[]> => {
@@ -157,16 +129,10 @@ export class PreferenceStore implements IPreferenceStore {
    *   5. Return the sorted array of relevant rules.
    *
    * Parameters:
-   *   @param {Iterable<string>} taskKeywords — Keywords to match against rule topics.
+   *   @param taskKeywords - Keywords to match against rule topics.
    *
    * Returns:
-   *   @returns {Promise<PreferenceRule[]>} — Sorted array of relevant rules by usage frequency.
-   *
-   * Dependencies:
-   *   - getAll — loads all rules from storage.
-   *
-   * Dependants:
-   *   - ContextBuilder.build — retrieves relevant preferences for task context.
+   *   @returns Sorted array of relevant rules by usage frequency.
    * </Summary>
    */
   getForTask = async (
@@ -214,21 +180,10 @@ export class PreferenceStore implements IPreferenceStore {
    *      f. Persist and return the new rule.
    *
    * Parameters:
-   *   @param {NewPreferenceRule} rule — Rule to add or merge.
+   *   @param rule - Rule to add or merge.
    *
    * Returns:
-   *   @returns {Promise<PreferenceRule>} — The added or merged rule.
-   *
-   * Dependencies:
-   *   - load — reads the preferences file.
-   *   - save — persists the updated file.
-   *   - textSimilarity — detects duplicate rules.
-   *   - higherConfidence — merges confidence levels.
-   *   - SIMILARITY_THRESHOLD — threshold for deduplication.
-   *
-   * Dependants:
-   *   - PatternExtractor — saves learned rules from task experiences.
-   *   - Memory routes — allows manual rule creation/updates.
+   *   @returns The added or merged rule.
    * </Summary>
    */
   add = async (rule: NewPreferenceRule): Promise<PreferenceRule> => {
@@ -307,18 +262,11 @@ export class PreferenceStore implements IPreferenceStore {
    *   7. Return the updated rule.
    *
    * Parameters:
-   *   @param {string} ruleId — ID of the rule to update.
-   *   @param {Partial<PreferenceRule>} newRule — Partial rule object with fields to update.
+   *   @param ruleId - ID of the rule to update.
+   *   @param newRule - Partial rule object with fields to update.
    *
    * Returns:
-   *   @returns {Promise<PreferenceRule | null>} — Updated rule or null if not found.
-   *
-   * Dependencies:
-   *   - load — reads the preferences file.
-   *   - save — persists the updated file.
-   *
-   * Dependants:
-   *   - Future memory routes — allows manual rule updates.
+   *   @returns Updated rule or null if not found.
    * </Summary>
    */
   update = async (
@@ -365,17 +313,10 @@ export class PreferenceStore implements IPreferenceStore {
    *   7. Return the count of removed rules.
    *
    * Parameters:
-   *   @param {string} topic — Topic string to match against rule topics.
+   *   @param topic - Topic string to match against rule topics.
    *
    * Returns:
-   *   @returns {Promise<number>} — Number of rules deleted.
-   *
-   * Dependencies:
-   *   - load — reads the preferences file.
-   *   - save — persists the updated file.
-   *
-   * Dependants:
-   *   - Future memory routes — allows manual rule deletion by topic.
+   *   @returns Number of rules deleted.
    * </Summary>
    */
   deleteByTopic = async (topic: string): Promise<number> => {
@@ -422,19 +363,7 @@ export class PreferenceStore implements IPreferenceStore {
    *   12. Persist the consolidated rules array to disk via save().
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves after consolidation attempt.
-   *
-   * Dependencies:
-   *   - load — reads the preferences file.
-   *   - save — persists the consolidated rules.
-   *   - IOllamaClient — queries advisor model for consolidation.
-   *   - IConfigManager — gets advisor model and temperature.
-   *   - extractJsonArray — parses advisor response.
-   *   - normaliseRule — validates consolidated rules.
-   *   - CONSOLIDATE_MIN_RULES — threshold for consolidation.
-   *
-   * Dependants:
-   *   - Future memory routes — triggers consolidation when rule count is high.
+   *   @returns Resolves after consolidation attempt.
    * </Summary>
    */
   consolidate = async (): Promise<void> => {
@@ -523,17 +452,10 @@ export class PreferenceStore implements IPreferenceStore {
    *   6. Return true if a rule was removed, false otherwise.
    *
    * Parameters:
-   *   @param {string} id — ID of the rule to remove.
+   *   @param id - ID of the rule to remove.
    *
    * Returns:
-   *   @returns {Promise<boolean>} — True if rule was removed, false if not found.
-   *
-   * Dependencies:
-   *   - load — reads the preferences file.
-   *   - save — persists the updated file.
-   *
-   * Dependants:
-   *   - Future memory routes — allows manual rule deletion.
+   *   @returns True if rule was removed, false if not found.
    * </Summary>
    */
   remove = async (id: string): Promise<boolean> => {
@@ -566,13 +488,7 @@ export class PreferenceStore implements IPreferenceStore {
    *   3. Return after write completes.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves after empty file is persisted.
-   *
-   * Dependencies:
-   *   - save — persists the empty file.
-   *
-   * Dependants:
-   *   - Future memory routes — allows manual store reset.
+   *   @returns Resolves after empty file is persisted.
    * </Summary>
    */
   clear = async (): Promise<void> => {
@@ -596,17 +512,10 @@ export class PreferenceStore implements IPreferenceStore {
    *   6. Return after write completes.
    *
    * Parameters:
-   *   @param {string} id — ID of the rule to mark as applied.
+   *   @param id - ID of the rule to mark as applied.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves after update attempt.
-   *
-   * Dependencies:
-   *   - load — reads the preferences file.
-   *   - save — persists the updated file.
-   *
-   * Dependants:
-   *   - Future ContextBuilder — tracks rule application.
+   *   @returns Resolves after update attempt.
    * </Summary>
    */
   markApplied = async (id: string): Promise<void> => {
@@ -642,14 +551,7 @@ export class PreferenceStore implements IPreferenceStore {
    *   7. Return the normalized PreferencesFile.
    *
    * Returns:
-   *   @returns {Promise<PreferencesFile>} — Normalized preferences file with valid rules.
-   *
-   * Dependencies:
-   *   - normaliseFile — validates the file structure.
-   *   - node:fs/promises — filesystem operations.
-   *
-   * Dependants:
-   *   - getAll, getForTask, add, update, deleteByTopic, consolidate, remove, clear, markApplied — all read the file.
+   *   @returns Normalized preferences file with valid rules.
    * </Summary>
    */
   private load = async (): Promise<PreferencesFile> => {
@@ -698,18 +600,10 @@ export class PreferenceStore implements IPreferenceStore {
    *   9. This guarantees no reader ever sees a partially-written preferences file.
    *
    * Parameters:
-   *   @param {PreferencesFile} file — The preferences file object to persist.
+   *   @param file - The preferences file object to persist.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves after atomic write completes.
-   *
-   * Dependencies:
-   *   - ensureDir — creates directory if needed.
-   *   - node:fs/promises — filesystem operations.
-   *   - node:crypto — generates unique temp file names.
-   *
-   * Dependants:
-   *   - add, update, deleteByTopic, consolidate, remove, clear, markApplied — all persist changes.
+   *   @returns Resolves after atomic write completes.
    * </Summary>
    */
   private save = async (preferencesFile: PreferencesFile): Promise<void> => {

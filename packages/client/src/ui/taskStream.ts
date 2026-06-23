@@ -7,17 +7,6 @@
  *   Manages the execution of user tasks through the RSocket connection. It handles streaming
  *   text tokens, status frames, and plan confirmations.
  *   This is the main bridge between the server-side task execution and the client-side UI.
- *
- * Dependencies:
- *   - Connection — provides the RSocket connection for task execution.
- *   - loadConfig — provides configuration for agent settings.
- *   - formatAdvisorThinkForDisplay — formats advisor think blocks for display.
- *   - agentStatus — manages task activity tracking.
- *   - uiBridge — provides UI bridge functions for display and state management.
- *   - spinnerSync — provides spinner state mapping.
- *
- * Dependants:
- *   - AppContext — calls this function to execute user tasks.
  * </Summary>
  */
 
@@ -62,21 +51,12 @@ import type { PlanDecision } from "./types.js";
  *   12. In finally block, clean up state and reset UI.
  *
  * Parameters:
- * @param {Connection} connection — The RSocket connection for server communication.
- * @param {string} task — The user task description to execute.
- * @param {MaxAgentsParam} maxAgents — The maximum number of agents to use (default from config).
+ * @param connection - The RSocket connection for server communication.
+ * @param task - The user task description to execute.
+ * @param maxAgents - The maximum number of agents to use (default from config).
  *
  * Returns:
- * @returns {Promise<void>} — Resolves when task execution completes.
- *
- * Dependencies:
- *   - Connection — sends task execution request to server.
- *   - uiBridge — manages UI state and display.
- *   - spinnerSync — provides spinner state mapping.
- *   - formatAdvisorThinkForDisplay — formats think blocks.
- *
- * Dependants:
- *   - AppContext — calls this function to execute user tasks.
+ * @returns Resolves when task execution completes.
  * </Summary>
  */
 export const runTaskStream = async (

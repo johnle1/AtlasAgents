@@ -39,14 +39,6 @@ type Props = {
  *   Sits alongside AgentStatusBox to provide detailed task-level view of
  *   an agent's work. Shows the task queue, completion status, and current
  *   activity message. Limits display to prevent UI overcrowding.
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering and state management.
- *   - resolveTaskLifecycleVisual — determines visual indicators per task state.
- *   - getWorkingFrameMs — provides animation timing for running tasks.
- *
- * Dependants:
- *   - Main UI components — render AgentTaskBoard for each active agent.
  * </Summary>
  */
 export const AgentTaskBoard: React.FC<Props> = ({ board }) => {
@@ -79,12 +71,6 @@ export const AgentTaskBoard: React.FC<Props> = ({ board }) => {
    *
    * Returns:
    *   void — called for side effects (timer management and state updates).
-   *
-   * Dependencies:
-   *   - getWorkingFrameMs — provides animation interval timing.
-   *
-   * Dependants:
-   *   None (React useEffect hook, called by React on render).
    * </Summary>
    */
   useEffect(() => {

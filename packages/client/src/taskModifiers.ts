@@ -103,18 +103,11 @@ const TRIGGER_LIST = Object.keys(TRIGGER_WORDS) as TriggerWord[];
  *   8. If no whole word match found after full scan, return false.
  *
  * Parameters:
- *   @param {string} raw — The raw task text to search in.
- *   @param {TriggerWord} word — The trigger word to look for.
+ *   @param raw - The raw task text to search in.
+ *   @param word - The trigger word to look for.
  *
  * Returns:
- *   @returns {boolean} — True if word appears as a whole word, false otherwise.
- *
- * Dependencies:
- *   - TRIGGER_WORDS — defines the trigger word strings.
- *
- * Dependants:
- *   - countTriggers — uses this to count trigger word occurrences.
- *   - parseTaskModifiers — uses this to find trigger words in task text.
+ *   @returns True if word appears as a whole word, false otherwise.
  * </Summary>
  */
 const isWordBoundaryTrigger = (raw: string, word: TriggerWord): boolean => {
@@ -183,17 +176,10 @@ const isWordBoundaryTrigger = (raw: string, word: TriggerWord): boolean => {
  *   4. Return the total count.
  *
  * Parameters:
- *   @param {string} raw — The raw task text to count triggers in.
+ *   @param raw - The raw task text to count triggers in.
  *
  * Returns:
- *   @returns {number} — The number of trigger words found as whole words.
- *
- * Dependencies:
- *   - TRIGGER_LIST — provides the list of trigger words to check.
- *   - isWordBoundaryTrigger — checks if each trigger word is a whole word.
- *
- * Dependants:
- *   - None (exported for potential validation use).
+ *   @returns The number of trigger words found as whole words.
  * </Summary>
  */
 export const countTriggers = (raw: string): number =>
@@ -216,21 +202,11 @@ export const countTriggers = (raw: string): number =>
  *   7. If no trigger word found, return default config settings.
  *
  * Parameters:
- *   @param {string} raw — The raw task text that may contain trigger words.
+ *   @param raw - The raw task text that may contain trigger words.
  *
  * Returns:
- *   @returns {TaskModifiers} — Object with maxAgents, modeLabel, clean text,
+ *   @returns Object with maxAgents, modeLabel, clean text,
  *                              and triggerFound fields.
- *
- * Dependencies:
- *   - TRIGGER_LIST — provides trigger words to search for.
- *   - TRIGGER_WORDS — provides configuration for each trigger word.
- *   - isWordBoundaryTrigger — checks if trigger word is a whole word.
- *   - loadConfig — provides default agentCap when no trigger found.
- *
- * Dependants:
- *   - Connection.sendTask — uses maxAgents and clean from returned object.
- *   - formatModeNotice — uses modeLabel and maxAgents for UI display.
  * </Summary>
  */
 export const parseTaskModifiers = (raw: string): TaskModifiers => {
@@ -298,16 +274,10 @@ export const parseTaskModifiers = (raw: string): TaskModifiers => {
  *   7. Return the formatted notice string.
  *
  * Parameters:
- *   @param {TaskModifiers} modifiers — The parsed task modifiers object.
+ *   @param modifiers - The parsed task modifiers object.
  *
  * Returns:
- *   @returns {string | null} — Formatted notice string, or null if no mode.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Renderer — uses this to display mode notice in the CLI.
+ *   @returns Formatted notice string, or null if no mode.
  * </Summary>
  */
 export const formatModeNotice = (modifiers: TaskModifiers): string | null => {

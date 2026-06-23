@@ -18,13 +18,6 @@
  *   - AbortError: Operation intentionally aborted
  *   - ConfigurationError: Invalid or missing configuration
  *   - OrchestrationError: Agent orchestration and execution failures
- *
- * Dependencies:
- *   - All error classes in the errors directory.
- *
- * Dependants:
- *   - Application code that needs to throw or catch typed errors.
- *   - Error handling middleware and logging systems.
  * </Summary>
  */
 

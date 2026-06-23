@@ -7,12 +7,6 @@
  *   Defines advisor-specific errors that can occur during planning and execution.
  *   Currently only contains TaskSkippedError, but provides a namespace for
  *   future advisor-specific error types.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - advisor.ts — throws TaskSkippedError when user skips task.
  * </Summary>
  */
 
@@ -26,13 +20,6 @@
  *   This is a controlled cancellation that indicates the task should not proceed
  *   without starting any agents. It's different from a normal error because it
  *   represents a deliberate user decision rather than a failure.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Advisor.plan — throws when reviewPlan returns skip decision.
- *   - AdvisorOrchestrator.runTask — catches and handles as user cancellation.
  * </Summary>
  */
 export class TaskSkippedError extends Error {

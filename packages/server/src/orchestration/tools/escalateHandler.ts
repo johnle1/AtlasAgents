@@ -13,18 +13,11 @@
  *   7. Return observation with guidance.
  *
  * Parameters:
- *   @param {AgentToolCall} tool - Tool call with escalation reason.
- *   @param {ToolHandlerContext} ctx - Execution context.
+ *   @param tool - Tool call with escalation reason.
+ *   @param ctx - Execution context.
  *
  * Returns:
- *   @returns {ToolExecutionResult} - Result with guidance observation or failure.
- *
- * Dependencies:
- *   - Advisor - for providing guidance on escalation.
- *   - IExperienceRecorder - for logging escalations.
- *
- * Dependants:
- *   - Agent.executeTool - uses this handler for escalate tools.
+ *   @returns Result with guidance observation or failure.
  * </Summary>
  */
 

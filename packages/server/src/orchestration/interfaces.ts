@@ -10,14 +10,6 @@
  *   Server bootstrap will eventually construct real classes implementing these
  *   interfaces and inject them into AdvisorOrchestrator. This enables dependency
  *   injection and makes the system more testable and modular.
- *
- * Dependencies:
- *   - types.ts — Message, ChatOptions, OrchestrationOutcome types.
- *
- * Dependants:
- *   - Advisor — constructor depends on IOllamaClient, IConfigManager.
- *   - Agent — constructor depends on IOllamaClient, IWorkspaceManager, IFileProxy.
- *   - AdvisorOrchestrator — constructor depends on all interfaces.
  * </Summary>
  */
 

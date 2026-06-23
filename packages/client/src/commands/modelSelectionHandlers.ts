@@ -8,16 +8,6 @@
  *   It fetches available models from the server, displays them to the user, and allows the user
  *   to select a model. The selected model is then saved to the local configuration and synced to
  *   the server. The banner is also refreshed to reflect the updated configuration.
- *
- * Dependencies:
- *   - config — provides configuration management functions.
- *   - Connection — provides server communication methods.
- *   - PromptPort — provides user prompt interface.
- *   - uiBridge — provides banner refresh function.
- *   - renderer — provides output formatting and display functions.
- *
- * Dependants:
- *   - configHandlers.handleSet — uses these handlers for /set advisor and /set agent commands.
  * </Summary>
  */
 
@@ -51,26 +41,12 @@ import { formatErrorMessage } from "./utils.js";
  *   15. Print a success message to the user.
  *
  * Parameters:
- * @param {"advisor" | "agent"} modelRole — Which configuration field to update ("advisor" for advisorModel, "agent" for agentModel).
- * @param {Connection} connection — RSocket connection for server communication.
- * @param {PromptPort} prompts — Prompt port for user interaction and selection.
+ * @param modelRole - Which configuration field to update ("advisor" for advisorModel, "agent" for agentModel).
+ * @param connection - RSocket connection for server communication.
+ * @param prompts - Prompt port for user interaction and selection.
  *
  * Returns:
- * @returns {Promise<void>} — Promise that resolves after setting the model (called for side effects only).
- *
- * Dependencies:
- *   - Connection.listModels — fetches available model names from server.
- *   - Connection.sendCommand — sends configuration updates to server.
- *   - Connection.updateConfig — updates connection with new configuration.
- *   - updateConfig — writes advisorModel or agentModel to local configuration file.
- *   - promptChoice — prompts user to select from numbered list.
- *   - renderer.printModels — displays numbered list of available models.
- *   - renderer.printError — displays error messages.
- *   - renderer.printSuccess — displays success messages.
- *   - refreshInkBanner — refreshes the banner to show updated configuration.
- *
- * Dependants:
- *   - configHandlers.handleSet — calls this for /set advisor and /set agent subcommands.
+ * @returns Promise that resolves after setting the model (called for side effects only).
  * </Summary>
  */
 export const handleSetModel = async (

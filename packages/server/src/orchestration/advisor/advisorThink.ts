@@ -9,15 +9,6 @@
  *   the planning process. These functions parse that block to extract structured
  *   data like command plans, risk lists, and numbered plan steps. This data is
  *   used to validate and build the executable AdvisorPlan.
- *
- * Dependencies:
- *   - maxAgents.ts — MaxAgentsParam type and constraint text.
- *   - planHelpers.ts — deriveExecution for plan validation.
- *   - types.ts — AdvisorPlan, CommandPlan, PlannedSubtask, PlanReviewResponse types.
- *
- * Dependants:
- *   - advisorHelpers.ts — re-exports these functions for use in advisor.ts.
- *   - advisor.ts — uses these functions to parse and validate advisor output.
  * </Summary>
  */
 
@@ -39,13 +30,6 @@ import { deriveExecution } from "../planHelpers.js";
  * How it fits in the system:
  *   The advisor model wraps its reasoning in <advisor-think> blocks.
  *   This regex extracts the content between the tags for parsing.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - extractAdvisorThink — extracts think block content.
- *   - stripAdvisorThink — removes think block from output.
  * </Summary>
  */
 const ADVISOR_THINK_RE = /<advisor-think>([\s\S]*?)<\/advisor-think>/i;
@@ -60,12 +44,6 @@ const ADVISOR_THINK_RE = /<advisor-think>([\s\S]*?)<\/advisor-think>/i;
  *   This template is inserted into the system prompt to tell the advisor model
  *   what structure to use for its reasoning. The template includes placeholders for
  *   max_agents constraint and agent assignment rules that are filled in dynamically.
- *
- * Dependencies:
- *   - maxAgents.ts — maxAgentsConstraintText for the MAX_AGENTS placeholder.
- *
- * Dependants:
- *   - buildAdvisorThinkInstruction — fills in placeholders to create instruction.
  * </Summary>
  */
 const ADVISOR_THINK_TEMPLATE = `Before the JSON plan, write a structured <advisor-think> block:
@@ -141,16 +119,10 @@ AGENT ASSIGNMENT RULES:
  *   5. Default to assigning by task structure.
  *
  * Parameters:
- *   @param {MaxAgentsParam} maxAgents — The max_agents constraint.
+ *   @param maxAgents - The max_agents constraint.
  *
  * Returns:
  *   {string} — Agent assignment rules as a string.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - buildAdvisorThinkInstruction — fills AGENT_RULES placeholder.
  * </Summary>
  */
 const agentAssignmentRules = (maxAgents: MaxAgentsParam): string => {
@@ -179,18 +151,10 @@ const agentAssignmentRules = (maxAgents: MaxAgentsParam): string => {
  *   2. Replace {AGENT_RULES} placeholder with assignment rules.
  *
  * Parameters:
- *   @param {MaxAgentsParam} maxAgents — The max_agents constraint.
+ *   @param maxAgents - The max_agents constraint.
  *
  * Returns:
  *   {string} — Complete advisor think instruction.
- *
- * Dependencies:
- *   - ADVISOR_THINK_TEMPLATE — template with placeholders.
- *   - maxAgentsConstraintText — fills MAX_AGENTS placeholder.
- *   - agentAssignmentRules — fills AGENT_RULES placeholder.
- *
- * Dependants:
- *   - Advisor.plan — includes in system prompt for advisor model.
  * </Summary>
  */
 export const buildAdvisorThinkInstruction = (
@@ -210,12 +174,6 @@ export const buildAdvisorThinkInstruction = (
  * How it fits in the system:
  *   Kept for backward compatibility. New code should use
  *   buildAdvisorThinkInstruction(maxAgents) to respect the constraint.
- *
- * Dependencies:
- *   - buildAdvisorThinkInstruction — called with default maxAgents.
- *
- * Dependants:
- *   - None (deprecated).
  * </Summary>
  */
 export const ADVISOR_THINK_INSTRUCTION = buildAdvisorThinkInstruction(3);
@@ -231,17 +189,10 @@ export const ADVISOR_THINK_INSTRUCTION = buildAdvisorThinkInstruction(3);
  *   3. Return null if no match found.
  *
  * Parameters:
- *   @param {string} raw — Raw model output containing think block.
+ *   @param raw - Raw model output containing think block.
  *
  * Returns:
  *   {string | null} — The think block content, or null if not found.
- *
- * Dependencies:
- *   - ADVISOR_THINK_RE — regex pattern for matching think blocks.
- *
- * Dependants:
- *   - Advisor.plan — extracts reasoning for validation and metadata.
- *   - stripModelThinkingBlocks — removes think block from output.
  * </Summary>
  */
 export const extractAdvisorThink = (raw: string): string | null => {
@@ -259,16 +210,10 @@ export const extractAdvisorThink = (raw: string): string | null => {
  *   2. Return the result with whitespace trimmed.
  *
  * Parameters:
- *   @param {string} raw — Raw model output containing think block.
+ *   @param raw - Raw model output containing think block.
  *
  * Returns:
  *   {string} — Model output with think block removed.
- *
- * Dependencies:
- *   - ADVISOR_THINK_RE — regex pattern for matching think blocks.
- *
- * Dependants:
- *   - stripModelThinkingBlocks — removes all thinking blocks.
  * </Summary>
  */
 export const stripAdvisorThink = (raw: string): string => {
@@ -288,10 +233,6 @@ export const stripAdvisorThink = (raw: string): string => {
  * Fields:
  *   hasGaps — Whether gaps were detected in the verification section.
  *   missingSummary — Human-readable description of what's missing.
- *
- * Dependants:
- *   - parseVerifyGaps — returns this type to report verification status.
- *   - Advisor.plan — uses to validate plan completeness before acceptance.
  * </Summary>
  */
 export type VerifyGaps = {
@@ -311,12 +252,6 @@ export type VerifyGaps = {
  *   Anchored at the start so a genuine gap such as "no error handling
  *   yet" is still flagged, while "No.", "None;", "N/A", "Nothing missing", or
  *   "No, all covered." are correctly treated as no-gap answers.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - parseVerifyGaps — determines if missing steps are real gaps or negations.
  * </Summary>
  */
 const NO_GAP_ANSWER_RE =
@@ -334,16 +269,10 @@ const NO_GAP_ANSWER_RE =
  *   4. Build gap summary string if gaps exist.
  *
  * Parameters:
- *   @param {string} thinkText — The advisor-think block content to parse.
+ *   @param thinkText - The advisor-think block content to parse.
  *
  * Returns:
  *   {VerifyGaps} — Object indicating whether gaps exist and what's missing.
- *
- * Dependencies:
- *   - NO_GAP_ANSWER_RE — distinguishes real gaps from negations.
- *
- * Dependants:
- *   - Advisor.plan — validates plan completeness.
  * </Summary>
  */
 export const parseVerifyGaps = (thinkText: string): VerifyGaps => {
@@ -386,16 +315,10 @@ export const parseVerifyGaps = (thinkText: string): VerifyGaps => {
  *   2. Check if empty or matches placeholder patterns.
  *
  * Parameters:
- *   @param {string} line — The line to check.
+ *   @param line - The line to check.
  *
  * Returns:
  *   {boolean} — True if the line is a placeholder.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - parseCommandLines — filters out placeholder lines.
  * </Summary>
  */
 const isPlaceholderLine = (line: string): boolean => {
@@ -420,16 +343,10 @@ const isPlaceholderLine = (line: string): boolean => {
  *   5. Trim again.
  *
  * Parameters:
- *   @param {string} line — The line to strip.
+ *   @param line - The line to strip.
  *
  * Returns:
  *   {string} — The line with wrapping removed.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - parseCommandLines — normalizes command lines for parsing.
  * </Summary>
  */
 const stripCommandWrapping = (line: string): string =>
@@ -452,17 +369,10 @@ const stripCommandWrapping = (line: string): string =>
  *   4. Return the list of valid commands.
  *
  * Parameters:
- *   @param {string} section — The section text containing commands.
+ *   @param section - The section text containing commands.
  *
  * Returns:
  *   {string[]} — Array of command strings.
- *
- * Dependencies:
- *   - stripCommandWrapping — normalizes command lines.
- *   - isPlaceholderLine — filters placeholders.
- *
- * Dependants:
- *   - parseCommandPlan — extracts command lists from sections.
  * </Summary>
  */
 const parseCommandLines = (section: string): string[] => {
@@ -489,16 +399,10 @@ const parseCommandLines = (section: string): string[] => {
  *   5. Parse commands from each section.
  *
  * Parameters:
- *   @param {string} thinkText — The advisor-think block content.
+ *   @param thinkText - The advisor-think block content.
  *
  * Returns:
  *   {CommandPlan} — Object containing setup, verify, and run-project command arrays.
- *
- * Dependencies:
- *   - parseCommandLines — parses individual command sections.
- *
- * Dependants:
- *   - Advisor.plan — extracts command classification plan.
  * </Summary>
  */
 export const parseCommandPlan = (thinkText: string): CommandPlan => {
@@ -542,10 +446,6 @@ export const parseCommandPlan = (thinkText: string): CommandPlan => {
  * Fields:
  *   hasGaps — Whether command plan is missing required categories.
  *   missingSummary — Human-readable description of what's missing.
- *
- * Dependants:
- *   - parseCommandPlanGaps — returns this type to report command plan status.
- *   - Advisor.plan — validates command plan completeness.
  * </Summary>
  */
 export type CommandPlanGaps = {
@@ -568,16 +468,10 @@ export type CommandPlanGaps = {
  *   4. Build gap summary string if gaps exist.
  *
  * Parameters:
- *   @param {string} thinkText — The advisor-think block content.
+ *   @param thinkText - The advisor-think block content.
  *
  * Returns:
  *   {CommandPlanGaps} — Object indicating gaps and missing categories.
- *
- * Dependencies:
- *   - parseCommandPlan — extracts command plan for validation.
- *
- * Dependants:
- *   - Advisor.plan — validates command plan completeness.
  * </Summary>
  */
 export const parseCommandPlanGaps = (thinkText: string): CommandPlanGaps => {
@@ -613,16 +507,10 @@ export const parseCommandPlanGaps = (thinkText: string): CommandPlanGaps => {
  *   5. Return the list of risk strings.
  *
  * Parameters:
- *   @param {string} thinkText — The advisor-think block content.
+ *   @param thinkText - The advisor-think block content.
  *
  * Returns:
  *   {string[]} — Array of risk strings (may be empty).
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Advisor.plan — extracts risks for plan metadata.
  * </Summary>
  */
 export const parseRisks = (thinkText: string): string[] => {
@@ -653,12 +541,6 @@ export const parseRisks = (thinkText: string): string[] => {
  *
  * How it fits in the system:
  *   Used to extract individual steps from the DRAFT PLAN or REVISED PLAN sections.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - extractNumberedSteps — matches plan step lines.
  * </Summary>
  */
 const PLAN_STEP_RE = /^\s*\d+\.\s+(.+)$/;
@@ -671,12 +553,6 @@ const PLAN_STEP_RE = /^\s*\d+\.\s+(.+)$/;
  * How it fits in the system:
  *   Used to determine where one plan section ends and another begins.
  *   Matches section headers like VERIFY PLAN, REVISED PLAN, etc.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - extractPlanSection — finds the end of a plan section.
  * </Summary>
  */
 const PLAN_SECTION_END =
@@ -692,16 +568,10 @@ const PLAN_SECTION_END =
  *   2. Check for placeholder patterns.
  *
  * Parameters:
- *   @param {string} text — The plan text to check.
+ *   @param text - The plan text to check.
  *
  * Returns:
  *   {boolean} — True if the text is a placeholder.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - extractNumberedSteps — filters out placeholder steps.
  * </Summary>
  */
 const isPlanPlaceholder = (text: string): boolean => {
@@ -727,17 +597,11 @@ const isPlanPlaceholder = (text: string): boolean => {
  *   4. Return the section content.
  *
  * Parameters:
- *   @param {string} thinkText — The advisor-think block content.
- *   @param {string} header — The section header to extract (e.g., "DRAFT PLAN").
+ *   @param thinkText - The advisor-think block content.
+ *   @param header - The section header to extract (e.g., "DRAFT PLAN").
  *
  * Returns:
  *   {string} — The section content, or empty string if not found.
- *
- * Dependencies:
- *   - PLAN_SECTION_END — detects section boundaries.
- *
- * Dependants:
- *   - parsePlanLines — extracts DRAFT PLAN or REVISED PLAN content.
  * </Summary>
  */
 const extractPlanSection = (thinkText: string, header: string): string => {
@@ -775,17 +639,10 @@ const extractPlanSection = (thinkText: string, header: string): string => {
  *   5. Return the list of step strings.
  *
  * Parameters:
- *   @param {string} section — The plan section text to parse.
+ *   @param section - The plan section text to parse.
  *
  * Returns:
  *   {string[]} — Array of plan step strings.
- *
- * Dependencies:
- *   - PLAN_STEP_RE — matches numbered step lines.
- *   - isPlanPlaceholder — filters out placeholder steps.
- *
- * Dependants:
- *   - parsePlanLines — extracts steps from DRAFT or REVISED PLAN.
  * </Summary>
  */
 const extractNumberedSteps = (section: string): string[] => {
@@ -821,17 +678,10 @@ const extractNumberedSteps = (section: string): string[] => {
  *   3. Otherwise, extract and return steps from DRAFT PLAN section.
  *
  * Parameters:
- *   @param {string} thinkText — The advisor-think block content.
+ *   @param thinkText - The advisor-think block content.
  *
  * Returns:
  *   {string[]} — Array of plan step strings.
- *
- * Dependencies:
- *   - extractPlanSection — extracts plan section content.
- *   - extractNumberedSteps — parses numbered steps from content.
- *
- * Dependants:
- *   - buildPlanFromLines — converts plan lines to PlannedSubtask array.
  * </Summary>
  */
 export const parsePlanLines = (thinkText: string): string[] => {
@@ -863,18 +713,11 @@ export const parsePlanLines = (thinkText: string): string[] => {
  *   6. Set dependencies to previous task (sequential by default).
  *
  * Parameters:
- *   @param {string[]} lines — Array of plan step strings.
- *   @param {MaxAgentsParam} maxAgents — The max_agents constraint.
+ *   @param lines - Array of plan step strings.
+ *   @param maxAgents - The max_agents constraint.
  *
  * Returns:
  *   {PlannedSubtask[]} — Array of PlannedSubtask objects.
- *
- * Dependencies:
- *   - MaxAgentsParam — type for constraint.
- *
- * Dependants:
- *   - Advisor.plan — builds plan from think block when JSON parsing fails.
- *   - applyPlanReview — builds plan from user-edited steps.
  * </Summary>
  */
 export const buildPlanFromLines = (
@@ -941,19 +784,12 @@ export const buildPlanFromLines = (
  *   5. If decision is "implement", return plan unchanged.
  *
  * Parameters:
- *   @param {AdvisorPlan} plan — The original advisor plan.
- *   @param {PlanReviewResponse} review — The user's review response.
- *   @param {MaxAgentsParam} maxAgents — The max_agents constraint.
+ *   @param plan - The original advisor plan.
+ *   @param review - The user's review response.
+ *   @param maxAgents - The max_agents constraint.
  *
  * Returns:
  *   {AdvisorPlan} — The updated plan (original or edited).
- *
- * Dependencies:
- *   - buildPlanFromLines — builds subtasks from edited step lines.
- *   - deriveExecution — calculates execution mode from subtasks.
- *
- * Dependants:
- *   - Advisor.plan — applies user review before returning final plan.
  * </Summary>
  */
 export const applyPlanReview = (

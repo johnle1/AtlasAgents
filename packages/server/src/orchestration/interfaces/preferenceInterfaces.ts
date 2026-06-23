@@ -5,12 +5,6 @@
  *
  * How it fits in the system:
  *   Defines the contract for storing, retrieving, and managing user preference rules.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - PreferenceStore, ContextBuilder, PatternExtractor.
  * </Summary>
  */
 
@@ -114,13 +108,7 @@ export interface IPreferenceStore {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<PreferenceRule[]>} — All rules in stable storage order.
-   *
-   * Dependencies:
-   *   None at interface level.
-   *
-   * Dependants:
-   *   - ContextBuilder.build.
+   *   @returns All rules in stable storage order.
    * </Summary>
    */
   getAll(): Promise<PreferenceRule[]>;
@@ -132,13 +120,10 @@ export interface IPreferenceStore {
    *   Adds or merges a rule (dedup by text similarity >= 0.8).
    *
    * Parameters:
-   *   @param {NewPreferenceRule} rule — Rule fields without id/timesApplied (timestamp optional).
+   *   @param rule - Rule fields without id/timesApplied (timestamp optional).
    *
    * Returns:
-   *   @returns {Promise<PreferenceRule>} — Persisted or merged row.
-   *
-   * Dependants:
-   *   - PatternExtractor, memory routes.
+   *   @returns Persisted or merged row.
    * </Summary>
    */
   add(rule: NewPreferenceRule): Promise<PreferenceRule>;
@@ -150,13 +135,10 @@ export interface IPreferenceStore {
    *   Returns rules whose topics overlap task keywords, sorted by timesApplied desc.
    *
    * Parameters:
-   *   @param {Iterable<string>} taskKeywords — Keyword set from task text.
+   *   @param taskKeywords - Keyword set from task text.
    *
    * Returns:
-   *   @returns {Promise<PreferenceRule[]>} — Matching rules.
-   *
-   * Dependants:
-   *   - ContextBuilder.build.
+   *   @returns Matching rules.
    * </Summary>
    */
   getForTask(taskKeywords: Iterable<string>): Promise<PreferenceRule[]>;
@@ -168,11 +150,11 @@ export interface IPreferenceStore {
    *   Replaces fields on one rule by id.
    *
    * Parameters:
-   *   @param {string} ruleId — Rule id.
-   *   @param {Partial<PreferenceRule>} newRule — Fields to merge.
+   *   @param ruleId - Rule id.
+   *   @param newRule - Fields to merge.
    *
    * Returns:
-   *   @returns {Promise<PreferenceRule | null>} — Updated row or null if id missing.
+   *   @returns Updated row or null if id missing.
    * </Summary>
    */
   update(
@@ -187,10 +169,10 @@ export interface IPreferenceStore {
    *   Removes all rules whose topics array contains the given topic.
    *
    * Parameters:
-   *   @param {string} topic — Topic tag to remove.
+   *   @param topic - Topic tag to remove.
    *
    * Returns:
-   *   @returns {Promise<number>} — Count of rules removed.
+   *   @returns Count of rules removed.
    * </Summary>
    */
   deleteByTopic(topic: string): Promise<number>;
@@ -205,7 +187,7 @@ export interface IPreferenceStore {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<void>} — Completes after optional rewrite.
+   *   @returns Completes after optional rewrite.
    *
    * @throws {Error} — When Ollama/config deps were not injected at construction.
    * </Summary>
@@ -219,13 +201,10 @@ export interface IPreferenceStore {
    *   Removes one rule by id when present.
    *
    * Parameters:
-   *   @param {string} id — Rule id to delete.
+   *   @param id - Rule id to delete.
    *
    * Returns:
-   *   @returns {Promise<boolean>} — True when a row was removed.
-   *
-   * Dependants:
-   *   - Future memory routes.
+   *   @returns True when a row was removed.
    * </Summary>
    */
   remove(id: string): Promise<boolean>;
@@ -240,10 +219,7 @@ export interface IPreferenceStore {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<void>} — Completes after atomic write.
-   *
-   * Dependants:
-   *   - Future memory routes.
+   *   @returns Completes after atomic write.
    * </Summary>
    */
   clear(): Promise<void>;
@@ -255,13 +231,10 @@ export interface IPreferenceStore {
    *   Increments timesApplied for one rule (no-op when id missing).
    *
    * Parameters:
-   *   @param {string} id — Rule id to bump.
+   *   @param id - Rule id to bump.
    *
    * Returns:
-   *   @returns {Promise<void>} — Completes after persistence.
-   *
-   * Dependants:
-   *   - Future learning hooks.
+   *   @returns Completes after persistence.
    * </Summary>
    */
   markApplied(id: string): Promise<void>;

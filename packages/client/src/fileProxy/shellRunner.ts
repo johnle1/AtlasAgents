@@ -18,18 +18,11 @@ import type { ShellResult } from "./types.js";
  *   9. Return the complete shell result with stdout, stderr, and exit code.
  *
  * Parameters:
- *   @param {string} command — The shell command to execute (e.g., "ls -la", "git status").
- *   @param {string} cwd — The working directory in which to execute the command.
+ *   @param command - The shell command to execute (e.g., "ls -la", "git status").
+ *   @param cwd - The working directory in which to execute the command.
  *
  * Returns:
- *   @returns {Promise<ShellResult>} — Object containing stdout string, stderr string, and exit code.
- *
- * Dependencies:
- *   - node:child_process — provides spawn() for process creation.
- *
- * Dependants:
- *   - Proxy dispatch context — provides this as the runShell utility for command execution.
- *   - Command handlers — use this to execute shell commands safely.
+ *   @returns Object containing stdout string, stderr string, and exit code.
  * </Summary>
  */
 export const runShell = (

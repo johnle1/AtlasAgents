@@ -39,18 +39,6 @@ export type { PullProgress, TaskFrame } from "../frames.js";
  *   Sits between the CLI input loop (index.ts / CommandHandler) and the
  *   server. All server communication flows through this class so transport
  *   logic is centralised in one place.
- *
- * Dependencies:
- *   - RSocketConnector — establishes the RSocket session.
- *   - TcpClientTransport — TCP transport layer under RSocket.
- *   - commands.js, streaming.js — wire-level send helpers.
- *   - utils.js — auth metadata and socket guard helpers.
- *   - fileResponder.js — handles server-initiated file operations.
- *
- * Dependants:
- *   - index.ts main() — creates a Connection instance on startup.
- *   - CommandHandler — calls listModels, syncSkills, getMemory, etc.
- *   - taskStream.runTaskStream — calls sendTask for user tasks.
  * </Summary>
  */
 export class Connection {
@@ -92,17 +80,12 @@ export class Connection {
    *   3. Returns a function that removes the callback from the set.
    *
    * Parameters:
-   *   @param {StatusListener} statusListenerCallback — Callback invoked with the new status string.
+   *   @param statusListenerCallback - Callback invoked with the new status string.
    *
    * Returns:
-   *   @returns {() => void} — Call this to unsubscribe.
+   *   @returns Call this to unsubscribe.
    *
-   * Dependencies:
    *   None.
-   *
-   * Dependants:
-   *   - index.ts main() — subscribes to print connection status in the CLI.
-   *   - App.tsx — drives ConnectionStatusLine in the Ink UI.
    * </Summary>
    */
   onConnectionStatus = (statusListenerCallback: StatusListener): (() => void) =>
@@ -142,16 +125,9 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when connected.
+   *   @returns Resolves when connected.
    *
    * @throws {Error} — When the timeout elapses without a successful connection.
-   *
-   * Dependencies:
-   *   - Connection.connect — attempts to open the TCP + RSocket session.
-   *
-   * Dependants:
-   *   - Connection.sendCommand — waits for connection before sending.
-   *   - Connection.sendTask — waits for connection before streaming.
    * </Summary>
    */
   private waitUntilConnected = async (): Promise<void> => {
@@ -214,20 +190,9 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when the connection is established.
+   *   @returns Resolves when the connection is established.
    *
    * @throws {Error} — When TCP connection or RSocket handshake fails.
-   *
-   * Dependencies:
-   *   - TcpClientTransport — opens the raw TCP socket.
-   *   - RSocketConnector — performs the RSocket SETUP handshake.
-   *   - createFileResponder — registers server-initiated file request handler.
-   *
-   * Dependants:
-   *   - index.ts main() — calls await conn.connect() on startup.
-   *   - Connection.waitUntilConnected — retries this on failure.
-   *   - Connection.scheduleReconnect — calls this after backoff delay.
-   *   - Connection.reload — calls this after closing the old socket.
    * </Summary>
    */
   connect = async (): Promise<void> => {
@@ -339,11 +304,7 @@ export class Connection {
    * Returns:
    *   void — called for side effects only.
    *
-   * Dependencies:
    *   None (uses clearTimeout).
-   *
-   * Dependants:
-   *   - Connection.reload — clears timer before intentional close.
    * </Summary>
    */
   private clearReconnectTimer = (): void => {
@@ -367,16 +328,12 @@ export class Connection {
    *   1. Stores the proxy reference for use in the RSocket responder callback.
    *
    * Parameters:
-   *   @param {LocalFileProxy} proxy — The file proxy instance.
+   *   @param proxy - The file proxy instance.
    *
    * Returns:
    *   void — called for side effects only.
    *
-   * Dependencies:
    *   None.
-   *
-   * Dependants:
-   *   - index.ts main() — calls this after creating the LocalFileProxy.
    * </Summary>
    */
   setFileProxy = (proxy: LocalFileProxy): void => {
@@ -405,19 +362,11 @@ export class Connection {
    *   9. Establishes a new connection with the updated config.
    *
    * Parameters:
-   *   @param {Config} config — The new configuration object.
+   *   @param config - The new configuration object.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when reconnect completes or immediately
+   *   @returns Resolves when reconnect completes or immediately
    *     if connection settings are unchanged.
-   *
-   * Dependencies:
-   *   - Connection.clearReconnectTimer — cancels pending reconnect attempts.
-   *   - Connection.connect — establishes the new connection.
-   *
-   * Dependants:
-   *   - configHandlers.handleConfig — calls this after user changes server settings.
-   *   - modelSelectionHandlers.handleSet — calls this after model config update.
    * </Summary>
    */
   reload = async (config: Config): Promise<void> => {
@@ -498,13 +447,7 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Buffer} — UTF-8 JSON password metadata for RSocket frames.
-   *
-   * Dependencies:
-   *   - authMetadata — serialises password from config.
-   *
-   * Dependants:
-   *   - All Connection send methods — attach metadata to every frame.
+   *   @returns UTF-8 JSON password metadata for RSocket frames.
    * </Summary>
    */
   private meta = (): Buffer => authMetadata(this.config);
@@ -521,15 +464,9 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {RSocket} — The live RSocket connection object.
+   *   @returns The live RSocket connection object.
    *
    * @throws {Error} — When the connection is not established.
-   *
-   * Dependencies:
-   *   - requireSocket — validates non-null socket.
-   *
-   * Dependants:
-   *   - Connection.sendCommand, sendTask, sendStream — after waitUntilConnected.
    * </Summary>
    */
   private socket = (): RSocket => requireSocket(this.rsocket);
@@ -545,21 +482,13 @@ export class Connection {
    *   2. Delegates to sendCommand in commands.js with socket and metadata.
    *
    * Parameters:
-   *   @param {string} type — Command route e.g. "models.list", "memory.get".
-   *   @param {unknown} payload — JSON-serialisable command payload.
+   *   @param type - Command route e.g. "models.list", "memory.get".
+   *   @param payload - JSON-serialisable command payload.
    *
    * Returns:
-   *   @returns {Promise<TResponse>} — Parsed data field from the server response.
+   *   @returns Parsed data field from the server response.
    *
    * @throws {Error} — When the server returns ok: false or connection fails.
-   *
-   * Dependencies:
-   *   - Connection.waitUntilConnected — ensures live socket.
-   *   - sendCommand — commands.js requestResponse helper.
-   *
-   * Dependants:
-   *   - index.ts — session.exists check on startup.
-   *   - modelHandlers — models.delete, models.show, etc.
    * </Summary>
    */
   sendCommand = async <TResponse>(
@@ -589,13 +518,7 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<InstalledModel[]>} — Array of model metadata objects.
-   *
-   * Dependencies:
-   *   - fetchModelsDetailed — commands.js helper.
-   *
-   * Dependants:
-   *   - modelHandlers.handleModels — list and find subcommands.
+   *   @returns Array of model metadata objects.
    * </Summary>
    */
   fetchModelsDetailed = async () => {
@@ -617,13 +540,7 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<string[]>} — Array of model name strings.
-   *
-   * Dependencies:
-   *   - fetchModels — commands.js helper.
-   *
-   * Dependants:
-   *   - Connection.listModels — deprecated alias.
+   *   @returns Array of model name strings.
    * </Summary>
    */
   fetchModels = async (): Promise<string[]> => {
@@ -644,13 +561,7 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<string[]>} — Array of model names.
-   *
-   * Dependencies:
-   *   - Connection.fetchModels — the real implementation.
-   *
-   * Dependants:
-   *   - modelSelectionHandlers.handleSet — populates the model picker.
+   *   @returns Array of model names.
    * </Summary>
    */
   listModels = async (): Promise<string[]> => this.fetchModels();
@@ -666,17 +577,10 @@ export class Connection {
    *   2. Delegates to syncSkills in commands.js.
    *
    * Parameters:
-   *   @param {SkillPayload[]} skills — Skill objects with name and markdown content.
+   *   @param skills - Skill objects with name and markdown content.
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   - syncSkills — commands.js helper.
-   *
-   * Dependants:
-   *   - skillHandlers.handleSkills — after reading local skill files.
-   *   - SkillManager.autoSync — on startup.
    * </Summary>
    */
   syncSkills = async (skills: SkillPayload[]): Promise<void> => {
@@ -698,13 +602,7 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<MemoryEntry[]>} — Array of topics with their rules.
-   *
-   * Dependencies:
-   *   - getMemory — commands.js helper.
-   *
-   * Dependants:
-   *   - memoryHandlers.handleMemory — show subcommand.
+   *   @returns Array of topics with their rules.
    * </Summary>
    */
   getMemory = async () => {
@@ -723,16 +621,10 @@ export class Connection {
    *   2. Delegates to forgetMemory in commands.js.
    *
    * Parameters:
-   *   @param {string} topic — Topic name to forget e.g. "coding-style".
+   *   @param topic - Topic name to forget e.g. "coding-style".
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   - forgetMemory — commands.js helper.
-   *
-   * Dependants:
-   *   - memoryHandlers.handleMemory — forget subcommand.
    * </Summary>
    */
   forgetMemory = async (topic: string): Promise<void> => {
@@ -755,12 +647,6 @@ export class Connection {
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   - clearMemory — commands.js helper.
-   *
-   * Dependants:
-   *   - memoryHandlers.handleMemory — clear subcommand.
    * </Summary>
    */
   clearMemory = async (): Promise<void> => {
@@ -779,16 +665,10 @@ export class Connection {
    *   2. Delegates to sendTask in streaming.js with config and callbacks.
    *
    * Parameters:
-   *   @param {Object} opts — Task options with text, maxAgents, onFrame, onToken.
+   *   @param opts - Task options with text, maxAgents, onFrame, onToken.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when the server finishes streaming.
-   *
-   * Dependencies:
-   *   - sendTask — streaming.js helper.
-   *
-   * Dependants:
-   *   - taskStream.runTaskStream — primary task execution entry point.
+   *   @returns Resolves when the server finishes streaming.
    * </Summary>
    */
   sendTask = async (taskOptions: {
@@ -827,17 +707,10 @@ export class Connection {
    *   2. Delegates to sendStream in streaming.js.
    *
    * Parameters:
-   *   @param {Object} opts — Operation kind, payload, and onFrame callback.
+   *   @param opts - Operation kind, payload, and onFrame callback.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when the server finishes streaming.
-   *
-   * Dependencies:
-   *   - sendStream — streaming.js helper.
-   *
-   * Dependants:
-   *   - modelHandlers.handleModels — pull subcommand.
-   *   - sessionHandlers.handleExplore — explore subcommand.
+   *   @returns Resolves when the server finishes streaming.
    * </Summary>
    */
   sendStream = async (
@@ -875,18 +748,12 @@ export class Connection {
    *   2. Delegates to respondPlan in commands.js.
    *
    * Parameters:
-   *   @param {string} id — Plan ID from the server frame.
-   *   @param {"implement" | "skip" | "edit"} decision — User's plan decision.
+   *   @param id - Plan ID from the server frame.
+   *   @param decision - User's plan decision.
    *   @param {string[]} [steps] — Modified steps when decision is "edit".
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when the server acknowledges.
-   *
-   * Dependencies:
-   *   - respondPlan — commands.js helper.
-   *
-   * Dependants:
-   *   - taskStream.runTaskStream — plan review prompts in Ink UI.
+   *   @returns Resolves when the server acknowledges.
    * </Summary>
    */
   respondPlan = async (

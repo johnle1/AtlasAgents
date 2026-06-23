@@ -35,13 +35,7 @@ let taskActive = false;
  *   None.
  *
  * Returns:
- *   @returns {boolean} — true if a task is active, false otherwise.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - localFileProxy.handleServerMessage — checks before starting spinners.
+ *   @returns true if a task is active, false otherwise.
  * </Summary>
  */
 export const isTaskActive = (): boolean => taskActive;
@@ -56,17 +50,10 @@ export const isTaskActive = (): boolean => taskActive;
  *   2. This change affects all subsequent spinner operations.
  *
  * Parameters:
- *   @param {boolean} active — true to mark task as active, false to mark as inactive.
+ *   @param active - true to mark task as active, false to mark as inactive.
  *
  * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - taskStream.startStream — sets true when starting a task.
- *   - taskStream.handleResponse — sets false when task completes.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const setTaskActive = (active: boolean): void => {
@@ -87,16 +74,7 @@ export const setTaskActive = (active: boolean): void => {
  *   None.
  *
  * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - uiBridge.isInkActive — checks if Ink system is available.
- *   - uiBridge.setSpinner — clears the spinner by passing null.
- *
- * Dependants:
- *   - agentStatus.beginBlockOutput — stops spinner before text output.
- *   - agentStatus.startAnimated — stops before starting new spinner state.
- *   - localFileProxy.handleServerMessage — stops spinner on task completion.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const stopAnimated = (): void => {
@@ -117,20 +95,11 @@ export const stopAnimated = (): void => {
  *   4. If Ink is active, updates the spinner with the new configuration.
  *
  * Parameters:
- *   @param {SpinnerState["mode"]} mode — The spinner animation mode ("thinking" or "working").
- *   @param {string} label — The text label to display next to the spinner.
+ *   @param mode - The spinner animation mode ("thinking" or "working").
+ *   @param label - The text label to display next to the spinner.
  *
  * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - agentStatus.taskActive — checks if task is currently active.
- *   - uiBridge.isInkActive — checks if Ink system is available.
- *   - uiBridge.setSpinner — updates spinner state.
- *
- * Dependants:
- *   - agentStatus.startThinking — calls with mode="thinking".
- *   - agentStatus.startWorking — calls with mode="working".
+ *   @returns called for side effects only.
  * </Summary>
  */
 const startAnimated = (mode: SpinnerState["mode"], label: string): void => {
@@ -151,16 +120,10 @@ const startAnimated = (mode: SpinnerState["mode"], label: string): void => {
  *   3. Spinner only appears if taskActive is true and Ink is available.
  *
  * Parameters:
- *   @param {string} nextLabel — The text label to display (defaults to "Advisor").
+ *   @param nextLabel - The text label to display (defaults to "Advisor").
  *
  * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - agentStatus.startAnimated — handles the actual spinner update.
- *
- * Dependants:
- *   - localFileProxy.handleServerMessage — starts thinking spinner during analysis.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const startThinking = (nextLabel = "Advisor"): void => {
@@ -178,16 +141,10 @@ export const startThinking = (nextLabel = "Advisor"): void => {
  *   3. Spinner only appears if taskActive is true and Ink is available.
  *
  * Parameters:
- *   @param {string} nextLabel — The text label to display (defaults to "Agent").
+ *   @param nextLabel - The text label to display (defaults to "Agent").
  *
  * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - agentStatus.startAnimated — handles the actual spinner update.
- *
- * Dependants:
- *   - localFileProxy.handleServerMessage — starts working spinner during execution.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const startWorking = (nextLabel = "Agent"): void => {
@@ -208,16 +165,7 @@ export const startWorking = (nextLabel = "Agent"): void => {
  *   None.
  *
  * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - agentStatus.stopAnimated — clears the active spinner.
- *   - uiBridge.isInkActive — checks if Ink system is available.
- *   - process.stdout.write — writes newline when Ink is unavailable.
- *
- * Dependants:
- *   - renderer.formatOutput — prepares terminal before displaying output.
- *   - localFileProxy.handleServerMessage — prepares terminal before block output.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const beginBlockOutput = (): void => {

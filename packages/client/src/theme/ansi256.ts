@@ -7,12 +7,6 @@
  *   Provides color conversion utilities that automatically detect terminal capabilities and use
  *   the best available color mode (24-bit truecolor or 256-color fallback). This ensures
  *   themes display correctly across different terminal emulators.
- *
- * Dependencies:
- *   - node:process — provides environment variables for terminal capability detection.
- *
- * Dependants:
- *   - themeManager — uses these functions to apply theme colors to terminal output.
  * </Summary>
  */
 
@@ -46,19 +40,10 @@ const COLOR_STEPS = [0, 95, 135, 175, 215, 255] as const;
  *   6. Return the RGB values as a tuple.
  *
  * Parameters:
- *   @param {string} hex — The hexadecimal color string (e.g., "#FF5733" or "FF5733").
+ *   @param hex - The hexadecimal color string (e.g., "#FF5733" or "FF5733").
  *
  * Returns:
- *   @returns {[number, number, number]} — Tuple containing red, green, and blue values (0-255).
- *
- * Dependencies:
- *   - None (basic string parsing and hex conversion).
- *
- * Dependants:
- *   - hexToTrueColor — parses hex for truecolor conversion.
- *   - hexToTrueColorBg — parses hex for truecolor background conversion.
- *   - hexToAnsi256 — parses hex for 256-color conversion.
- *   - hexToAnsi256Bg — parses hex for 256-color background conversion.
+ *   @returns Tuple containing red, green, and blue values (0-255).
  * </Summary>
  */
 const parseHexRgb = (hex: string): [number, number, number] => {
@@ -90,14 +75,7 @@ const parseHexRgb = (hex: string): [number, number, number] => {
  *   3. Return true if either environment variable indicates truecolor support.
  *
  * Returns:
- *   @returns {boolean} — True if the terminal supports 24-bit truecolor, false otherwise.
- *
- * Dependencies:
- *   - node:process — provides access to environment variables.
- *
- * Dependants:
- *   - fg — uses this to choose the best color conversion method.
- *   - bg — uses this to choose the best color conversion method.
+ *   @returns True if the terminal supports 24-bit truecolor, false otherwise.
  * </Summary>
  */
 export const supportsTrueColor = (): boolean => {
@@ -128,16 +106,10 @@ export const supportsTrueColor = (): boolean => {
  *   3. Return the escape sequence for terminal display.
  *
  * Parameters:
- *   @param {string} hex — The hexadecimal color string (e.g., "#FF5733").
+ *   @param hex - The hexadecimal color string (e.g., "#FF5733").
  *
  * Returns:
- *   @returns {string} — ANSI escape sequence for 24-bit foreground color (e.g., "\x1b[38;2;255;87;51m").
- *
- * Dependencies:
- *   - parseHexRgb — converts hex to RGB components.
- *
- * Dependants:
- *   - fg — uses this when truecolor is supported.
+ *   @returns ANSI escape sequence for 24-bit foreground color (e.g., "\x1b[38;2;255;87;51m").
  * </Summary>
  */
 /** Exact RGB foreground (iTerm, VS Code / Cursor integrated terminal, most modern emulators). */
@@ -164,16 +136,10 @@ export const hexToTrueColor = (hex: string): string => {
  *   3. Return the escape sequence for terminal display.
  *
  * Parameters:
- *   @param {string} hex — The hexadecimal color string (e.g., "#FF5733").
+ *   @param hex - The hexadecimal color string (e.g., "#FF5733").
  *
  * Returns:
- *   @returns {string} — ANSI escape sequence for 24-bit background color (e.g., "\x1b[48;2;255;87;51m").
- *
- * Dependencies:
- *   - parseHexRgb — converts hex to RGB components.
- *
- * Dependants:
- *   - bg — uses this when truecolor is supported.
+ *   @returns ANSI escape sequence for 24-bit background color (e.g., "\x1b[48;2;255;87;51m").
  * </Summary>
  */
 /** Exact RGB background (iTerm, VS Code / Cursor integrated terminal, most modern emulators). */
@@ -202,17 +168,10 @@ export const hexToTrueColorBg = (hex: string): string => {
  *   5. Return the index of the nearest step.
  *
  * Parameters:
- *   @param {number} value — The color component value (0-255) to find the nearest step for.
+ *   @param value - The color component value (0-255) to find the nearest step for.
  *
  * Returns:
- *   @returns {number} — The index (0-5) of the nearest color step in COLOR_STEPS.
- *
- * Dependencies:
- *   - COLOR_STEPS — provides the quantization step values.
- *
- * Dependants:
- *   - hexToAnsi256 — uses this to find nearest steps for each RGB component.
- *   - hexToAnsi256Bg — uses this to find nearest steps for each RGB component.
+ *   @returns The index (0-5) of the nearest color step in COLOR_STEPS.
  * </Summary>
  */
 const nearestStepIndex = (value: number): number => {
@@ -256,18 +215,10 @@ const nearestStepIndex = (value: number): number => {
  *   8. Return the ANSI escape sequence with the chosen color index.
  *
  * Parameters:
- *   @param {string} hex — The hexadecimal color string (e.g., "#FF5733").
+ *   @param hex - The hexadecimal color string (e.g., "#FF5733").
  *
  * Returns:
- *   @returns {string} — ANSI escape sequence for the nearest 256-color foreground (e.g., "\x1b[38;5;208m").
- *
- * Dependencies:
- *   - parseHexRgb — converts hex to RGB components.
- *   - nearestStepIndex — finds nearest color step indices.
- *   - COLOR_STEPS — provides quantization values.
- *
- * Dependants:
- *   - fg — uses this when truecolor is not supported.
+ *   @returns ANSI escape sequence for the nearest 256-color foreground (e.g., "\x1b[38;5;208m").
  * </Summary>
  */
 /** Nearest 256-color cube / gray index. */
@@ -372,18 +323,10 @@ export const hexToAnsi256 = (hex: string): string => {
  *   8. Return the ANSI escape sequence with the chosen color index (background variant).
  *
  * Parameters:
- *   @param {string} hex — The hexadecimal color string (e.g., "#FF5733").
+ *   @param hex - The hexadecimal color string (e.g., "#FF5733").
  *
  * Returns:
- *   @returns {string} — ANSI escape sequence for the nearest 256-color background (e.g., "\x1b[48;5;208m").
- *
- * Dependencies:
- *   - parseHexRgb — converts hex to RGB components.
- *   - nearestStepIndex — finds nearest color step indices.
- *   - COLOR_STEPS — provides quantization values.
- *
- * Dependants:
- *   - bg — uses this when truecolor is not supported.
+ *   @returns ANSI escape sequence for the nearest 256-color background (e.g., "\x1b[48;5;208m").
  * </Summary>
  */
 /** Nearest 256-color cube / gray index for background. */
@@ -483,18 +426,10 @@ export const hexToAnsi256Bg = (hex: string): string => {
  *   3. If not supported, use the nearest 256-color fallback escape sequence.
  *
  * Parameters:
- *   @param {string} hex — The hexadecimal color string (e.g., "#FF5733").
+ *   @param hex - The hexadecimal color string (e.g., "#FF5733").
  *
  * Returns:
- *   @returns {string} — The best available foreground color escape sequence.
- *
- * Dependencies:
- *   - supportsTrueColor — detects terminal color capabilities.
- *   - hexToTrueColor — provides 24-bit truecolor escape sequence.
- *   - hexToAnsi256 — provides 256-color fallback escape sequence.
- *
- * Dependants:
- *   - themeManager — uses this to apply theme foreground colors.
+ *   @returns The best available foreground color escape sequence.
  * </Summary>
  */
 /** Best available foreground escape for a hex color. */
@@ -512,18 +447,10 @@ export const fg = (hex: string): string =>
  *   3. If not supported, use the nearest 256-color background fallback escape sequence.
  *
  * Parameters:
- *   @param {string} hex — The hexadecimal color string (e.g., "#FF5733").
+ *   @param hex - The hexadecimal color string (e.g., "#FF5733").
  *
  * Returns:
- *   @returns {string} — The best available background color escape sequence.
- *
- * Dependencies:
- *   - supportsTrueColor — detects terminal color capabilities.
- *   - hexToTrueColorBg — provides 24-bit truecolor background escape sequence.
- *   - hexToAnsi256Bg — provides 256-color background fallback escape sequence.
- *
- * Dependants:
- *   - themeManager — uses this to apply theme background colors.
+ *   @returns The best available background color escape sequence.
  * </Summary>
  */
 /** Best available background escape for a hex color. */

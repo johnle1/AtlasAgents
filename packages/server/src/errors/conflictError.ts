@@ -7,12 +7,6 @@ import { AppError } from "./appError.js";
  *
  * How it fits in the system:
  *   Used when an operation conflicts with current state or another operation.
- *
- * Dependencies:
- *   - AppError - base error class.
- *
- * Dependants:
- *   - State management and concurrent operation logic.
  * </Summary>
  */
 export class ConflictError extends AppError {

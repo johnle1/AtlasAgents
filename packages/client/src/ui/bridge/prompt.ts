@@ -8,15 +8,6 @@
  *   for actions like text input, choice selection, plan editing, or theme selection.
  *   It manages pending prompt state, routes requests to the UI, and resolves prompts
  * with user responses.
- *
- * Dependencies:
- *   - getInkUIActive — checks if the Ink UI is currently active.
- *   - getBridgeHooks — provides access to global state update hooks.
- *   - getPendingPromptEntry/setPendingPromptEntry — manages pending prompt state.
- *
- * Dependants:
- *   - Server communication handlers — call these functions to request user input.
- *   - PromptOverlay component — displays pending prompt requests to users.
  * </Summary>
  */
 
@@ -35,14 +26,7 @@ import { getPendingPromptEntry, setPendingPromptEntry } from "./state.js";
  *   3. Returns null if no prompt is pending.
  *
  * Returns:
- *   @returns {PromptRequest | null} — The pending prompt request or null.
- *
- * Dependencies:
- *   - getPendingPromptEntry — retrieves the pending prompt state entry.
- *
- * Dependants:
- *   - PromptOverlay component — uses this to display the current prompt request.
- *   - Server handlers — check this to avoid duplicate prompt requests.
+ *   @returns The pending prompt request or null.
  * </Summary>
  */
 export const getPendingPrompt = (): PromptRequest | null =>
@@ -63,22 +47,12 @@ export const getPendingPrompt = (): PromptRequest | null =>
  *   6. Returns a promise that resolves when user responds.
  *
  * Parameters:
- *   @param {PromptRequest} promptRequest — The prompt request to present to the user.
+ *   @param promptRequest - The prompt request to present to the user.
  *
  * Returns:
- *   @returns {Promise<PromptResult>} — Promise that resolves with user's input.
+ *   @returns Promise that resolves with user's input.
  *
  * @throws {Error} — When a prompt request is already pending.
- *
- * Dependencies:
- *   - getInkUIActive — checks if the Ink UI is currently active.
- *   - getPendingPromptEntry — checks for existing pending prompts.
- *   - setPendingPromptEntry — stores the new prompt request.
- *   - getBridgeHooks — provides access to UI notification hooks.
- *
- * Dependants:
- *   - Server streaming handlers — call this to request user input.
- *   - Plan execution functions — use this to get plan edits from user.
  * </Summary>
  */
 export const requestPrompt = (
@@ -139,19 +113,10 @@ export const requestPrompt = (
  *   4. Calls the resolver with the user's prompt result.
  *
  * Parameters:
- *   @param {PromptResult} promptResult — The user's input response.
+ *   @param promptResult - The user's input response.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getPendingPromptEntry — retrieves the pending prompt state entry.
- *   - setPendingPromptEntry — clears the pending prompt state.
- *   - getBridgeHooks — provides access to UI notification hooks.
- *
- * Dependants:
- *   - PromptOverlay component — calls this when user submits input.
- *   - Keyboard input handlers — call this when user presses enter on prompts.
  * </Summary>
  */
 export const resolvePrompt = (promptResult: PromptResult): void => {

@@ -7,12 +7,6 @@ import { AppError } from "./appError.js";
  *
  * How it fits in the system:
  *   Used when a requested resource (file, model, config, etc.) cannot be found.
- *
- * Dependencies:
- *   - AppError - base error class.
- *
- * Dependants:
- *   - Resource access logic throughout the application.
  * </Summary>
  */
 export class NotFoundError extends AppError {

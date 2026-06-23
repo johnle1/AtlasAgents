@@ -6,13 +6,7 @@
  *
  * How it fits in the system:
  *   Used by ExperienceRecorder (writes) and PatternExtractor (reads).
- *
- * Dependencies:
- *   None.
- *
- * Dependants:
- *   - experienceRecorder.ts, patternExtractor.ts — record lifecycle.
- *   - orchestration/interfaces.ts — re-exports for IExperienceRecorder.
+ 
  * </Summary>
  */
 

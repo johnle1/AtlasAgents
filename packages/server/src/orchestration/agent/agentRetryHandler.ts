@@ -8,13 +8,6 @@
  *   thinking without acting, or acting without thinking. This module detects these
  *   patterns and provides corrective feedback to guide the agent back on track.
  *   It also manages escalation when the agent is stuck and can't proceed.
- *
- * Dependencies:
- *   - toolProtocol.js — looksLikeMarkdownOrCodeDump, MARKDOWN_CORRECTION_MESSAGE, MAX_MARKDOWN_RETRIES.
- *   - types.ts — AgentToolCall, Message types.
- *
- * Dependants:
- *   - Agent.run — uses this to handle retry logic after each model response.
  * </Summary>
  */
 
@@ -43,9 +36,6 @@ import {
  *   updatedThinkRetryCount — Updated count of "think without act" retries.
  *   shouldEscalate — Whether to escalate to advisor (optional).
  *   escalationReason — Reason for escalation when shouldEscalate is true (optional).
- *
- * Dependants:
- *   - Agent.run — uses result to decide whether to retry or continue.
  * </Summary>
  */
 export type RetryResult = {
@@ -86,23 +76,15 @@ export type RetryResult = {
  *   10. If no issues found, return shouldRetry: false.
  *
  * Parameters:
- *   @param {string} assistantText — Agent's full response text including think block.
- *   @param {string | null} thinkText — Extracted think block text (null if not found).
- *   @param {number} toolCallsCount — Number of tool calls parsed from response.
- *   @param {number} markdownRetryCount — Current markdown correction retry count.
- *   @param {number} thinkRetryCount — Current "think without act" retry count.
- *   @param {number} maxEscalations — Maximum escalation attempts before failure.
+ *   @param assistantText - Agent's full response text including think block.
+ *   @param thinkText - Extracted think block text (null if not found).
+ *   @param toolCallsCount - Number of tool calls parsed from response.
+ *   @param markdownRetryCount - Current markdown correction retry count.
+ *   @param thinkRetryCount - Current "think without act" retry count.
+ *   @param maxEscalations - Maximum escalation attempts before failure.
  *
  * Returns:
  *   {RetryResult} — Result indicating if retry needed and updated counts/state.
- *
- * Dependencies:
- *   - looksLikeMarkdownOrCodeDump — detects markdown/code dump patterns.
- *   - MARKDOWN_CORRECTION_MESSAGE — correction prompt for markdown issues.
- *   - MAX_MARKDOWN_RETRIES — maximum markdown correction attempts.
- *
- * Dependants:
- *   - Agent.run — uses this to handle retry logic after each model response.
  * </Summary>
  */
 export const handleAgentRetry = (

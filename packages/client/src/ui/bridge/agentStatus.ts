@@ -8,15 +8,6 @@
  *   These functions serve as the bridge between server-side agent status updates
  *   and the UI components that display agent status. They update the global application
  *   state through the bridge hooks system, which then triggers UI re-renders.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *   - AgentStage — type definition for agent activity stages.
- *   - AgentBoardState, AgentStatusState, SpinnerState — UI state types.
- *
- * Dependants:
- *   - Server communication handlers — call these functions to update UI.
- *   - Streaming functions — use these to display real-time agent progress.
  * </Summary>
  */
 
@@ -39,17 +30,10 @@ import { getBridgeHooks } from "./state.js";
  *   3. The hook updates the global state and triggers UI re-render.
  *
  * Parameters:
- *   @param {SpinnerState | null} spinnerState — The new spinner state (null to hide spinner).
+ *   @param spinnerState - The new spinner state (null to hide spinner).
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *
- * Dependants:
- *   - Connection streaming handlers — call this to show/hide spinner during operations.
- *   - Server communication functions — use this to indicate activity.
  * </Summary>
  */
 export const setSpinner = (spinnerState: SpinnerState | null): void => {
@@ -78,17 +62,10 @@ export const setSpinner = (spinnerState: SpinnerState | null): void => {
  *   5. Returns the updated Map to update the global state.
  *
  * Parameters:
- *   @param {AgentStatusState} agentStatus — The agent status object to add/update.
+ *   @param agentStatus - The agent status object to add/update.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *
- * Dependants:
- *   - Server streaming handlers — call this to update agent progress indicators.
- *   - Task execution functions — use this to show agent status changes.
  * </Summary>
  */
 export const setAgentStatus = (agentStatus: AgentStatusState): void => {
@@ -131,17 +108,10 @@ export const setAgentStatus = (agentStatus: AgentStatusState): void => {
  *   6. Returns the updated Map to update the global state.
  *
  * Parameters:
- *   @param {number | "advisor"} agentId — The ID of the agent to remove (or "advisor").
+ *   @param agentId - The ID of the agent to remove (or "advisor").
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *
- * Dependants:
- *   - Agent completion handlers — call this to remove agent status when done.
- *   - Task cleanup functions — use this to clear agent status after task completion.
  * </Summary>
  */
 export const removeAgentStatus = (agentId: number | "advisor"): void => {
@@ -185,13 +155,6 @@ export const removeAgentStatus = (agentId: number | "advisor"): void => {
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *
- * Dependants:
- *   - Session cleanup handlers — call this to clear boards on session end.
- *   - Reset functions — use this to clear all agent board displays.
  * </Summary>
  */
 export const clearAgentBoards = (): void => {
@@ -218,14 +181,6 @@ export const clearAgentBoards = (): void => {
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *   - clearAgentBoards — clears the agent boards array.
- *
- * Dependants:
- *   - Session reset handlers — call this to clear all agent-related state.
- *   - Cleanup functions — use this to reset agent display state.
  * </Summary>
  */
 export const clearAgentStatuses = (): void => {
@@ -260,17 +215,10 @@ export const clearAgentStatuses = (): void => {
  *   7. Returns the updated boards array.
  *
  * Parameters:
- *   @param {AgentBoardState[]} agentBoards — The new agent boards state.
+ *   @param agentBoards - The new agent boards state.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *
- * Dependants:
- *   - Server streaming handlers — call this to update agent task board display.
- *   - Agent status updates — use this to refresh board information.
  * </Summary>
  */
 export const setAgentBoards = (agentBoards: AgentBoardState[]): void => {
@@ -326,18 +274,11 @@ export const setAgentBoards = (agentBoards: AgentBoardState[]): void => {
  *   6. Returns the updated boards array.
  *
  * Parameters:
- *   @param {number} agentId — The ID of the agent to update.
- *   @param {{ stage: AgentStage; message: string } | null} agentActivity — The new activity info (null to clear).
+ *   @param agentId - The ID of the agent to update.
+ *   @param agentActivity - The new activity info (null to clear).
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *
- * Dependants:
- *   - Agent status streaming handlers — call this to update agent activity display.
- *   - Task progress functions — use this to show current agent operation.
  * </Summary>
  */
 export const updateAgentActivity = (

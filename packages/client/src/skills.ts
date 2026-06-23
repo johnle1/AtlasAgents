@@ -41,13 +41,6 @@ const DEFAULT_SKILLS_PACKAGE_DIR = path.resolve(
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - fs — mkdirSync, existsSync, readdirSync, copyFileSync.
- *
- * Dependants:
- *   - ensureSkillsDir — invokes this before guaranteeing the directory exists.
- *   - SkillManager constructor — triggers first-run seed via ensureSkillsDir.
  * </Summary>
  */
 export const installDefaultSkills = (): void => {
@@ -81,13 +74,6 @@ export const installDefaultSkills = (): void => {
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - installDefaultSkills — may populate SKILLS_DIR when new.
- *   - fs.mkdirSync — creates SKILLS_DIR if still missing.
- *
- * Dependants:
- *   - listSkills, addSkill, readAllSkills, readSkill — call before touching files.
  * </Summary>
  */
 export const ensureSkillsDir = (): void => {
@@ -113,16 +99,7 @@ export const ensureSkillsDir = (): void => {
  *   None.
  *
  * Returns:
- *   @returns {string[]} — Array of skill names e.g. ["coding", "research"].
- *
- * Dependencies:
- *   - ensureSkillsDir — ensures SKILLS_DIR exists before reading.
- *   - fs.readdirSync — reads directory listing.
- *
- * Dependants:
- *   - CommandHandler.handleSkills (list subcommand) — calls this to display skills.
- *   - readAllSkills — calls this to get the list before reading file contents.
- *   - SkillManager.list — delegates here.
+ *   @returns Array of skill names e.g. ["coding", "research"].
  * </Summary>
  */
 export const listSkills = (): string[] => {
@@ -154,22 +131,12 @@ export const listSkills = (): string[] => {
  *   8. Ignores editor exit errors (file is still created).
  *
  * Parameters:
- *   @param {string} name — Skill basename without extension.
+ *   @param name - Skill basename without extension.
  *
  * Returns:
  *   void — called for side effects only.
  *
  * @throws {Error} — When a skill with the same name already exists.
- *
- * Dependencies:
- *   - ensureSkillsDir — ensures SKILLS_DIR exists before writing.
- *   - fs.existsSync — checks for existing file.
- *   - fs.writeFileSync — writes the initial template.
- *   - execSync — spawns the editor process.
- *
- * Dependants:
- *   - CommandHandler.handleSkills (add subcommand) — calls this to create a skill.
- *   - SkillManager.create — delegates here.
  * </Summary>
  */
 export const addSkill = (name: string): void => {
@@ -206,19 +173,12 @@ export const addSkill = (name: string): void => {
  *   4. Returns fs.readFileSync as utf-8 string.
  *
  * Parameters:
- *   @param {string} name — Skill basename without extension.
+ *   @param name - Skill basename without extension.
  *
  * Returns:
- *   @returns {string} — Full markdown file contents.
+ *   @returns Full markdown file contents.
  *
  * @throws {Error} — When the skill file does not exist.
- *
- * Dependencies:
- *   - ensureSkillsDir — ensures directory exists.
- *   - fs.existsSync, fs.readFileSync — file access.
- *
- * Dependants:
- *   - SkillManager.read — delegates here.
  * </Summary>
  */
 export const readSkill = (name: string): string => {
@@ -246,16 +206,7 @@ export const readSkill = (name: string): string => {
  *   None.
  *
  * Returns:
- *   @returns {SkillPayload[]} — Array of { name, content } objects.
- *
- * Dependencies:
- *   - ensureSkillsDir — ensures SKILLS_DIR exists.
- *   - listSkills — gets the list of skill names.
- *   - fs.readFileSync — reads file contents.
- *
- * Dependants:
- *   - CommandHandler.handleSkills (sync subcommand) — calls this before syncing to server.
- *   - SkillManager.readAll and SkillManager.sync — delegate here.
+ *   @returns Array of { name, content } objects.
  * </Summary>
  */
 export const readAllSkills = (): SkillPayload[] => {
@@ -277,14 +228,6 @@ export const readAllSkills = (): SkillPayload[] => {
  *   Wraps listSkills, addSkill, readSkill, readAllSkills with the Part 5 API
  *   and runs default-skill installation on construction so first-run seeding
  *   happens before the REPL handles slash commands.
- *
- * Dependencies:
- *   - Connection — sync uploads skill payloads.
- *   - installDefaultSkills — invoked from constructor for first-run behaviour.
- *
- * Dependants:
- *   - index.ts main — constructs one instance per session.
- *   - CommandHandler — optional reference for skills commands.
  * </Summary>
  */
 export class SkillManager {
@@ -299,16 +242,10 @@ export class SkillManager {
    *      packaged defaults only when that directory did not already exist.
    *
    * Parameters:
-   *   @param {Connection} conn — Live RSocket connection used by sync().
+   *   @param conn - Live RSocket connection used by sync().
    *
    * Returns:
    *   void — constructor side effects only.
-   *
-   * Dependencies:
-   *   - installDefaultSkills — optional copy from default-skills/.
-   *
-   * Dependants:
-   *   - index.ts main — constructs SkillManager after Connection.connect.
    * </Summary>
    */
   constructor(private readonly conn: Connection) {
@@ -324,13 +261,7 @@ export class SkillManager {
    *   None.
    *
    * Returns:
-   *   @returns {string[]} — Skill names.
-   *
-   * Dependencies:
-   *   - listSkills — reads directory.
-   *
-   * Dependants:
-   *   - CommandHandler.handleSkills — when skills manager is wired.
+   *   @returns Skill names.
    * </Summary>
    */
   list = (): string[] => listSkills();
@@ -341,16 +272,10 @@ export class SkillManager {
    *   Creates a new empty skill file and opens it in $EDITOR.
    *
    * Parameters:
-   *   @param {string} name — Basename without .md.
+   *   @param name - Basename without .md.
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   - addSkill — file + editor.
-   *
-   * Dependants:
-   *   - CommandHandler.handleSkills — add subcommand.
    * </Summary>
    */
   create = (name: string): void => {
@@ -363,16 +288,10 @@ export class SkillManager {
    *   Returns the UTF-8 body of one skill file.
    *
    * Parameters:
-   *   @param {string} name — Basename without .md.
+   *   @param name - Basename without .md.
    *
    * Returns:
-   *   @returns {string} — File contents.
-   *
-   * Dependencies:
-   *   - readSkill — filesystem read.
-   *
-   * Dependants:
-   *   - None (available for future commands).
+   *   @returns File contents.
    * </Summary>
    */
   read = (name: string): string => readSkill(name);
@@ -386,13 +305,7 @@ export class SkillManager {
    *   None.
    *
    * Returns:
-   *   @returns {SkillPayload[]} — All skills.
-   *
-   * Dependencies:
-   *   - readAllSkills — bulk read.
-   *
-   * Dependants:
-   *   - SkillManager.sync — uses same data path.
+   *   @returns All skills.
    * </Summary>
    */
   readAll = (): SkillPayload[] => readAllSkills();
@@ -412,14 +325,7 @@ export class SkillManager {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<number>} — Count of skills synced.
-   *
-   * Dependencies:
-   *   - readAllSkills — local aggregation.
-   *   - Connection.syncSkills — RSocket command.
-   *
-   * Dependants:
-   *   - CommandHandler.handleSkills — sync subcommand.
+   *   @returns Count of skills synced.
    * </Summary>
    */
   sync = async (): Promise<number> => {

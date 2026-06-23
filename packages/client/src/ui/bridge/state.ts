@@ -8,18 +8,6 @@
  *   This module maintains the global state that allows server-side code to communicate
  *   with the Ink-based UI. It stores callback hooks for state updates, tracks pending
  *   user interactions (approvals and prompts), and manages the streaming token handler.
- *
- * Dependencies:
- *   - Config — type definition for application configuration.
- *   - AgentBoardState, AgentStatusState — type definitions for agent display state.
- *   - ApprovalRequest, ApprovalResult — type definitions for approval workflow.
- *   - HistoryItem — type definition for history display items.
- *   - PromptRequest, PromptResult — type definitions for prompt workflow.
- *   - SpinnerState — type definition for spinner display state.
- *
- * Dependants:
- *   - All bridge modules — use these functions to access and modify global state.
- *   - useBridgeSetup hook — registers bridge hooks during component mount.
  * </Summary>
  */
 
@@ -153,12 +141,6 @@ type BridgeState = {
  * How it fits in the system:
  *   This singleton object maintains all bridge state across the application.
  *   It is accessed and modified by the state getter/setter functions.
- *
- * Dependencies:
- *   - None (initialized at module load).
- *
- * Dependants:
- *   - All state getter/setter functions — access this global state.
  * </Summary>
  */
 const bridgeGlobalState: BridgeState = {
@@ -178,13 +160,7 @@ const bridgeGlobalState: BridgeState = {
  *   1. Returns the hooks object from the global state.
  *
  * Returns:
- *   @returns {BridgeHooks} — The registered bridge hooks.
- *
- * Dependencies:
- *   - bridgeGlobalState — the global state object.
- *
- * Dependants:
- *   - All bridge modules — use this to call the registered hooks.
+ *   @returns The registered bridge hooks.
  * </Summary>
  */
 export const getBridgeHooks = (): BridgeHooks => bridgeGlobalState.hooks;
@@ -198,16 +174,10 @@ export const getBridgeHooks = (): BridgeHooks => bridgeGlobalState.hooks;
  *   1. Updates the hooks object in the global state.
  *
  * Parameters:
- *   @param {BridgeHooks} bridgeHooks — The bridge hooks to register.
+ *   @param bridgeHooks - The bridge hooks to register.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - bridgeGlobalState — the global state object.
- *
- * Dependants:
- *   - registerBridgeHooks function — calls this to register hooks.
  * </Summary>
  */
 export const setBridgeHooks = (bridgeHooks: BridgeHooks): void => {
@@ -223,13 +193,7 @@ export const setBridgeHooks = (bridgeHooks: BridgeHooks): void => {
  *   1. Returns the inkUIActive flag from the global state.
  *
  * Returns:
- *   @returns {boolean} — True if Ink UI is active, false otherwise.
- *
- * Dependencies:
- *   - bridgeGlobalState — the global state object.
- *
- * Dependants:
- *   - isInkActive function — calls this to check UI state.
+ *   @returns True if Ink UI is active, false otherwise.
  * </Summary>
  */
 export const getInkUIActive = (): boolean => bridgeGlobalState.inkUIActive;
@@ -243,16 +207,10 @@ export const getInkUIActive = (): boolean => bridgeGlobalState.inkUIActive;
  *   1. Updates the inkUIActive flag in the global state.
  *
  * Parameters:
- *   @param {boolean} isActive — Whether the Ink UI is active.
+ *   @param isActive - Whether the Ink UI is active.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - bridgeGlobalState — the global state object.
- *
- * Dependants:
- *   - setInkActive function — calls this to update UI state.
  * </Summary>
  */
 export const setInkUIActiveValue = (isActive: boolean): void => {
@@ -268,13 +226,7 @@ export const setInkUIActiveValue = (isActive: boolean): void => {
  *   1. Returns the pendingApproval entry from the global state.
  *
  * Returns:
- *   @returns {PendingApproval | null} — The pending approval or null.
- *
- * Dependencies:
- *   - bridgeGlobalState — the global state object.
- *
- * Dependants:
- *   - approval module functions — call this to check pending approvals.
+ *   @returns The pending approval or null.
  * </Summary>
  */
 export const getPendingApprovalEntry = (): PendingApproval | null =>
@@ -289,17 +241,10 @@ export const getPendingApprovalEntry = (): PendingApproval | null =>
  *   1. Updates the pendingApproval entry in the global state.
  *
  * Parameters:
- *   @param {PendingApproval | null} approvalEntry — The approval entry to set.
+ *   @param approvalEntry - The approval entry to set.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - bridgeGlobalState — the global state object.
- *
- * Dependants:
- *   - requestApproval function — calls this to store pending approval.
- *   - resolveApproval function — calls this to clear pending approval.
  * </Summary>
  */
 export const setPendingApprovalEntry = (
@@ -317,13 +262,7 @@ export const setPendingApprovalEntry = (
  *   1. Returns the pendingPrompt entry from the global state.
  *
  * Returns:
- *   @returns {PendingPrompt | null} — The pending prompt or null.
- *
- * Dependencies:
- *   - bridgeGlobalState — the global state object.
- *
- * Dependants:
- *   - prompt module functions — call this to check pending prompts.
+ *   @returns The pending prompt or null.
  * </Summary>
  */
 export const getPendingPromptEntry = (): PendingPrompt | null =>
@@ -338,17 +277,10 @@ export const getPendingPromptEntry = (): PendingPrompt | null =>
  *   1. Updates the pendingPrompt entry in the global state.
  *
  * Parameters:
- *   @param {PendingPrompt | null} promptEntry — The prompt entry to set.
+ *   @param promptEntry - The prompt entry to set.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - bridgeGlobalState — the global state object.
- *
- * Dependants:
- *   - requestPrompt function — calls this to store pending prompt.
- *   - resolvePrompt function — calls this to clear pending prompt.
  * </Summary>
  */
 export const setPendingPromptEntry = (
@@ -366,13 +298,7 @@ export const setPendingPromptEntry = (
  *   1. Returns the streamingTokenHandler from the global state.
  *
  * Returns:
- *   @returns {((token: string) => void) | null} — The streaming handler or null.
- *
- * Dependencies:
- *   - bridgeGlobalState — the global state object.
- *
- * Dependants:
- *   - history module functions — call this to process streaming tokens.
+ *   @returns The streaming handler or null.
  * </Summary>
  */
 export const getStreamingTokenHandler = (): ((token: string) => void) | null =>
@@ -387,16 +313,10 @@ export const getStreamingTokenHandler = (): ((token: string) => void) | null =>
  *   1. Updates the streamingTokenHandler in the global state.
  *
  * Parameters:
- *   @param {((token: string) => void) | null} tokenHandler — The token handler to set.
+ *   @param tokenHandler - The token handler to set.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - bridgeGlobalState — the global state object.
- *
- * Dependants:
- *   - registerStreamingHandler function — calls this to store the handler.
  * </Summary>
  */
 export const setStreamingTokenHandler = (

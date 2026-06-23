@@ -7,15 +7,6 @@
  * How it fits in the system:
  *   Provides utility functions for processing experience records and extracting
  *   preference rules.
- *
- * Dependencies:
- *   - patternConstants.ts - uses budget constants.
- *   - @loopycode/shared - computeDiff, formatDiffPlain.
- *   - orchestration/interfaces.js - PreferenceConfidence.
- *   - types.js - UserEditEntry.
- *
- * Dependants:
- *   - patternExtractor.ts - uses these helpers in the PatternExtractor class.
  * </Summary>
  */
 
@@ -51,17 +42,11 @@ import {
  *      caller can still attempt to parse or log the raw response.
  *
  * Parameters:
- *   @param {string} raw — Raw text returned by the advisor/LLM.
+ *   @param raw - Raw text returned by the advisor/LLM.
  *
  * Returns:
  *   {string} — The extracted JSON array text (or the original body if no
  *   well-formed array boundaries were found).
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - PatternExtractor.run — parses advisor response for preference rules.
  * </Summary>
  */
 export const extractJsonArray = (raw: string): string => {
@@ -117,20 +102,12 @@ export const extractJsonArray = (raw: string): string => {
  *   3. Otherwise, take the first `max` characters and append `…`.
  *
  * Parameters:
- *   @param {string} text — Input string to trim.
- *   @param {number} max — Maximum allowed length before truncation.
+ *   @param text - Input string to trim.
+ *   @param max - Maximum allowed length before truncation.
  *
  * Returns:
  *   {string} — Either the original text (if short) or a truncated version
  *   with a trailing ellipsis.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Logging and user-visible message formatting elsewhere in the module.
- *   - plainDiffFromEdit — truncates diff output to budget.
- *   - PatternExtractor.run — truncates escalation reasons, guidance, and diffs.
  * </Summary>
  */
 export const truncate = (text: string, max: number): string => {
@@ -156,22 +133,13 @@ export const truncate = (text: string, max: number): string => {
  *   3. Truncate to max length when provided.
  *
  * Parameters:
- *   @param {string} before — Content before edit.
- *   @param {string} after — Content after edit.
- *   @param {string} filePath — Path for optional header in diff output.
+ *   @param before - Content before edit.
+ *   @param after - Content after edit.
+ *   @param filePath - Path for optional header in diff output.
  *   @param {number} [maxLen] — Optional character budget; omit for full diff.
  *
  * Returns:
- *   @returns {string} — Plain diff text.
- *
- * Dependencies:
- *   - @loopycode/shared/computeDiff — computes diff chunks.
- *   - @loopycode/shared/formatDiffPlain — formats diff as plain text.
- *   - truncate — limits output length when maxLen is provided.
- *
- * Dependants:
- *   - formatUserEditForPrompt — creates formatted edit blocks for prompts.
- *   - PatternExtractor.run — generates style rule diff snippets.
+ *   @returns Plain diff text.
  * </Summary>
  */
 export const plainDiffFromEdit = (
@@ -207,17 +175,10 @@ export const plainDiffFromEdit = (
  *   2. Format as a bullet point with the file path and indented diff lines.
  *
  * Parameters:
- *   @param {UserEditEntry} edit — User edit row from the experience record.
+ *   @param edit - User edit row from the experience record.
  *
  * Returns:
- *   @returns {string} — Multi-line block for the advisor prompt.
- *
- * Dependencies:
- *   - plainDiffFromEdit — generates the diff text.
- *   - USER_EDIT_DIFF_BUDGET — limits diff length.
- *
- * Dependants:
- *   - PatternExtractor.run — creates editBlock for advisor prompt.
+ *   @returns Multi-line block for the advisor prompt.
  * </Summary>
  */
 export const formatUserEditForPrompt = (edit: UserEditEntry): string => {
@@ -250,16 +211,10 @@ export const formatUserEditForPrompt = (edit: UserEditEntry): string => {
  *      and report how many were omitted.
  *
  * Parameters:
- *   @param {UserEditEntry[]} edits — All user edits on the record.
+ *   @param edits - All user edits on the record.
  *
  * Returns:
- *   @returns {{ edits: UserEditEntry[]; omitted: number }} — Sample and omit count.
- *
- * Dependencies:
- *   - MAX_USER_EDITS_IN_PROMPT — defines the sampling limit.
- *
- * Dependants:
- *   - PatternExtractor.run — samples edits before building advisor prompt.
+ *   @returns Sample and omit count.
  * </Summary>
  */
 export const sampleUserEdits = (
@@ -295,18 +250,11 @@ export const sampleUserEdits = (
  *   3. If the extension is unknown, return the fallback scope `all`.
  *
  * Parameters:
- *   @param {string} filePath — The path to the file whose language should
+ *   @param filePath - The path to the file whose language should
  *   be determined.
  *
  * Returns:
  *   {string} — A scope identifier such as `typescript`, `python`, or `all`.
- *
- * Dependencies:
- *   - node:path — for extracting file extensions.
- *
- * Dependants:
- *   - topicsFromPath — uses scope for topic generation.
- *   - PatternExtractor.run — scopes style preference rules by language.
  * </Summary>
  */
 export const scopeFromPath = (filePath: string): string => {
@@ -354,17 +302,10 @@ export const scopeFromPath = (filePath: string): string => {
  *   3. Otherwise return an array containing the single scope string.
  *
  * Parameters:
- *   @param {string} filePath — File path used to derive topics.
+ *   @param filePath - File path used to derive topics.
  *
  * Returns:
  *   {string[]} — Array of topic strings (commonly a single language scope).
- *
- * Dependencies:
- *   - scopeFromPath — determines the language scope from file path.
- *
- * Dependants:
- *   - Creation of `style` preference rules that tag rules with topics.
- *   - PatternExtractor.run — generates topics for fix and style rules.
  * </Summary>
  */
 export const topicsFromPath = (filePath: string): string[] => {
@@ -393,16 +334,10 @@ export const topicsFromPath = (filePath: string): string[] => {
  *      limit the result to the first 8 tokens.
  *
  * Parameters:
- *   @param {string} reason — Human-readable error reason or message.
+ *   @param reason - Human-readable error reason or message.
  *
  * Returns:
  *   {string[]} — Up to eight deduplicated keyword tokens.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - PatternExtractor.run — generates topics for fix rules from escalations.
  * </Summary>
  */
 export const errorKeywords = (reason: string): string[] => {
@@ -433,17 +368,10 @@ export const errorKeywords = (reason: string): string[] => {
  *   3. Otherwise, fall back to the safe default `'medium'`.
  *
  * Parameters:
- *   @param {unknown} raw — The untrusted value produced by the advisor.
+ *   @param raw - The untrusted value produced by the advisor.
  *
  * Returns:
  *   {PreferenceConfidence} — One of `'high'|'medium'|'low'`.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - PatternExtractor.run — validates confidence from advisor responses.
- *   - Creating `NewPreferenceRule` objects stored in the preference store.
  * </Summary>
  */
 export const parseConfidence = (raw: unknown): PreferenceConfidence => {

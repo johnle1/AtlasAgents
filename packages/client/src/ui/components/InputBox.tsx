@@ -12,14 +12,6 @@ import { useAppContext } from "../../DataContext.js";
  *   Provides the main input interface for user commands and responses.
  *   Shows a prompt label and either an active input field or disabled
  *   indicator when input is not available (e.g., during processing).
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering.
- *   - TextInput — handles keyboard input and editing.
- *   - useAppContext — accesses prompt, input state, and handlers.
- *
- * Dependants:
- *   - Main UI components — renders InputBox for user interaction.
  * </Summary>
  */
 export const InputBox: React.FC = () => {

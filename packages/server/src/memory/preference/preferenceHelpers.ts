@@ -6,12 +6,6 @@
  * How it fits in the system:
  *   Provides utility functions for tokenizing text, calculating similarity,
  *   and extracting JSON arrays from advisor responses.
- *
- * Dependencies:
- *   - preferenceConstants.ts - uses STOP_WORDS for tokenization.
- *
- * Dependants:
- *   - preferenceStore.ts - uses these helpers for rule deduplication and consolidation.
  * </Summary>
  */
 
@@ -29,16 +23,10 @@ import { STOP_WORDS } from "./preferenceConstants.js";
  *   4. Return as Set for efficient lookup and deduplication.
  *
  * Parameters:
- *   @param {string} text — Input text to tokenize.
+ *   @param text - Input text to tokenize.
  *
  * Returns:
- *   @returns {Set<string>} — Set of meaningful word tokens.
- *
- * Dependencies:
- *   - STOP_WORDS — filters out noise words.
- *
- * Dependants:
- *   - textSimilarity — uses tokenized sets for comparison.
+ *   @returns Set of meaningful word tokens.
  * </Summary>
  */
 export const tokenise = (text: string): Set<string> => {
@@ -71,17 +59,11 @@ export const tokenise = (text: string): Set<string> => {
  *   5. Return Jaccard index (intersection / union).
  *
  * Parameters:
- *   @param {string} textA — First text string.
- *   @param {string} textB — Second text string.
+ *   @param textA - First text string.
+ *   @param textB - Second text string.
  *
  * Returns:
- *   @returns {number} — Jaccard similarity (0-1, where 1 = identical).
- *
- * Dependencies:
- *   - tokenise — converts text to token sets.
- *
- * Dependants:
- *   - PreferenceStore.add — detects duplicate rules for merging.
+ *   @returns Jaccard similarity (0-1, where 1 = identical).
  * </Summary>
  */
 export const textSimilarity = (textA: string, textB: string): number => {
@@ -136,16 +118,10 @@ export const textSimilarity = (textA: string, textB: string): number => {
  *   6. Otherwise, return the full body for caller to handle.
  *
  * Parameters:
- *   @param {string} raw — Raw text returned by the advisor/LLM.
+ *   @param raw - Raw text returned by the advisor/LLM.
  *
  * Returns:
- *   @returns {string} — Extracted JSON array text (or original body if not found).
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - PreferenceStore.consolidate — parses advisor response for rule consolidation.
+ *   @returns Extracted JSON array text (or original body if not found).
  * </Summary>
  */
 export const extractJsonArray = (raw: string): string => {

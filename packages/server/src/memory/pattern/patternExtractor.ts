@@ -6,13 +6,6 @@
  *
  * How it fits in the system:
  *   Triggered fire-and-forget by ExperienceRecorder.finish.
- *
- * Dependencies:
- *   - IOllamaClient, IConfigManager — advisor chat.
- *   - IPreferenceStore — persists learned rules.
- *
- * Dependants:
- *   - ExperienceRecorder.
  * </Summary>
  */
 
@@ -56,9 +49,6 @@ import {
  *   - Triggered by `ExperienceRecorder.finish` as a fire-and-forget task.
  *   - Depends on `IOllamaClient` for advisor chat, `IConfigManager` for
  *     model/temperature settings, and `IPreferenceStore` to save rules.
- *
- * Dependants:
- *   - ExperienceRecorder (fires extraction after tasks finish).
  * </Summary>
  */
 export class PatternExtractor implements IPatternExtractor {
@@ -70,21 +60,13 @@ export class PatternExtractor implements IPatternExtractor {
    *   2. Store the dependencies as private readonly fields for use in methods.
    *
    * Parameters:
-   *   @param {Object} deps — Dependency bag with the following services:
-   *     @param {IOllamaClient} deps.ollama — Client for communicating with the advisor AI model.
-   *     @param {IConfigManager} deps.config — Manager for reading configuration (model name, temperature).
-   *     @param {IPreferenceStore} deps.prefs — Store for persisting extracted preference rules.
+   *   @param deps - Dependency bag with the following services:
+   *     @param deps - .ollama — Client for communicating with the advisor AI model.
+   *     @param deps - .config — Manager for reading configuration (model name, temperature).
+   *     @param deps - .prefs — Store for persisting extracted preference rules.
    *
    * Returns:
    *   void — Constructor does not return a value.
-   *
-   * Dependencies:
-   *   - IOllamaClient — required for advisor chat operations.
-   *   - IConfigManager — required for reading advisor model configuration.
-   *   - IPreferenceStore — required for persisting learned preference rules.
-   *
-   * Dependants:
-   *   - ExperienceRecorder — instantiates PatternExtractor to extract rules from completed tasks.
    */
   constructor(
     private readonly deps: {
@@ -103,16 +85,10 @@ export class PatternExtractor implements IPatternExtractor {
    *   2. Attach a catch handler to log any unexpected error.
    *
    * Parameters:
-   *   @param {ExperienceRecord} record — The finished experience to analyze.
+   *   @param record - The finished experience to analyze.
    *
    * Returns:
    *   void — called for side effects only (background extraction).
-   *
-   * Dependencies:
-   *   - this.run — private method that performs the actual extraction work.
-   *
-   * Dependants:
-   *   - ExperienceRecorder.finish — calls this method after completing a task.
    */
   extract = (record: ExperienceRecord): void => {
     // Step 1: Start the async work and attach error logging (fire-and-forget)
@@ -145,31 +121,13 @@ export class PatternExtractor implements IPatternExtractor {
    *      store.
    *
    * Parameters:
-   *   @param {ExperienceRecord} record — The experience being processed.
+   *   @param record - The experience being processed.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when extraction and storage complete.
+   *   @returns Resolves when extraction and storage complete.
    *
    * Throws:
    *   - Errors from advisor chat are caught and logged, not re-thrown.
-   *
-   * Dependencies:
-   *   - this.deps.config.getAdvisorModel — reads which model to use.
-   *   - this.deps.config.getAdvisorTemperature — reads temperature setting.
-   *   - this.deps.ollama.chat — sends prompt to advisor model.
-   *   - this.deps.prefs.add — persists extracted rules.
-   *   - sampleUserEdits — limits edits to avoid huge prompts.
-   *   - formatUserEditForPrompt — formats edits for advisor.
-   *   - truncate — limits text length to budgets.
-   *   - extractJsonArray — parses JSON from advisor response.
-   *   - parseConfidence — validates confidence values.
-   *   - errorKeywords — extracts keywords from error reasons.
-   *   - scopeFromPath — determines language scope from file path.
-   *   - topicsFromPath — determines topics from file path.
-   *   - plainDiffFromEdit — creates diff from user edits.
-   *
-   * Dependants:
-   *   - extract — calls this method in a fire-and-forget manner.
    */
   private run = async (record: ExperienceRecord): Promise<void> => {
     // Step 1: If the task failed but produced no escalations, nothing to do

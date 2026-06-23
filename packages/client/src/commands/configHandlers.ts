@@ -8,16 +8,6 @@
  *   Sits between the CLI command parser (CommandHandler) and the config/storage
  *   layer. Centralises all configuration-related command logic so changes to
  *   config structure only require updates to this module.
- *
- * Dependencies:
- *   - config.js — loadConfig, updateConfig for reading and writing config.
- *   - renderer.js — printError, printSuccess, printConfig for user feedback.
- *   - connection/index.js — Connection class for reloading connections.
- *   - themeManager.js — getTheme for terminal colors.
- *   - utils.js — parsePort for port validation.
- *
- * Dependants:
- *   - CommandHandler.handle — routes /set, /config, and /agent commands here.
  * </Summary>
  */
 
@@ -46,20 +36,11 @@ import { logger } from "../utils/logger.js";
  *   8. Updates config with new cap value and prints success message.
  *
  * Parameters:
- *   @param {string} sub — The subcommand after "/agent" (e.g., "cap" or empty).
- *   @param {string} arg — The argument value for the cap (number or "::max").
+ *   @param sub - The subcommand after "/agent" (e.g., "cap" or empty).
+ *   @param arg - The argument value for the cap (number or "::max").
  *
  * Returns:
  *   void — called for side effects only (config update and user feedback).
- *
- * Dependencies:
- *   - loadConfig — reads current agentCap from config.json.
- *   - updateConfig — writes new agentCap to config.json.
- *   - printError — displays error messages to user.
- *   - printSuccess — displays success messages to user.
- *
- * Dependants:
- *   - CommandHandler.handle — routes "/agent cap" commands to this handler.
  * </Summary>
  */
 export const handleAgent = (sub: string, arg: string): void => {
@@ -136,25 +117,14 @@ export const handleAgent = (sub: string, arg: string): void => {
  *   7. For unknown subcommand: prints error message.
  *
  * Parameters:
- *   @param {string} sub — The subcommand after "/set" (password, server, port, advisor, agent).
- *   @param {string} arg — The argument value for the subcommand (often empty for prompts).
- *   @param {Connection} connection — The RSocket connection instance for reloading.
- *   @param {PromptPort} prompts — The prompt interface for user input.
- *   @param {(role: "advisor" | "agent") => Promise<void>} handleSetModel — Callback to handle model selection.
+ *   @param sub - The subcommand after "/set" (password, server, port, advisor, agent).
+ *   @param arg - The argument value for the subcommand (often empty for prompts).
+ *   @param connection - The RSocket connection instance for reloading.
+ *   @param prompts - The prompt interface for user input.
+ *   @param handleSetModel - Callback to handle model selection.
  *
  * Returns:
- *   @returns {Promise<void>} — Resolves when configuration update is complete.
- *
- * Dependencies:
- *   - updateConfig — writes new configuration values to config.json.
- *   - Connection.reload — reconnects to server with new configuration.
- *   - parsePort — validates port number is in valid range (1-65535).
- *   - printError, printSuccess — displays feedback to user.
- *   - getTheme — retrieves terminal color theme.
- *   - handleSetModel — handles interactive model selection for advisor/agent.
- *
- * Dependants:
- *   - CommandHandler.handle — routes "/set" commands to this handler.
+ *   @returns Resolves when configuration update is complete.
  * </Summary>
  */
 export const handleSet = async (
@@ -318,13 +288,6 @@ export const handleSet = async (
  *
  * Returns:
  *   void — called for side effects only (displaying config to user).
- *
- * Dependencies:
- *   - loadConfig — reads the current configuration from config.json file.
- *   - renderer.printConfig — formats and displays configuration in a table.
- *
- * Dependants:
- *   - CommandHandler.handle — routes "/config" commands to this handler.
  * </Summary>
  */
 export const handleConfig = async (): Promise<void> => {

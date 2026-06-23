@@ -238,17 +238,6 @@ const darkShikiConfig = {
  * How it fits in the system:
  *   Central theme registry that the themeManager uses to load and switch themes.
  *   Contains both custom themes and imported VS Code/GitHub themes for consistency.
- *
- * Dependencies:
- *   - vscodeTheme — provides VS Code Dark+ theme.
- *   - vscodeDarkModernTheme — provides VS Code Dark Modern theme.
- *   - githubDarkTheme — provides GitHub Dark theme.
- *   - githubDimmedTheme — provides GitHub Dimmed theme.
- *   - githubLightTheme — provides GitHub Light theme.
- *
- * Dependants:
- *   - themeManager — loads and switches themes from this registry.
- *   - THEME_KEYS — extracts the available theme keys for display.
  * </Summary>
  */
 export const THEMES: Record<string, Theme> = {
@@ -511,14 +500,7 @@ export const THEMES: Record<string, Theme> = {
  *   2. Return the array of theme keys.
  *
  * Returns:
- *   @returns {string[]} — Array of theme key strings (e.g., ["default", "ocean", "forest", "monochrome", "sunset", "vscode-dark", "vscode-modern", "github-dark", "github-dimmed", "github-light"]).
- *
- * Dependencies:
- *   - THEMES — provides the theme registry to extract keys from.
- *
- * Dependants:
- *   - Theme listing commands — use this to display available themes.
- *   - Theme selection UI — uses this to populate theme selection options.
+ *   @returns Array of theme key strings (e.g., ["default", "ocean", "forest", "monochrome", "sunset", "vscode-dark", "vscode-modern", "github-dark", "github-dimmed", "github-light"]).
  * </Summary>
  */
 export const THEME_KEYS = Object.keys(THEMES);

@@ -63,15 +63,6 @@ type Props = AgentStatusEntry;
  *   Each box shows the agent's icon, current message, and handles animation
  *   for working states. The visual representation updates based on stage and
  *   animation state.
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering and state management.
- *   - resolveWorkerVisual — determines which icon/color to display based on state.
- *   - isWorkingStage — checks if agent is in an active working state.
- *   - getWorkingFrameMs — gets animation timing for working states.
- *
- * Dependants:
- *   - AgentTaskBoard — renders multiple AgentStatusBox components for each agent.
  * </Summary>
  */
 export const AgentStatusBox: React.FC<Props> = ({
@@ -111,11 +102,6 @@ export const AgentStatusBox: React.FC<Props> = ({
    * Returns:
    *   void — called for side effects (timer management and state updates).
    *
-   * Dependencies:
-   *   - isWorkingStage — checks if current stage requires animation.
-   *   - getWorkingFrameMs — provides animation interval timing.
-   *
-   * Dependants:
    *   None (React useEffect hook, called by React on render).
    * </Summary>
    */

@@ -34,15 +34,6 @@ export type ConnectionLifecycleDeps = {
  *   Handles the connection state machine and reconnection logic for the RSocket connection.
  *   Provides status change notifications to listeners and implements exponential backoff
  *   with jitter for reconnection attempts.
- *
- * Dependencies:
- *   - ConnectionLifecycleDeps — provides connect and clearSocket functions.
- *   - RECONNECT_BASE_DELAY_MS — base delay for exponential backoff calculation.
- *   - RECONNECT_JITTER_MAX_MS — maximum jitter to add to reconnection delay.
- *   - RECONNECT_MAX_DELAY_MS — maximum delay cap for exponential backoff.
- *
- * Dependants:
- *   - Connection — creates an instance and delegates lifecycle management to it.
  * </Summary>
  */
 export class ConnectionLifecycle {
@@ -70,16 +61,11 @@ export class ConnectionLifecycle {
    *   1. Stores the provided dependencies for later use.
    *
    * Parameters:
-   *   @param {ConnectionLifecycleDeps} lifecycleDependencies — Functions for connection and cleanup.
+   *   @param lifecycleDependencies - Functions for connection and cleanup.
    *
    * Returns:
    *   void — constructor side effects only.
-   *
-   * Dependencies:
-   *   None (field assignment only).
-   *
-   * Dependants:
-   *   - Connection — creates ConnectionLifecycle with these dependencies.
+  
    * </Summary>
    */
   constructor(
@@ -97,16 +83,12 @@ export class ConnectionLifecycle {
    *   3. Returns a function that removes the callback from the set.
    *
    * Parameters:
-   *   @param {StatusListener} statusListenerCallback — Callback invoked with the new status.
+   *   @param statusListenerCallback - Callback invoked with the new status.
    *
    * Returns:
-   *   @returns {() => void} — Call this to unsubscribe from status updates.
+   *   @returns Call this to unsubscribe from status updates.
    *
-   * Dependencies:
-   *   None.
-   *
-   * Dependants:
-   *   - Connection.onConnectionStatus — delegates to this method.
+
    * </Summary>
    */
   onConnectionStatus = (
@@ -139,13 +121,8 @@ export class ConnectionLifecycle {
    *   1. Returns the currentStatus field value.
    *
    * Returns:
-   *   @returns {ConnectionStatus} — The current connection status.
+   *   @returns The current connection status.
    *
-   * Dependencies:
-   *   None (simple field access).
-   *
-   * Dependants:
-   *   - Connection components — use this to check current status for display.
    * </Summary>
    */
   getStatus = (): ConnectionStatus => this.currentStatus;
@@ -161,17 +138,11 @@ export class ConnectionLifecycle {
    *   3. Iterates through all listeners and invokes each with the new status.
    *
    * Parameters:
-   *   @param {ConnectionStatus} newStatus — The new connection status to emit.
+   *   @param newStatus - The new connection status to emit.
    *
    * Returns:
    *   void — called for side effects only.
    *
-   * Dependencies:
-   *   None.
-   *
-   * Dependants:
-   *   - Connection.connect — emits "connecting" and "connected" statuses.
-   *   - Connection.handleSocketClosed — emits "disconnected" status.
    * </Summary>
    */
   emitStatus = (newStatus: ConnectionStatus): void => {
@@ -202,16 +173,11 @@ export class ConnectionLifecycle {
    *   1. Updates the suppressReconnectFlag to the provided value.
    *
    * Parameters:
-   *   @param {boolean} suppressFlag — True to suppress reconnect, false to allow reconnect.
+   *   @param suppressFlag - True to suppress reconnect, false to allow reconnect.
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   None.
-   *
-   * Dependants:
-   *   - Connection.reload — suppresses reconnect during intentional reconnection.
+  
    * </Summary>
    */
   setSuppressReconnect = (suppressFlag: boolean): void => {
@@ -230,13 +196,9 @@ export class ConnectionLifecycle {
    *   1. Returns the suppressReconnectFlag value.
    *
    * Returns:
-   *   @returns {boolean} — True if reconnect is suppressed, false otherwise.
+   *   @returns True if reconnect is suppressed, false otherwise.
    *
-   * Dependencies:
-   *   None (simple field access).
-   *
-   * Dependants:
-   *   - Connection.suppressReconnect — exposes this for testing purposes.
+
    * </Summary>
    */
   isReconnectSuppressed = (): boolean => this.suppressReconnectFlag;
@@ -253,11 +215,7 @@ export class ConnectionLifecycle {
    * Returns:
    *   void — called for side effects only.
    *
-   * Dependencies:
-   *   None (uses clearTimeout).
-   *
-   * Dependants:
-   *   - Connection.clearReconnectTimer — delegates to this method.
+
    * </Summary>
    */
   cancelReconnect = (): void => {
@@ -284,11 +242,6 @@ export class ConnectionLifecycle {
    * Returns:
    *   void — called for side effects only.
    *
-   * Dependencies:
-   *   None.
-   *
-   * Dependants:
-   *   - Connection.connect — resets counter after successful connection.
    * </Summary>
    */
   resetReconnectAttempt = (): void => {
@@ -311,14 +264,6 @@ export class ConnectionLifecycle {
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   - lifecycleDependencies.clearSocket — clears the socket reference.
-   *   - emitStatus — notifies listeners of status change.
-   *   - scheduleReconnect — initiates reconnection attempt.
-   *
-   * Dependants:
-   *   - Connection.onClose callback — calls this when socket closes.
    * </Summary>
    */
   handleSocketClosed = (): void => {
@@ -359,15 +304,6 @@ export class ConnectionLifecycle {
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   - RECONNECT_BASE_DELAY_MS — base delay for backoff calculation.
-   *   - RECONNECT_JITTER_MAX_MS — maximum jitter to add.
-   *   - RECONNECT_MAX_DELAY_MS — maximum delay cap.
-   *   - lifecycleDependencies.connect — attempts reconnection.
-   *
-   * Dependants:
-   *   - handleSocketClosed — calls this to schedule reconnect after disconnect.
    * </Summary>
    */
   scheduleReconnect = (): void => {

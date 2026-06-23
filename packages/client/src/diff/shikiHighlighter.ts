@@ -44,14 +44,7 @@ let codeToANSIImpl: CodeToANSI | null = null;
  *   5. Return the cached implementation.
  *
  * Returns:
- *   @returns {Promise<CodeToANSI>} — The Shiki codeToANSI function that converts code to ANSI-colored strings.
- *
- * Dependencies:
- *   - @shikijs/cli — external module providing the syntax highlighting functionality.
- *
- * Dependants:
- *   - initShiki — calls this to get the function for initialization.
- *   - highlightLine — calls this to get the function for actual highlighting.
+ *   @returns The Shiki codeToANSI function that converts code to ANSI-colored strings.
  * </Summary>
  */
 const getCodeToANSI = async (): Promise<CodeToANSI> => {
@@ -83,14 +76,7 @@ const getCodeToANSI = async (): Promise<CodeToANSI> => {
  *   3. This ensures subsequent highlighting calls are fast and ready.
  *
  * Returns:
- *   @returns {Promise<void>} — Resolves when Shiki is fully initialized.
- *
- * Dependencies:
- *   - getCodeToANSI — provides the highlighting function.
- *   - @shikijs/cli — loads syntax grammars and themes during the warm-up call.
- *
- * Dependants:
- *   - Application startup code — calls this once during initialization.
+ *   @returns Resolves when Shiki is fully initialized.
  * </Summary>
  */
 export const initShiki = async (): Promise<void> => {
@@ -117,19 +103,12 @@ export const initShiki = async (): Promise<void> => {
  *   5. If highlighting fails, fall back to returning the plain trimmed code.
  *
  * Parameters:
- *   @param {string} code — The line of code to highlight (e.g., "function foo() { return 42; }").
- *   @param {string} lang — The language identifier (e.g., "typescript", "javascript", "python").
- *   @param {string} shikiTheme — The Shiki theme name (e.g., "dark-plus", "github-dark").
+ *   @param code - The line of code to highlight (e.g., "function foo() { return 42; }").
+ *   @param lang - The language identifier (e.g., "typescript", "javascript", "python").
+ *   @param shikiTheme - The Shiki theme name (e.g., "dark-plus", "github-dark").
  *
  * Returns:
- *   @returns {Promise<string>} — ANSI-colored string with syntax highlighting, or plain code if highlighting fails.
- *
- * Dependencies:
- *   - getCodeToANSI — provides the Shiki highlighting function.
- *   - @shikijs/cli — performs the actual syntax highlighting.
- *
- * Dependants:
- *   - diffRenderer — calls this for each line in the diff to add syntax highlighting.
+ *   @returns ANSI-colored string with syntax highlighting, or plain code if highlighting fails.
  * </Summary>
  */
 export const highlightLine = async (

@@ -7,13 +7,6 @@
  *   Called by AdvisorOrchestrator before the first task in a new session to establish
  *   baseline context. Provides the advisor with the workspace structure without
  *   reading file contents, which is more efficient for large codebases.
- *
- * Dependencies:
- *   - WorkspaceManager.listStructure — reads directory tree.
- *   - TaskFrame — emits progress frames to client.
- *
- * Dependants:
- *   - AdvisorOrchestrator.runTask — calls for new sessions.
  * </Summary>
  */
 
@@ -30,9 +23,6 @@ import type { WorkspaceManager } from "../workspace/manager/workspaceManager.js"
  *
  * Fields:
  *   snapshot — The directory structure snapshot as a formatted string.
- *
- * Dependants:
- *   - AdvisorOrchestrator.runTask — uses snapshot to build initial context.
  * </Summary>
  */
 export type ExploreResult = {
@@ -52,18 +42,12 @@ export type ExploreResult = {
  *   3. Format the structure as a snapshot and return it.
  *
  * Parameters:
- *   @param {WorkspaceManager} workspace — The workspace manager for directory operations.
- *   @param {(frame: TaskFrame) => void} emit — Function to emit progress frames to client.
- *   @param {AbortSignal} _signal — Abort signal (currently unused, reserved for future cancellation).
+ *   @param workspace - The workspace manager for directory operations.
+ *   @param emit - Function to emit progress frames to client.
+ *   @param _signal - Abort signal (currently unused, reserved for future cancellation).
  *
  * Returns:
- *   @returns {Promise<ExploreResult>} — Result containing the structure snapshot.
- *
- * Dependencies:
- *   - WorkspaceManager.listStructure — reads directory tree up to specified depth.
- *
- * Dependants:
- *   - AdvisorOrchestrator.runTask — calls for new sessions to build initial context.
+ *   @returns Result containing the structure snapshot.
  * </Summary>
  */
 export const exploreCodebase = async (

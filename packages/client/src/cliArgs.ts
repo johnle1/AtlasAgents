@@ -71,17 +71,10 @@ export type CliParseResult = {
  *   3. Returns undefined if invalid, otherwise returns the parsed number.
  *
  * Parameters:
- *   @param {string} raw — The port string to parse (e.g., "7000").
+ *   @param raw - The port string to parse (e.g., "7000").
  *
  * Returns:
- *   @returns {number | undefined} — The parsed port number, or undefined if invalid.
- *
- * Dependencies:
- *   - Number.parseInt — converts string to integer.
- *   - Number.isNaN — checks if parsing failed.
- *
- * Dependants:
- *   - parseCliArgs — validates port argument before using it.
+ *   @returns The parsed port number, or undefined if invalid.
  * </Summary>
  */
 const parsePort = (raw: string): number | undefined => {
@@ -108,13 +101,7 @@ const parsePort = (raw: string): number | undefined => {
  *   None.
  *
  * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - console.log — outputs help text to terminal.
- *
- * Dependants:
- *   - index.ts — displays help when --help flag is passed or on parsing errors.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const printCliHelp = (): void => {
@@ -152,20 +139,13 @@ Examples:
  *   10. Returns result with help=false and any parsed overrides.
  *
  * Parameters:
- *   @param {string[]} argv — The process.argv array (command-line arguments).
+ *   @param argv - The process.argv array (command-line arguments).
  *
  * Returns:
- *   @returns {CliParseResult} — Object containing help flag and config overrides.
+ *   @returns Object containing help flag and config overrides.
  *
  * Throws:
  *   @throws {Error} — When port argument is provided but invalid.
- *
- * Dependencies:
- *   - node:util.parseArgs — parses command-line arguments.
- *   - parsePort — validates port number format and range.
- *
- * Dependants:
- *   - index.ts — parses process.argv to get CLI overrides and help flag.
  * </Summary>
  */
 export const parseCliArgs = (argv: string[]): CliParseResult => {
@@ -228,17 +208,11 @@ export const parseCliArgs = (argv: string[]): CliParseResult => {
  *   4. Returns new config object with overrides applied.
  *
  * Parameters:
- *   @param {Config} config — The original configuration object.
- *   @param {CliOverrides} overrides — CLI overrides to apply (server and/or port).
+ *   @param config - The original configuration object.
+ *   @param overrides - CLI overrides to apply (server and/or port).
  *
  * Returns:
- *   @returns {Config} — New configuration object with CLI overrides applied.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - index.ts — applies CLI overrides to loaded config before starting client.
+ *   @returns New configuration object with CLI overrides applied.
  * </Summary>
  */
 export const applyCliOverrides = (

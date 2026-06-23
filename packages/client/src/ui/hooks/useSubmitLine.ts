@@ -9,17 +9,6 @@
  *   a command. It manages the command history, executes commands through the
  *   command handler, or streams tasks to the server if the input is not a command.
  *   It also handles error display and manages the busy state during execution.
- *
- * Dependencies:
- *   - React hooks — useCallback for memoization, useRef for submit lock.
- *   - formatErrorMessage — formats error messages for display.
- *   - loadConfig — loads application configuration.
- *   - sanitizeHistoryLine — sanitizes input before adding to history.
- *   - MAX_INPUT_HISTORY — maximum number of history entries to keep.
- *   - runTaskStream — streams tasks to the server.
- *
- * Dependants:
- *   - AppContent component — uses this hook to handle command submission.
  * </Summary>
  */
 
@@ -79,18 +68,10 @@ type SubmitLineContext = Pick<
  *   9. Releases submit lock and resets busy state in finally block.
  *
  * Parameters:
- *   @param {SubmitLineContext} submitLineDependencies — State and setters from context.
+ *   @param submitLineDependencies - State and setters from context.
  *
  * Returns:
- *   @returns {{ submit: Function, submitLockRef: React.RefObject<boolean> }} — The submit handler and lock ref.
- *
- * Dependencies:
- *   - React hooks — useCallback for memoization, useRef for submit lock.
- *   - Command utilities — for command execution and error formatting.
- *   - Task streaming — for non-command input handling.
- *
- * Dependants:
- *   - AppContent component — uses this hook to handle command submission.
+ *   @returns The submit handler and lock ref.
  * </Summary>
  */
 export const useSubmitLine = ({

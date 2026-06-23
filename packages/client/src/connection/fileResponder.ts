@@ -50,18 +50,12 @@ type RequestResponseResponder = (
  *   4. On missing proxy or errors: respond with { ok: false, error } JSON.
  *
  * Parameters:
- *   @param {LocalFileProxy | null} fileProxy — File proxy instance, or null if
+ *   @param fileProxy - File proxy instance, or null if
  *     not yet initialised via Connection.setFileProxy.
  *
  * Returns:
- *   @returns {{ requestResponse: RequestResponseResponder }} — RSocket responder
+ *   @returns RSocket responder
  *     config passed to RSocketConnector.
- *
- * Dependencies:
- *   - LocalFileProxy.handle — executes file operations on the client filesystem.
- *
- * Dependants:
- *   - Connection.connect — passes this to RSocketConnector.responder.
  * </Summary>
  */
 export const createFileResponder = (

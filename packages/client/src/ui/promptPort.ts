@@ -7,12 +7,6 @@
  *   Abstracts the UI prompt functionality to allow different implementations based on the
  *   rendering context. When using Ink, it delegates to the uiBridge for actual prompt handling.
  *   This enables dependency injection and testing flexibility.
- *
- * Dependencies:
- *   - uiBridge — provides the actual prompt request implementation when Ink is active.
- *
- * Dependants:
- *   - CommandHandler — uses this port to prompt users for input.
  * </Summary>
  */
 
@@ -36,11 +30,11 @@ export type PromptPort = {
    * Prompts the user for a text response with optional masking.
    *
    * Parameters:
-   * @param {string} prompt — The question or prompt text to display to the user.
-   * @param {{ masked?: boolean }} opts — Optional settings including masked flag for sensitive inputs.
+   * @param prompt - The question or prompt text to display to the user.
+   * @param opts - Optional settings including masked flag for sensitive inputs.
    *
    * Returns:
-   * @returns {Promise<string>} — The user's response as a string.
+   * @returns The user's response as a string.
    */
   question: (prompt: string, opts?: { masked?: boolean }) => Promise<string>;
 
@@ -48,11 +42,11 @@ export type PromptPort = {
    * Prompts the user to choose from a numbered list of options.
    *
    * Parameters:
-   * @param {string} prompt — The question or prompt text to display to the user.
-   * @param {number} max — The maximum number of choices available.
+   * @param prompt - The question or prompt text to display to the user.
+   * @param max - The maximum number of choices available.
    *
    * Returns:
-   * @returns {Promise<number>} — The index of the user's choice (1-based).
+   * @returns The index of the user's choice (1-based).
    */
   choose: (prompt: string, max: number) => Promise<number>;
 
@@ -60,7 +54,7 @@ export type PromptPort = {
    * Opens the theme selection interface.
    *
    * Returns:
-   * @returns {Promise<void>} — Resolves when theme selection is complete.
+   * @returns Resolves when theme selection is complete.
    */
   pickTheme: () => Promise<void>;
 };
@@ -86,13 +80,7 @@ export type PromptPort = {
  *   2. Wait for the user to complete theme selection.
  *
  * Returns:
- * @returns {PromptPort} — A prompt port implementation for Ink-based prompting.
- *
- * Dependencies:
- *   - requestPrompt — provides the actual UI prompt handling.
- *
- * Dependants:
- *   - Application initialization — creates this port for the command handler.
+ * @returns A prompt port implementation for Ink-based prompting.
  * </Summary>
  */
 export const createInkPromptPort = (): PromptPort => ({

@@ -7,15 +7,6 @@
  *   This module handles the approval workflow where the server requests user confirmation
  *   for actions like plan review, command execution, or file operations. It manages
  *   pending approval state, routes requests to the UI, and resolves approvals with user responses.
- *
- * Dependencies:
- *   - getInkUIActive — checks if the Ink UI is currently active.
- *   - getBridgeHooks — provides access to global state update hooks.
- *   - getPendingApprovalEntry/setPendingApprovalEntry — manages pending approval state.
- *
- * Dependants:
- *   - Server communication handlers — call these functions to request user approval.
- *   - ApprovalMenu component — displays pending approval requests to users.
  * </Summary>
  */
 
@@ -34,14 +25,7 @@ import { getPendingApprovalEntry, setPendingApprovalEntry } from "./state.js";
  *   3. Returns null if no approval is pending.
  *
  * Returns:
- *   @returns {ApprovalRequest | null} — The pending approval request or null.
- *
- * Dependencies:
- *   - getPendingApprovalEntry — retrieves the pending approval state entry.
- *
- * Dependants:
- *   - ApprovalMenu component — uses this to display the current approval request.
- *   - Server handlers — check this to avoid duplicate approval requests.
+ *   @returns The pending approval request or null.
  * </Summary>
  */
 export const getPendingApproval = (): ApprovalRequest | null =>
@@ -62,22 +46,12 @@ export const getPendingApproval = (): ApprovalRequest | null =>
  *   6. Returns a promise that resolves when user responds.
  *
  * Parameters:
- *   @param {ApprovalRequest} approvalRequest — The approval request to present to the user.
+ *   @param approvalRequest - The approval request to present to the user.
  *
  * Returns:
- *   @returns {Promise<ApprovalResult>} — Promise that resolves with user's approval decision.
+ *   @returns Promise that resolves with user's approval decision.
  *
  * @throws {Error} — When an approval request is already pending.
- *
- * Dependencies:
- *   - getInkUIActive — checks if the Ink UI is currently active.
- *   - getPendingApprovalEntry — checks for existing pending approvals.
- *   - setPendingApprovalEntry — stores the new approval request.
- *   - getBridgeHooks — provides access to UI notification hooks.
- *
- * Dependants:
- *   - Server streaming handlers — call this to request user confirmation.
- *   - Plan execution functions — use this to get plan approval from user.
  * </Summary>
  */
 export const requestApproval = (
@@ -134,19 +108,10 @@ export const requestApproval = (
  *   4. Calls the resolver with the user's approval result.
  *
  * Parameters:
- *   @param {ApprovalResult} approvalResult — The user's approval decision.
+ *   @param approvalResult - The user's approval decision.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getPendingApprovalEntry — retrieves the pending approval state entry.
- *   - setPendingApprovalEntry — clears the pending approval state.
- *   - getBridgeHooks — provides access to UI notification hooks.
- *
- * Dependants:
- *   - ApprovalMenu component — calls this when user selects an option.
- *   - Keyboard input handlers — call this when user presses approval hotkeys.
  * </Summary>
  */
 export const resolveApproval = (approvalResult: ApprovalResult): void => {

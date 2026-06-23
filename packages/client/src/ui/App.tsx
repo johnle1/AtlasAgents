@@ -8,13 +8,6 @@
  *   This is the top-level React component that wraps the entire application
  *   with the AppProvider context and renders the main AppContent component.
  *   It serves as the entry point for the Ink-based terminal user interface.
- *
- * Dependencies:
- *   - AppProvider — provides global application state context.
- *   - AppContent — main application content component.
- *
- * Dependants:
- *   - BootstrapApp — renders this component after initialization.
  * </Summary>
  */
 
@@ -52,17 +45,10 @@ import { useSubmitLine } from "./hooks/useSubmitLine.js";
  *   3. Renders the wrapped component tree.
  *
  * Parameters:
- *   @param {AppProps} appProps — Application properties (connection, handlers, etc.).
+ *   @param appProps - Application properties (connection, handlers, etc.).
  *
  * Returns:
- *   @returns {JSX.Element} — The wrapped application component tree.
- *
- * Dependencies:
- *   - AppProvider — supplies global application state context.
- *   - AppContent — main application content.
- *
- * Dependants:
- *   - BootstrapApp — renders this component after initialization.
+ *   @returns The wrapped application component tree.
  * </Summary>
  */
 export const App: React.FC<AppProps> = (appProps) => (
@@ -82,15 +68,6 @@ export const App: React.FC<AppProps> = (appProps) => (
  *   history display, input handling, command autocomplete, agent task boards,
  *   approval menus, and prompt overlays. It coordinates between user input
  *   and the application state through the context system.
- *
- * Dependencies:
- *   - AppContext — provides global application state and setter functions.
- *   - useApp — provides Ink app exit functionality.
- *   - Custom hooks — useBridgeSetup, useSubmitLine, useKeyboardInput.
- *   - UI components — HistoryView, InputBox, ApprovalMenu, etc.
- *
- * Dependants:
- *   - App — renders this component wrapped in context provider.
  * </Summary>
  */
 const AppContent: React.FC = () => {

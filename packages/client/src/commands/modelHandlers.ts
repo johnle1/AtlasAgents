@@ -8,13 +8,6 @@
  *   subcommands for listing, finding, pulling, deleting, showing, and listing running models.
  *   These commands communicate with the server via the RSocket connection and provide real-time
  *   progress feedback during operations like model pulling.
- *
- * Dependencies:
- *   - Connection — provides server communication methods.
- *   - renderer — provides output formatting and display functions.
- *
- * Dependants:
- *   - CommandHandler — uses these handlers for /models commands.
  * </Summary>
  */
 
@@ -48,28 +41,12 @@ import {
  *   8. Print success or error messages for each operation based on the result.
  *
  * Parameters:
- * @param {string} subcommand — Subcommand type: "list", "find", "pull", "delete", "show", or "running".
- * @param {string} modelArgument — Model name for find, pull, delete, and show subcommands.
- * @param {Connection} connection — RSocket connection for server communication.
+ * @param subcommand - Subcommand type: "list", "find", "pull", "delete", "show", or "running".
+ * @param modelArgument - Model name for find, pull, delete, and show subcommands.
+ * @param connection - RSocket connection for server communication.
  *
  * Returns:
- * @returns {Promise<void>} — Promise that resolves after handling the subcommand (called for side effects only).
- *
- * Dependencies:
- *   - Connection.fetchModelsDetailed — fetches detailed model information from server.
- *   - Connection.sendCommand — sends one-time commands to server.
- *   - Connection.sendStream — initiates streaming communication with server.
- *   - renderer.printInstalledModels — displays list of installed models.
- *   - renderer.printModelFind — displays model search results.
- *   - renderer.printLine — prints plain text output.
- *   - renderer.printError — displays error messages.
- *   - renderer.printSuccess — displays success messages.
- *   - renderer.printProgress — displays download progress.
- *   - renderer.resetPullProgress — initializes progress tracking.
- *   - renderer.finishPullProgress — finalizes progress tracking.
- *
- * Dependants:
- *   - CommandHandler.handle — calls this for /models commands.
+ * @returns Promise that resolves after handling the subcommand (called for side effects only).
  * </Summary>
  */
 export const handleModels = async (

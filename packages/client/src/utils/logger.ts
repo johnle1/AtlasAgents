@@ -7,12 +7,6 @@
  *   Replaces direct console.log calls throughout the codebase with a structured
  *   logging interface that provides consistency and makes it easier to add
  *   advanced logging features in the future (like log levels, file output, etc.).
- *
- * Dependencies:
- *   - None (uses built-in console methods).
- *
- * Dependants:
- *   - All modules that previously used console.log directly.
  * </Summary>
  */
 

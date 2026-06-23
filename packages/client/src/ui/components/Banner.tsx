@@ -41,13 +41,6 @@ const WELCOME_TEXT = "Welcome back";
  * How it fits in the system:
  *   Helper component used by Banner to display the ASCII art logo.
  *   Each row consists of colored blocks that form the logo image.
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering.
- *   - LogoColor type — defines available colors for logo blocks.
- *
- * Dependants:
- *   - Banner — renders multiple LogoRow components to form complete logo.
  * </Summary>
  */
 const LogoRow: React.FC<{ row: LogoColor[] }> = ({ row }) => (
@@ -68,13 +61,6 @@ const LogoRow: React.FC<{ row: LogoColor[] }> = ({ row }) => (
  * How it fits in the system:
  *   Helper component used by Banner to create spacing between sections.
  *   Maintains consistent border width and alignment.
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering.
- *   - BANNER_INNER — defines inner banner width for spacing.
- *
- * Dependants:
- *   - Banner — uses for vertical spacing between banner sections.
  * </Summary>
  */
 const BorderedBlank: React.FC<{ border: (s: string) => React.ReactNode }> = ({
@@ -97,14 +83,6 @@ const BorderedBlank: React.FC<{ border: (s: string) => React.ReactNode }> = ({
  *   Displays on startup to show the CLI version, configured models,
  *   and LoopyCode branding. Provides visual context about the
  *   current environment and configuration.
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering.
- *   - logoArt module — provides logo grid, colors, and formatting constants.
- *   - bannerCenterPad — calculates centering for text and logo.
- *
- * Dependants:
- *   - App component — renders Banner on startup and when configuration changes.
  * </Summary>
  */
 export const Banner: React.FC<BannerProps> = ({

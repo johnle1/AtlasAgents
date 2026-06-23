@@ -5,13 +5,6 @@
  *
  * How it fits in the system:
  *   Provides configuration values for experience and snapshot directory paths.
- *
- * Dependencies:
- *   - None (pure constants).
- *
- * Dependants:
- *   - experienceHelpers.ts - uses these constants for directory operations.
- *   - experienceRecorder.ts - uses these constants for directory paths.
  * </Summary>
  */
 

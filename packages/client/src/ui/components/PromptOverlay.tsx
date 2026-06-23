@@ -23,14 +23,7 @@ import { useAppContext } from "../../DataContext.js";
  *   None — uses promptReq from context.
  *
  * Returns:
- *   @returns {React.ReactNode} — The appropriate prompt component or null.
- *
- * Dependencies:
- *   - useAppContext — accesses current prompt request.
- *   - ThemePicker, PlanEditPrompt, ChoicePrompt, LinePrompt — helper components.
- *
- * Dependants:
- *   - Main UI components — renders PromptOverlay when prompt request exists.
+ *   @returns The appropriate prompt component or null.
  * </Summary>
  */
 export const PromptOverlay: React.FC = () => {
@@ -63,15 +56,6 @@ export const PromptOverlay: React.FC = () => {
  * How it fits in the system:
  *   Used for simple text input prompts where the user provides a single
  *   line of text (e.g., passwords, configuration values).
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering.
- *   - TextInput — handles keyboard input and editing.
- *   - useAppContext — accesses prompt draft state.
- *   - resolvePrompt — sends response back to server.
- *
- * Dependants:
- *   - PromptOverlay — renders LinePrompt for text input requests.
  * </Summary>
  */
 const LinePrompt: React.FC<{ prompt: string; masked: boolean }> = ({
@@ -105,15 +89,6 @@ const LinePrompt: React.FC<{ prompt: string; masked: boolean }> = ({
  * How it fits in the system:
  *   Used when the user needs to select from a numbered list of options.
  *   Validates that input is a number within the valid range.
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering.
- *   - TextInput — handles keyboard input and editing.
- *   - useAppContext — accesses prompt draft state.
- *   - resolvePrompt — sends response back to server.
- *
- * Dependants:
- *   - PromptOverlay — renders ChoicePrompt for numeric selection requests.
  * </Summary>
  */
 const ChoicePrompt: React.FC<{ prompt: string; max: number }> = ({
@@ -152,15 +127,6 @@ const ChoicePrompt: React.FC<{ prompt: string; max: number }> = ({
  *   Used when the user wants to edit a generated plan. Shows initial
  *   plan steps and allows adding new steps line by line. An empty line
  *   submits the final plan.
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering.
- *   - TextInput — handles keyboard input and editing.
- *   - useAppContext — accesses prompt draft state.
- *   - resolvePrompt — sends response back to server.
- *
- * Dependants:
- *   - PromptOverlay — renders PlanEditPrompt for plan editing requests.
  * </Summary>
  */
 const PlanEditPrompt: React.FC<{ initial: string[] }> = ({ initial }) => {
@@ -235,17 +201,7 @@ const PlanEditPrompt: React.FC<{ initial: string[] }> = ({ initial }) => {
  *   None — uses THEMES and context state.
  *
  * Returns:
- *   @returns {React.ReactElement} — Theme selection menu component.
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering and input handling.
- *   - THEMES — provides available theme options.
- *   - setTheme — applies selected theme globally.
- *   - useAppContext — accesses prompt draft state.
- *   - resolvePrompt — sends response back to server.
- *
- * Dependants:
- *   - PromptOverlay — renders ThemePicker for theme selection requests.
+ *   @returns Theme selection menu component.
  * </Summary>
  */
 const ThemePicker: React.FC = () => {

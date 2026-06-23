@@ -12,34 +12,15 @@
  * =============================================================================
  */
 
-// ===== STANDARD LIBRARY IMPORTS =====
 import * as readline from "node:readline";
-
-// ===== EXTERNAL DEPENDENCIES =====
 import type { RSocket } from "@rsocket/core";
-
-// ===== AUTHENTICATION IMPORTS =====
 import { AuthMiddleware } from "./auth/middleware.js";
-
-// ===== CONFIGURATION IMPORTS =====
 import { ConfigError } from "./config/configManager.js";
-
-// ===== CONTAINER IMPORTS =====
 import { createContainer } from "./container.js";
-
-// ===== DATA INITIALIZATION IMPORTS =====
 import { installUserDataDefaults } from "./installUserDataDefaults.js";
-
-// ===== SERVER IMPORTS =====
 import { RSocketServer } from "./server/rsocket/rsocketServer.js";
-
-// ===== OLLAMA LIFECYCLE IMPORTS =====
 import { ensureOllamaRunning } from "./ollama/lifecycle.js";
-
-// ===== WORKSPACE CLEANUP IMPORTS =====
 import { cleanupOldSnapshots } from "./workspace/cleanup/snapshotCleanup.js";
-
-// ===== LOGGING IMPORTS =====
 import { logger } from "./logger.js";
 
 // ===== CONSTANTS =====
@@ -73,13 +54,7 @@ const clientPeers = new Map<string, RSocket>();
  *   None.
  *
  * Returns:
- *   @returns {Promise<string>} — Password (may be empty for dev mode).
- *
- * Dependencies:
- *   - process.stdin, process.stdout — TTY raw read or line fallback.
- *
- * Dependants:
- *   - runServerStartupPrompts — first startup question.
+ *   @returns Password (may be empty for dev mode).
  * </Summary>
  */
 const readPasswordAtStartup = (): Promise<string> => {
@@ -94,20 +69,25 @@ const readPasswordAtStartup = (): Promise<string> => {
   if (!stdin.isTTY) {
     // Step 3a: Non-TTY environment (e.g., piped input)
     // Use readline interface for simple line-by-line input
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const readlineInterface = readline.createInterface({
         input: stdin,
         output: stdout,
       });
       readlineInterface.question("", (inputLine) => {
-        readlineInterface.close();
-        resolve(inputLine.trimEnd());
+        try {
+          readlineInterface.close();
+          resolve(inputLine.trimEnd());
+        } catch (error) {
+          readlineInterface.close();
+          reject(error);
+        }
       });
     });
   }
 
   // Step 4: TTY environment - use raw mode for character-by-character input
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     // Step 4a: Enable raw mode for direct character input
     stdin.setRawMode(true);
 
@@ -120,56 +100,66 @@ const readPasswordAtStartup = (): Promise<string> => {
     // Step 4d: Initialize password accumulator
     let password = "";
 
-    // Step 4e: Define data handler for character input
-    const onData = (chunk: string | Buffer) => {
-      // Step 4f: Convert chunk to string if it's a Buffer
-      const chunkString =
-        typeof chunk === "string" ? chunk : chunk.toString("utf8");
-
-      // Step 4g: Process each character in the chunk
-      for (const character of chunkString) {
-        const characterCode = character.charCodeAt(0);
-
-        // Step 4h: Check for enter key (newline, carriage return, or Ctrl-D)
-        if (character === "\n" || character === "\r" || characterCode === 4) {
-          // Step 4h-1: Remove data listener to stop processing input
-          stdin.removeListener("data", onData);
-
-          // Step 4h-2: Disable raw mode
-          stdin.setRawMode(false);
-
-          // Step 4h-3: Pause stdin
-          stdin.pause();
-
-          // Step 4h-4: Move to next line
-          stdout.write("\n");
-
-          // Step 4h-5: Resolve with collected password
-          resolve(password);
-          return;
-        }
-
-        // Step 4i: Check for backspace or delete key
-        if (characterCode === 127 || character === "\b") {
-          // Step 4i-1: Only handle backspace if password has characters
-          if (password.length > 0) {
-            // Step 4i-2: Remove last character from password
-            password = password.slice(0, -1);
-
-            // Step 4i-3: Move cursor back, overwrite with space, move back again
-            stdout.write("\b \b");
-          }
-          continue;
-        }
-
-        // Step 4j: Regular character - add to password and show bullet point
-        password += character;
-        stdout.write("•");
+    // Step 4e: Define cleanup function to restore TTY state
+    const cleanup = () => {
+      try {
+        stdin.removeListener("data", onData);
+        stdin.setRawMode(false);
+        stdin.pause();
+      } catch (e) {
+        // Ignore cleanup errors to avoid masking original error
       }
     };
 
-    // Step 4k: Attach data handler to stdin
-    stdin.on("data", onData);
+    // Step 4f: Define data handler for character input
+    const onData = (chunk: string | Buffer) => {
+      try {
+        // Step 4f-1: Convert chunk to string if it's a Buffer
+        const chunkString =
+          typeof chunk === "string" ? chunk : chunk.toString("utf8");
+
+        // Step 4f-2: Process each character in the chunk
+        for (const character of chunkString) {
+          const characterCode = character.charCodeAt(0);
+
+          // Step 4f-3: Check for enter key (newline, carriage return, or Ctrl-D)
+          if (character === "\n" || character === "\r" || characterCode === 4) {
+            cleanup();
+            stdout.write("\n");
+            resolve(password);
+            return;
+          }
+
+          // Step 4f-4: Check for backspace or delete key
+          if (characterCode === 127 || character === "\b") {
+            // Step 4f-4a: Only handle backspace if password has characters
+            if (password.length > 0) {
+              // Step 4f-4b: Remove last character from password
+              password = password.slice(0, -1);
+
+              // Step 4f-4c: Move cursor back, overwrite with space, move back again
+              stdout.write("\b \b");
+            }
+            continue;
+          }
+
+          // Step 4f-5: Regular character - add to password and show bullet point
+          password += character;
+          stdout.write("•");
+        }
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    };
+
+    // Step 4g: Attach data handler to stdin with error handling
+    try {
+      stdin.on("data", onData);
+    } catch (error) {
+      cleanup();
+      reject(error);
+    }
   });
 };
 
@@ -188,16 +178,10 @@ const readPasswordAtStartup = (): Promise<string> => {
  *   7. If valid: return the parsed port number.
  *
  * Parameters:
- *   @param {readline.Interface} readlineInterface — Readline for one line of input.
+ *   @param readlineInterface - Readline for one line of input.
  *
  * Returns:
- *   @returns {Promise<number>} — Listen port in valid range.
- *
- * Dependencies:
- *   - readline.Interface.question — user input.
- *
- * Dependants:
- *   - runServerStartupPrompts — second startup question.
+ *   @returns Listen port in valid range.
  * </Summary>
  */
 const promptListenPort = (
@@ -247,13 +231,7 @@ const promptListenPort = (
  *   None.
  *
  * Returns:
- *   @returns {Promise<{ password: string; port: number }>} — Startup answers.
- *
- * Dependencies:
- *   - readPasswordAtStartup, readline.createInterface, promptListenPort.
- *
- * Dependants:
- *   - main — composes AuthMiddleware and RSocketServer.
+ *   @returns Startup answers.
  * </Summary>
  */
 const runServerStartupPrompts = async (): Promise<{
@@ -307,13 +285,7 @@ const runServerStartupPrompts = async (): Promise<{
  *   None.
  *
  * Returns:
- *   @returns {Promise<void>} — Runs until SIGINT or process exit.
- *
- * Dependencies:
- *   - runServerStartupPrompts, assertOllamaReachable, AuthMiddleware, Router, RSocketServer.
- *
- * Dependants:
- *   - Node bootstrap — invoked at process startup.
+ *   @returns Runs until SIGINT or process exit.
  * </Summary>
  */
 const main = async (): Promise<void> => {
@@ -466,7 +438,13 @@ const main = async (): Promise<void> => {
         // Step 24b-1: Dispose plan broker resources
         perConnection.planBroker.dispose();
 
-        // Step 24b-2: Remove connection from active connections map
+        // Step 24b-2: Dispose workspace manager resources
+        perConnection.workspace.dispose();
+
+        // Step 24b-3: Dispose terminal executor resources
+        perConnection.terminal.dispose();
+
+        // Step 24b-4: Remove connection from active connections map
         app.brokerByRequester.delete(requesterId);
       }
     },

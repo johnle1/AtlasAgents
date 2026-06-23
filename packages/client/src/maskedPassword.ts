@@ -15,17 +15,10 @@ import * as readline from "node:readline";
  *   5. TTY: turn raw mode off, stop listening, print a newline, return the password (can be empty).
  *
  * Parameters:
- *   @param {string} prompt — Label printed before the user types (e.g. "Enter password: ").
+ *   @param prompt - Label printed before the user types (e.g. "Enter password: ").
  *
  * Returns:
- *   @returns {Promise<string>} — The password. Empty string is allowed.
- *
- * Dependencies (classes/modules this function calls):
- *   - readline — non-TTY path only.
- *   - process.stdin / process.stdout — TTY raw read and dots.
- *
- * Dependants (classes/modules that call this function):
- *   - index.ts runFirstRunSetup — only before the main REPL readline starts.
+ *   @returns The password. Empty string is allowed.
  *
  * Note:
  *   Do not use while the main readline prompt owns stdin; the two fight over the same stream.

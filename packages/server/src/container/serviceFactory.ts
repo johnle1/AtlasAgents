@@ -18,17 +18,10 @@
  * setup clean and maintainable.
  *
  * Parameters:
- *   @param {ServiceFactoryOptions} options - Configuration options for service setup.
+ *   @param options - Configuration options for service setup.
  *
  * Returns:
- *   @returns {InitializedServices} - All initialized application services.
- *
- * Dependencies:
- *   - All imported service classes.
- *   - ServiceFactoryOptions for configuration.
- *
- * Dependants:
- *   - createContainer — calls this to initialize services.
+ *   @returns All initialized application services.
  * </Summary>
  */
 
@@ -186,18 +179,10 @@ export type InitializedServices = {
  *   13. Return object containing all initialized services.
  *
  * Parameters:
- *   @param {ServiceFactoryOptions} options - Configuration options for service setup.
+ *   @param options - Configuration options for service setup.
  *
  * Returns:
- *   @returns {InitializedServices} - All initialized application services.
- *
- * Dependencies:
- *   - All imported service classes.
- *   - ServiceFactoryOptions for configuration.
- *   - process.cwd for default data root.
- *
- * Dependants:
- *   - createContainer — calls this to initialize services.
+ *   @returns All initialized application services.
  * </Summary>
  */
 export const createServices = (

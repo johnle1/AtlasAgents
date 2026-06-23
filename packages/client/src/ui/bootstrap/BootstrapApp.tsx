@@ -9,17 +9,6 @@
  *   complete bootstrap process from initial setup through server connection to launching
  *   the main application. It manages the connection lifecycle, skill synchronization,
  *   and provides error handling for the startup sequence.
- *
- * Dependencies:
- *   - SetupWizard — handles first-run configuration wizard.
- *   - Connection — establishes RSocket connection to the server.
- *   - CommandHandler — processes CLI commands.
- *   - SkillManager — manages skill synchronization with server.
- *   - LocalFileProxy — provides file system operations.
- *   - App — main application component launched after bootstrap.
- *
- * Dependants:
- *   - BootstrapApp.tsx entry point — renders this component as the initial UI.
  * </Summary>
  */
 
@@ -120,18 +109,10 @@ type ReadyAppState = {
  *   6. Passes initialized services to main App component when ready.
  *
  * Parameters:
- *   @param {BootstrapAppProps} bootstrapProps — Properties for bootstrap process.
+ *   @param bootstrapProps - Properties for bootstrap process.
  *
  * Returns:
- *   @returns {JSX.Element} — The appropriate UI component based on bootstrap phase.
- *
- * Dependencies:
- *   - React hooks — useState, useEffect, useMemo, useRef, useLayoutEffect.
- *   - Ink components — Box, Text, useApp, useInput.
- *   - Application services — Connection, CommandHandler, SkillManager, etc.
- *
- * Dependants:
- *   - BootstrapApp entry point — renders this component as the initial UI.
+ *   @returns The appropriate UI component based on bootstrap phase.
  * </Summary>
  */
 export const BootstrapApp: React.FC<BootstrapAppProps> = ({

@@ -33,16 +33,10 @@ const ADVISOR_THINKING_STAGES = new Set<AdvisorStage>([
  *   3. Set the mode to "thinking" for braille indicator display.
  *
  * Parameters:
- * @param {string} label — The label text to display next to the spinner.
+ * @param label - The label text to display next to the spinner.
  *
  * Returns:
- * @returns {SpinnerState} — A spinner state object configured for thinking mode.
- *
- * Dependencies:
- *   - None (simple object creation).
- *
- * Dependants:
- *   - spinnerForStatusFrame — uses this to create advisor and agent thinking spinners.
+ * @returns A spinner state object configured for thinking mode.
  * </Summary>
  */
 const thinkingSpinner = (label: string): SpinnerState => ({
@@ -68,17 +62,10 @@ const thinkingSpinner = (label: string): SpinnerState => ({
  *   9. Otherwise, clear the spinner (return null).
  *
  * Parameters:
- * @param {TaskFrame} frame — The task frame to evaluate for spinner state.
+ * @param frame - The task frame to evaluate for spinner state.
  *
  * Returns:
- * @returns {SpinnerState | null | undefined} — The spinner state (show spinner), null (clear spinner), or undefined (no change).
- *
- * Dependencies:
- *   - ADVISOR_THINKING_STAGES — provides the set of advisor thinking stages.
- *   - thinkingSpinner — creates spinner states for thinking operations.
- *
- * Dependants:
- *   - Status display components — use this to determine spinner behavior.
+ * @returns The spinner state (show spinner), null (clear spinner), or undefined (no change).
  * </Summary>
  */
 /**

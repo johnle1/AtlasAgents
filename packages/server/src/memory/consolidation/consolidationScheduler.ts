@@ -18,17 +18,10 @@
  *   memory system from growing indefinitely and improves performance.
  *
  * Parameters:
- *   @param {ConsolidationSchedulerDeps} dependencies - Config and preference store dependencies.
+ *   @param dependencies - Config and preference store dependencies.
  *
  * Returns:
  *   void — called for side effects (timer setup and consolidation scheduling).
- *
- * Dependencies:
- *   - config — stores last consolidation timestamp.
- *   - prefs — performs consolidation operation.
- *
- * Dependants:
- *   - createContainer — calls this to set up periodic consolidation.
  * </Summary>
  */
 
@@ -98,18 +91,10 @@ export type ConsolidationSchedulerDeps = {
  *   6. Unref timer to allow clean process exit.
  *
  * Parameters:
- *   @param {ConsolidationSchedulerDeps} dependencies - Config and preference store dependencies.
+ *   @param dependencies - Config and preference store dependencies.
  *
  * Returns:
  *   void — called for side effects (timer setup and consolidation scheduling).
- *
- * Dependencies:
- *   - config — stores last consolidation timestamp.
- *   - prefs — performs consolidation operation.
- *   - setInterval — timer scheduling.
- *
- * Dependants:
- *   - createContainer — calls this to set up periodic consolidation.
  * </Summary>
  */
 export const scheduleConsolidation = (
@@ -141,13 +126,6 @@ export const scheduleConsolidation = (
    *
    * Returns:
    *   void — called for side effects (consolidation and timestamp update).
-   *
-   * Dependencies:
-   *   - config — stores last consolidation timestamp.
-   *   - prefs — performs consolidation operation.
-   *
-   * Dependants:
-   *   - scheduleConsolidation — calls this periodically.
    * </Summary>
    */
   const runConsolidationIfDue = async (): Promise<void> => {

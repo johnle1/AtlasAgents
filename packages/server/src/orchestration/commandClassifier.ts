@@ -8,14 +8,6 @@
  *   Used by Agent.run to classify commands and enforce safety rules. Commands are
  *   classified based on the advisor's command plan to prevent agents from running
  *   dangerous commands (like dev servers) in the foreground.
- *
- * Dependencies:
- *   - types.ts — CommandPlan type for command classification.
- *   - toolProtocol.ts — CommandPurpose type enum.
- *
- * Dependants:
- *   - Agent.run — classifies commands before execution.
- *   - ReadyQueue — enforces verification requirements.
  * </Summary>
  */
 
@@ -33,16 +25,10 @@ import type { CommandPurpose } from "./toolProtocol.js";
  *   3. Convert to lowercase for case-insensitive matching.
  *
  * Parameters:
- *   @param {string} command — The raw shell command string.
+ *   @param command - The raw shell command string.
  *
  * Returns:
  *   {string} — Normalized command string.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - commandMatchesPlanEntry — normalizes both command and entry for comparison.
  * </Summary>
  */
 export const normalizeCommand = (command: string): string =>
@@ -63,17 +49,11 @@ export const normalizeCommand = (command: string): string =>
  *   3. Check for exact match or prefix match (entry followed by space).
  *
  * Parameters:
- *   @param {string} command — The shell command to check.
- *   @param {string} entry — The plan entry to match against.
+ *   @param command - The shell command to check.
+ *   @param entry - The plan entry to match against.
  *
  * Returns:
  *   {boolean} — True if command matches entry exactly or as a prefix.
- *
- * Dependencies:
- *   - normalizeCommand — normalizes strings for comparison.
- *
- * Dependants:
- *   - matchesAnyEntry — checks command against multiple entries.
  * </Summary>
  */
 export const commandMatchesPlanEntry = (
@@ -108,17 +88,11 @@ export const commandMatchesPlanEntry = (
  *   3. Return true if any entry matches.
  *
  * Parameters:
- *   @param {string} command — The shell command to check.
- *   @param {string[]} entries — Array of plan entries to match against.
+ *   @param command - The shell command to check.
+ *   @param entries - Array of plan entries to match against.
  *
  * Returns:
  *   {boolean} — True if command matches any entry in the list.
- *
- * Dependencies:
- *   - commandMatchesPlanEntry — checks individual entry matching.
- *
- * Dependants:
- *   - inferPurpose — checks against different command categories.
  * </Summary>
  */
 const matchesAnyEntry = (command: string, entries: string[]): boolean =>
@@ -137,17 +111,11 @@ const matchesAnyEntry = (command: string, entries: string[]): boolean =>
  *   3. Default to setup if no other match.
  *
  * Parameters:
- *   @param {string} command — The shell command to classify.
- *   @param {CommandPlan} plan — The advisor's command plan.
+ *   @param command - The shell command to classify.
+ *   @param plan - The advisor's command plan.
  *
  * Returns:
  *   {CommandPurpose} — The inferred purpose: "run-project", "verify", or "setup".
- *
- * Dependencies:
- *   - matchesAnyEntry — checks command against command categories.
- *
- * Dependants:
- *   - Agent.run — classifies commands before execution.
  * </Summary>
  */
 export const inferPurpose = (
@@ -182,24 +150,18 @@ export const inferPurpose = (
  *   3. Return the complete markdown block.
  *
  * Parameters:
- *   @param {CommandPlan} plan — The command plan to format.
+ *   @param plan - The command plan to format.
  *
  * Returns:
  *   {string} — Formatted markdown block showing the command plan.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Agent.run — displays command plan in agent context.
  * </Summary>
  */
 export const formatCommandPlanBlock = (plan: CommandPlan): string => {
   /**
    * Helper function to format a list of commands as markdown bullet points.
    *
-   * @param {string[]} items — Array of command strings.
-   * @returns {string} — Formatted bullet list or "(none)" if empty.
+   * @param items - Array of command strings.
+   * @returns Formatted bullet list or "(none)" if empty.
    */
   const formatList = (items: string[]): string =>
     items.length > 0
@@ -229,16 +191,10 @@ export const formatCommandPlanBlock = (plan: CommandPlan): string => {
  *   3. Return the formatted message string.
  *
  * Parameters:
- *   @param {string} command — The blocked command string.
+ *   @param command - The blocked command string.
  *
  * Returns:
  *   {string} — Warning message explaining the block and how to fix it.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Agent.run — displays warning when blocking run-project commands.
  * </Summary>
  */
 export const RUN_PROJECT_BLOCK_MESSAGE = (command: string): string =>
@@ -266,16 +222,10 @@ export const RUN_PROJECT_BLOCK_MESSAGE = (command: string): string =>
  *   3. Return the formatted message string.
  *
  * Parameters:
- *   @param {Set<string>} paths — Set of file paths that need verification.
+ *   @param paths - Set of file paths that need verification.
  *
  * Returns:
  *   {string} — Message explaining verification requirements.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Agent.run — displays verification requirement before blocking finish.
  * </Summary>
  */
 export const VERIFY_REQUIRED_MESSAGE = (paths: Set<string>): string => {
@@ -305,12 +255,6 @@ export const VERIFY_REQUIRED_MESSAGE = (paths: Set<string>): string => {
  * How it fits in the system:
  *   Displayed to agent when it calls run_command without proper think block
  *   documentation (purpose, exits, risk fields are required).
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Agent.run — validates think blocks before allowing run_command.
  * </Summary>
  */
 export const RUN_COMMAND_THINK_MISSING_MESSAGE =
@@ -329,16 +273,10 @@ export const RUN_COMMAND_THINK_MISSING_MESSAGE =
  *   4. Check for risk field presence.
  *
  * Parameters:
- *   @param {string | null} thinkText — The think block text to validate.
+ *   @param thinkText - The think block text to validate.
  *
  * Returns:
  *   {boolean} — True if all required fields are present and valid.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Agent.run — validates think blocks before allowing run_command.
  * </Summary>
  */
 export const hasRunCommandThinkFields = (thinkText: string | null): boolean => {
@@ -367,16 +305,10 @@ export const hasRunCommandThinkFields = (thinkText: string | null): boolean => {
  *   3. Check for "off-limits" keyword.
  *
  * Parameters:
- *   @param {string} thinkText — The think block text to validate.
+ *   @param thinkText - The think block text to validate.
  *
  * Returns:
  *   {boolean} — True if all command plan sections are present.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Agent.run — validates command plan in first think block of task.
  * </Summary>
  */
 export const hasCommandPlanSection = (thinkText: string): boolean =>

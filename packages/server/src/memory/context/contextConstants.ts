@@ -8,13 +8,6 @@
  *   text processing, and task type keywords for keyword extraction.
  *   These constants are used throughout the context building system to
  *   ensure consistent behavior and optimize keyword extraction quality.
- *
- * Dependencies:
- *   - None (pure constants).
- *
- * Dependants:
- *   - contextHelpers.ts - uses these constants for tokenization and keyword extraction.
- *   - contextBuilder.ts - uses DEFAULT_CONTEXT_WINDOW for fallback context window.
  * </Summary>
  */
 
@@ -33,10 +26,6 @@
  *   - 128k tokens is a common context window for modern LLMs (e.g., Claude, GPT-4)
  *   - Provides enough space for complex tasks without being overly conservative
  *   - Will be overridden by actual model context windows when available
- *
- * Dependants:
- *   - resolveContextLength — returns this when all extraction attempts fail.
- *   - getContextWindow — uses this when Ollama query fails.
  * </Summary>
  */
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
@@ -57,9 +46,6 @@ export const DEFAULT_CONTEXT_WINDOW = 128_000;
  *   - Improves accuracy of preference rule matching
  *   - Focuses on meaningful technical and domain-specific terms
  *   - Prevents common words from triggering irrelevant rules
- *
- * Dependants:
- *   - extractKeywords — filters out these words when extracting meaningful keywords.
  * </Summary>
  */
 export const HIGHLIGHT_WORDS = new Set([
@@ -157,10 +143,6 @@ export const HIGHLIGHT_WORDS = new Set([
  *   - Enables the system to understand user intent
  *   - Helps match tasks with relevant preference rules
  *   - Improves context relevance for agent planning
- *
- * Dependants:
- *   - extractKeywords — matches these words in task text to add as keywords.
- *   - contextBuilder — uses task type keywords to identify relevant fix rules.
  * </Summary>
  */
 export const TASK_TYPE_WORDS = new Set([

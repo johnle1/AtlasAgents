@@ -40,23 +40,16 @@ export const STREAM_WINDOW = 64;
  *   13. In onComplete: waits for frame chain to finish, then completes.
  *
  * Parameters:
- *   @param {RSocket} rsocket — The live RSocket connection instance.
- *   @param {Record<string, unknown>} body — The request body to send as JSON.
- *   @param {Buffer} metadata — The auth metadata Buffer.
- *   @param {(frame: TaskFrame) => void | Promise<void>} onFrame — Callback
+ *   @param rsocket - The live RSocket connection instance.
+ *   @param body - The request body to send as JSON.
+ *   @param metadata - The auth metadata Buffer.
+ *   @param onFrame - Callback
  *     invoked with each TaskFrame from the server.
  *   @param {(token: string) => void} [onToken] — Optional callback invoked
  *     with token text for incremental display.
  *
  * Returns:
- *   @returns {Promise<void>} — Resolves when the server finishes streaming.
- *
- * Dependencies:
- *   - decodeFrame — parses payload data into TaskFrame objects.
- *
- * Dependants:
- *   - Connection.sendTask — calls this for task execution streaming.
- *   - Connection.sendStream — calls this for model pull and explore streaming.
+ *   @returns Resolves when the server finishes streaming.
  * </Summary>
  */
 export async function streamRequest(
@@ -187,24 +180,18 @@ export async function streamRequest(
  *   2. Calls streamRequest with the constructed body.
  *
  * Parameters:
- *   @param {string} task — The user's task description to execute.
- *   @param {Config} config — The configuration object with model settings.
- *   @param {Buffer} metadata — The auth metadata Buffer.
- *   @param {RSocket} rsocket — The live RSocket connection instance.
- *   @param {(frame: TaskFrame) => void | Promise<void>} onFrame — Callback
+ *   @param task - The user's task description to execute.
+ *   @param config - The configuration object with model settings.
+ *   @param metadata - The auth metadata Buffer.
+ *   @param rsocket - The live RSocket connection instance.
+ *   @param onFrame - Callback
  *     invoked with each TaskFrame from the server.
  *   @param {(token: string) => void} [onToken] — Optional callback invoked
  *     with token text for incremental display.
  *   @param {number} [maxAgents] — Optional max agents setting.
  *
  * Returns:
- *   @returns {Promise<void>} — Resolves when the server finishes streaming.
- *
- * Dependencies:
- *   - streamRequest — handles the RSocket requestStream logic.
- *
- * Dependants:
- *   - index.ts rl.on('line') — calls this for plain text task input.
+ *   @returns Resolves when the server finishes streaming.
  * </Summary>
  */
 export async function sendTask(
@@ -251,23 +238,16 @@ export async function sendTask(
  *   5. streamRequest handles the RSocket streaming and backpressure.
  *
  * Parameters:
- *   @param {Object} opts — Operation-specific options.
- *     @param {string} opts.kind — Either "models.pull" or "explore".
- *     @param {Object} opts.payload — Operation-specific data (e.g., { name: string }).
- *     @param {(frame: TaskFrame) => void | Promise<void>} opts.onFrame — Callback
+ *   @param opts - Operation-specific options.
+ *     @param opts - .kind — Either "models.pull" or "explore".
+ *     @param opts - .payload — Operation-specific data (e.g., { name: string }).
+ *     @param opts - .onFrame — Callback
  *       invoked with each TaskFrame from the server.
- *   @param {Buffer} metadata — The auth metadata Buffer.
- *   @param {RSocket} rsocket — The live RSocket connection instance.
+ *   @param metadata - The auth metadata Buffer.
+ *   @param rsocket - The live RSocket connection instance.
  *
  * Returns:
- *   @returns {Promise<void>} — Resolves when the server finishes streaming.
- *
- * Dependencies:
- *   - streamRequest — handles the RSocket requestStream logic.
- *
- * Dependants:
- *   - CommandHandler.handlePull — calls this to stream model pull progress.
- *   - CommandHandler.handleExplore — calls this to stream exploration results.
+ *   @returns Resolves when the server finishes streaming.
  * </Summary>
  */
 export async function sendStream(

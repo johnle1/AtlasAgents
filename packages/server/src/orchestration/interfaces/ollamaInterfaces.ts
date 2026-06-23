@@ -6,13 +6,6 @@
  * How it fits in the system:
  *   Defines the contract for interacting with the Ollama API for chat completions,
  *   model management, and administrative operations.
- *
- * Dependencies:
- *   - types.ts — Message, ChatOptions.
- *   - ollama/types.js — ModelInfo, OllamaModelSummary, PullProgress, RunningModel.
- *
- * Dependants:
- *   - Advisor, Agent, Router command handlers.
  * </Summary>
  */
 
@@ -45,18 +38,12 @@ export interface IOllamaClient {
    *   Sends one non-streaming chat completion and returns the full assistant text.
    *
    * Parameters:
-   *   @param {string} model — Ollama model name.
-   *   @param {Message[]} messages — System/user/assistant turns.
-   *   @param {ChatOptions} options — Temperature and related sampling knobs.
+   *   @param model - Ollama model name.
+   *   @param messages - System/user/assistant turns.
+   *   @param options - Temperature and related sampling knobs.
    *
    * Returns:
-   *   @returns {Promise<string>} — Concatenated assistant message content.
-   *
-   * Dependencies:
-   *   - None at interface level.
-   *
-   * Dependants:
-   *   - Advisor.plan, Advisor.advise.
+   *   @returns Concatenated assistant message content.
    * </Summary>
    */
   chat(
@@ -72,18 +59,12 @@ export interface IOllamaClient {
    *   Streams assistant tokens from Ollama for one chat request.
    *
    * Parameters:
-   *   @param {string} model — Ollama model name.
-   *   @param {Message[]} messages — System/user/assistant turns.
-   *   @param {ChatOptions} options — Sampling options.
+   *   @param model - Ollama model name.
+   *   @param messages - System/user/assistant turns.
+   *   @param options - Sampling options.
    *
    * Returns:
-   *   @returns {AsyncGenerator<string>} — Yields incremental text chunks.
-   *
-   * Dependencies:
-   *   - None at interface level.
-   *
-   * Dependants:
-   *   - Advisor.combine, Agent.run.
+   *   @returns Yields incremental text chunks.
    * </Summary>
    */
   chatStream(
@@ -117,10 +98,7 @@ export interface IOllamaAdminClient {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<string[]>} — Model names only.
-   *
-   * Dependants:
-   *   - Router models.list handler.
+   *   @returns Model names only.
    * </Summary>
    */
   listModels(): Promise<string[]>;
@@ -132,10 +110,7 @@ export interface IOllamaAdminClient {
    *   Lists installed models with size, modified time, and details from GET /api/tags.
    *
    * Returns:
-   *   @returns {Promise<OllamaModelSummary[]>} — Full tag rows.
-   *
-   * Dependants:
-   *   - Router models.list handler.
+   *   @returns Full tag rows.
    * </Summary>
    */
   listModelsDetailed(): Promise<OllamaModelSummary[]>;
@@ -146,13 +121,10 @@ export interface IOllamaAdminClient {
    *   Streams pull progress lines from POST /api/pull with stream true.
    *
    * Parameters:
-   *   @param {string} name — Model name to pull.
+   *   @param name - Model name to pull.
    *
    * Returns:
-   *   @returns {AsyncGenerator<PullProgress>} — Progress chunks until success.
-   *
-   * Dependants:
-   *   - Future model management UI.
+   *   @returns Progress chunks until success.
    * </Summary>
    */
   pullModel(name: string): AsyncGenerator<PullProgress>;
@@ -164,15 +136,12 @@ export interface IOllamaAdminClient {
    *   Deletes a model after verifying it exists in listModels.
    *
    * Parameters:
-   *   @param {string} name — Model name to delete.
+   *   @param name - Model name to delete.
    *
    * Returns:
-   *   @returns {Promise<void>} — Completes when Ollama accepts delete.
+   *   @returns Completes when Ollama accepts delete.
    *
    * @throws {OllamaError} — When model missing or HTTP not ok.
-   *
-   * Dependants:
-   *   - Future admin routes.
    * </Summary>
    */
   deleteModel(name: string): Promise<void>;
@@ -184,13 +153,10 @@ export interface IOllamaAdminClient {
    *   Returns parsed model info from POST /api/show.
    *
    * Parameters:
-   *   @param {string} name — Model name to inspect.
+   *   @param name - Model name to inspect.
    *
    * Returns:
-   *   @returns {Promise<ModelInfo>} — Parsed JSON body.
-   *
-   * Dependants:
-   *   - Future tooling routes.
+   *   @returns Parsed JSON body.
    * </Summary>
    */
   showModel(name: string): Promise<ModelInfo>;
@@ -205,10 +171,7 @@ export interface IOllamaAdminClient {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<RunningModel[]>} — Running rows (may be empty).
-   *
-   * Dependants:
-   *   - Future diagnostics routes.
+   *   @returns Running rows (may be empty).
    * </Summary>
    */
   listRunning(): Promise<RunningModel[]>;

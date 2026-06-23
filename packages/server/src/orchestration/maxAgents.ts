@@ -6,13 +6,6 @@
  * How it fits in the system:
  *   The max_agents parameter controls how many agents can work in parallel on a task.
  *   Users can set this via CLI flag /agent cap to control resource usage and execution mode.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Router — parses max_agents from CLI arguments.
- *   - planHelpers — applies max_agents constraint to advisor plans.
  * </Summary>
  */
 
@@ -29,10 +22,6 @@
  *   2 — Collab mode: exactly two agent groups.
  *   "max" — Unlimited agents: use as many as the task needs.
  *   number — Custom cap: user-defined limit (minimum 3).
- *
- * Dependants:
- *   - Router — parses and validates max_agents from CLI.
- *   - planHelpers — applies constraint to advisor plans.
  * </Summary>
  */
 export type MaxAgentsParam = 1 | 2 | "max" | number;
@@ -53,16 +42,10 @@ const MIN_AGENT_CAP = 1;
  *   2. Ensure the result is at least MIN_AGENT_CAP.
  *
  * Parameters:
- *   @param {number} agentCap — The agent cap value to clamp.
+ *   @param agentCap - The agent cap value to clamp.
  *
  * Returns:
  *   {number} — The clamped agent cap (minimum 1).
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - parseMaxAgentsPayload — clamps numeric values from user input.
  * </Summary>
  */
 export const clampAgentCap = (agentCap: number): number =>
@@ -81,16 +64,10 @@ export const clampAgentCap = (agentCap: number): number =>
  *   4. Default to DEFAULT_AGENT_CAP for invalid values.
  *
  * Parameters:
- *   @param {unknown} value — The raw value from CLI or config (untrusted).
+ *   @param value - The raw value from CLI or config (untrusted).
  *
  * Returns:
  *   {MaxAgentsParam} — Normalized max_agents parameter.
- *
- * Dependencies:
- *   - clampAgentCap — ensures numeric values meet minimum requirements.
- *
- * Dependants:
- *   - Router — parses max_agents from CLI arguments.
  * </Summary>
  */
 export const parseMaxAgentsPayload = (value: unknown): MaxAgentsParam => {
@@ -133,16 +110,10 @@ export const parseMaxAgentsPayload = (value: unknown): MaxAgentsParam => {
  *   3. Default to DEFAULT_AGENT_CAP description.
  *
  * Parameters:
- *   @param {MaxAgentsParam} maxAgents — The max_agents parameter to describe.
+ *   @param maxAgents - The max_agents parameter to describe.
  *
  * Returns:
  *   {string} — Human-readable description of the constraint.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - Router — displays constraint information to user.
  * </Summary>
  */
 export const maxAgentsConstraintText = (maxAgents: MaxAgentsParam): string => {
@@ -176,16 +147,10 @@ export const maxAgentsConstraintText = (maxAgents: MaxAgentsParam): string => {
  *   2. Check if it's greater than 2 (not special value 1 or 2).
  *
  * Parameters:
- *   @param {MaxAgentsParam} maxAgents — The max_agents parameter to check.
+ *   @param maxAgents - The max_agents parameter to check.
  *
  * Returns:
  *   {boolean} — True if maxAgents is a custom numeric cap (> 2).
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - planHelpers — determines if custom cap logic should be applied.
  * </Summary>
  */
 export const isNumericCap = (maxAgents: MaxAgentsParam): maxAgents is number =>

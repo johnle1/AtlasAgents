@@ -33,32 +33,15 @@ import {
  *   7. Return the result from the appropriate handler function.
  *
  * Parameters:
- *   @param {DispatchContext} context — The dispatch context containing workspace root, current directory,
+ *   @param context - The dispatch context containing workspace root, current directory,
  *     and other runtime state needed by handlers.
- *   @param {ClientRoute} route — The route identifier that determines which handler to call
+ *   @param route - The route identifier that determines which handler to call
  *     (e.g., "file.read", "command.run").
- *   @param {unknown} payload — The request payload containing parameters for the handler (typed as unknown
+ *   @param payload - The request payload containing parameters for the handler (typed as unknown
  *     for flexibility, cast to Record<string, unknown> for handler consumption).
  *
  * Returns:
- *   @returns {Promise<unknown>} — The result from the appropriate handler function (type varies by route).
- *
- * Dependencies:
- *   - handleFileRead — handles file reading requests.
- *   - handleFileWrite — handles file writing requests.
- *   - handleFileListDir — handles directory listing requests.
- *   - handleFileSearch — handles file search requests.
- *   - handleFileCreateDir — handles directory creation requests.
- *   - handleFileDeleteFile — handles file deletion requests.
- *   - handleFileDeleteDir — handles directory deletion requests.
- *   - handleFileCd — handles directory change requests.
- *   - handleFileGetCwd — handles get current working directory requests.
- *   - handleCommandClassify — handles command classification requests.
- *   - handleCommandRun — handles command execution requests.
- *
- * Dependants:
- *   - Proxy request handlers — call this to route incoming client requests to the appropriate handlers.
- *   - Client-server communication layer — uses this as the central routing mechanism.
+ *   @returns The result from the appropriate handler function (type varies by route).
  * </Summary>
  */
 export const dispatch = async (

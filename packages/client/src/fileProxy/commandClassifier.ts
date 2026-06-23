@@ -22,18 +22,10 @@ import {
  *     otherwise "cautious" as the default for unknown commands.
  *
  * Parameters:
- *   @param {string} command — The shell command to classify (e.g., "git status", "rm -rf file.txt").
+ *   @param command - The shell command to classify (e.g., "git status", "rm -rf file.txt").
  *
  * Returns:
- *   @returns {BashClass} — One of "safe", "dangerous", or "cautious" indicating the command's risk level.
- *
- * Dependencies:
- *   - SAFE_BASE_COMMANDS — provides the list of known safe base commands.
- *   - SAFE_GIT_SUBCOMMANDS — provides the list of known safe git subcommands.
- *   - DANGEROUS_TOKENS — provides the list of dangerous command tokens and flags.
- *
- * Dependants:
- *   - command execution handlers — use this classification to determine if user confirmation is needed.
+ *   @returns One of "safe", "dangerous", or "cautious" indicating the command's risk level.
  * </Summary>
  */
 export const classifyCommand = (command: string): BashClass => {

@@ -27,22 +27,13 @@ import * as fs from "node:fs";
  *   6. Updates file proxy and prompts if available.
  *
  * Parameters:
- *   @param {string} sub — Subcommand: must be "set".
- *   @param {string} arg — Path to the workspace directory.
- *   @param {LocalFileProxy | undefined} fileProxy — Optional file proxy instance.
- *   @param {(() => void) | undefined} onPromptUpdate — Optional callback for prompt updates.
+ *   @param sub - Subcommand: must be "set".
+ *   @param arg - Path to the workspace directory.
+ *   @param fileProxy - Optional file proxy instance.
+ *   @param onPromptUpdate - Optional callback for prompt updates.
  *
  * Returns:
- *   @returns {Promise<void>} — called for side effects only.
- *
- * Dependencies:
- *   - updateConfig — writes workspace to config.
- *   - LocalFileProxy.setWorkspaceRoot — updates file proxy workspace.
- *   - path, os, fs — path manipulation and validation.
- *   - renderer.printError, printSuccessOp — display output.
- *
- * Dependants:
- *   - CommandHandler.handle — calls this for /workspace commands.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const handleWorkspace = async (
@@ -95,18 +86,10 @@ export const handleWorkspace = async (
  *   2. Prints the directory path to the console.
  *
  * Parameters:
- *   @param {LocalFileProxy | undefined} fileProxy — Optional file proxy instance.
+ *   @param fileProxy - Optional file proxy instance.
  *
  * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - LocalFileProxy.getCwd — gets current directory from file proxy.
- *   - process.cwd — fallback to process current directory.
- *   - renderer.printLine — displays the path.
- *
- * Dependants:
- *   - CommandHandler.handle — calls this for /cwd command.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const handleCwd = (

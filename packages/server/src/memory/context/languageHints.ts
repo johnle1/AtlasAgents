@@ -7,13 +7,6 @@
  *   Seeded from packages/server/default-data on first server start; read by ContextBuilder.
  *   Provides language/framework detection for keyword extraction, enabling the system
  *   to recognize programming languages and frameworks mentioned in task descriptions.
- *
- * Dependencies:
- *   - node:fs/promises, node:path — read JSON from disk.
- *
- * Dependants:
- *   - ContextBuilder.build — keyword extraction.
- *   - installUserDataDefaults — copies packaged default when missing.
  * </Summary>
  */
 
@@ -43,16 +36,10 @@ export const LANGUAGE_HINTS_FILENAME = "language-hints.json";
  *   9. Return the array of validated hints.
  *
  * Parameters:
- *   @param {unknown} rawInput — Parsed JSON root (could be any type).
+ *   @param rawInput - Parsed JSON root (could be any type).
  *
  * Returns:
- *   @returns {LanguageHint[]} — Normalised hints (invalid rows dropped).
- *
- * Dependencies:
- *   - None (pure function).
- *
- * Dependants:
- *   - loadLanguageHints.
+ *   @returns Normalised hints (invalid rows dropped).
  * </Summary>
  */
 export const parseLanguageHints = (rawInput: unknown): LanguageHint[] => {
@@ -134,18 +121,10 @@ export const parseLanguageHints = (rawInput: unknown): LanguageHint[] => {
  *   8. If JSON parsing fails, return empty array (corrupted file handled).
  *
  * Parameters:
- *   @param {string} rootDirectory — Server data root (usually process.cwd()).
+ *   @param rootDirectory - Server data root (usually process.cwd()).
  *
  * Returns:
- *   @returns {Promise<LanguageHint[]>} — Parsed hints, or empty when file missing/unreadable.
- *
- * Dependencies:
- *   - fs.promises.readFile — file reading.
- *   - path.join — path construction.
- *   - parseLanguageHints — JSON validation.
- *
- * Dependants:
- *   - ContextBuilder.build — keyword extraction.
+ *   @returns Parsed hints, or empty when file missing/unreadable.
  * </Summary>
  */
 export const loadLanguageHints = async (

@@ -7,14 +7,6 @@
  *   Manages user-data/session/current.md for multi-task continuity within a session.
  *   This interface provides methods to read, append, and clear session data, enabling
  *   the advisor to have context from previous tasks in the same session for better continuity.
- *
- * Dependencies:
- *   - memory/types.js — SessionSummary type.
- *
- * Dependants:
- *   - ContextBuilder — reads prior session context at task start.
- *   - ExperienceRecorder — appends after success or partial failure.
- *   - Router session command handlers — exists/clear operations.
  * </Summary>
  */
 

@@ -8,14 +8,6 @@
  *   These functions handle UI display aspects like busy state indicators, current
  *   working directory labels, banner refresh, and terminal alternate screen mode.
  *   They update the global application state through the bridge hooks system.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *   - Config — type definition for application configuration.
- *
- * Dependants:
- *   - Server communication handlers — call these to update display state.
- *   - Terminal management functions — use these for terminal features.
  * </Summary>
  */
 
@@ -34,17 +26,10 @@ import { getBridgeHooks } from "./state.js";
  *   3. The hook updates the global state and triggers UI re-render.
  *
  * Parameters:
- *   @param {boolean} busyState — True if application is busy, false if idle.
+ *   @param busyState - True if application is busy, false if idle.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *
- * Dependants:
- *   - Connection streaming handlers — call this during long operations.
- *   - Task execution functions — use this to show busy state to users.
  * </Summary>
  */
 export const setBusy = (busyState: boolean): void => {
@@ -70,17 +55,10 @@ export const setBusy = (busyState: boolean): void => {
  *   3. The hook updates the prompt state and triggers UI re-render.
  *
  * Parameters:
- *   @param {string} currentWorkingDirectory — The current working directory path to display.
+ *   @param currentWorkingDirectory - The current working directory path to display.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *
- * Dependants:
- *   - File proxy handlers — call this when directory changes.
- *   - Workspace navigation functions — use this to update prompt on cd operations.
  * </Summary>
  */
 export const setCwdLabel = (currentWorkingDirectory: string): void => {
@@ -106,17 +84,10 @@ export const setCwdLabel = (currentWorkingDirectory: string): void => {
  *   3. The hook rebuilds the banner lines and updates the global state.
  *
  * Parameters:
- *   @param {Config} configuration — The current application configuration.
+ *   @param configuration - The current application configuration.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - getBridgeHooks — provides access to global state update hooks.
- *
- * Dependants:
- *   - Configuration update handlers — call this after config changes.
- *   - Theme change functions — use this to refresh banner after theme update.
  * </Summary>
  */
 export const refreshInkBanner = (configuration: Config): void => {
@@ -144,13 +115,6 @@ export const refreshInkBanner = (configuration: Config): void => {
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - None (uses process.stdout and ANSI escape sequences).
- *
- * Dependants:
- *   - useBridgeSetup hook — calls this when alternate buffer is enabled in config.
- *   - Terminal management functions — use this for full-screen UI mode.
  * </Summary>
  */
 export const enterAlternateScreen = (): void => {
@@ -179,13 +143,6 @@ export const enterAlternateScreen = (): void => {
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - None (uses process.stdout and ANSI escape sequences).
- *
- * Dependants:
- *   - useBridgeSetup hook — calls this when component unmounts.
- *   - Terminal management functions — use this to return to normal mode.
  * </Summary>
  */
 export const exitAlternateScreen = (): void => {

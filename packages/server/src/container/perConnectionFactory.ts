@@ -17,23 +17,12 @@
  * interference.
  *
  * Parameters:
- *   @param {PerConnectionFactoryDeps} dependencies - Dependencies for creating per-connection resources.
- *   @param {string} requesterId - Unique identifier for the requesting client.
- *   @param {function} emit - Function to emit task frames to the client.
+ *   @param dependencies - Dependencies for creating per-connection resources.
+ *   @param requesterId - Unique identifier for the requesting client.
+ *   @param emit - Function to emit task frames to the client.
  *
  * Returns:
- *   @returns {PerConnection} - Object containing connection-specific resources.
- *
- * Dependencies:
- *   - createStreamTransports — creates RSocket stream transports.
- *   - PlanReviewBroker — handles plan review workflow.
- *   - WorkspaceManager — manages workspace operations.
- *   - TerminalExecutor — executes terminal commands.
- *   - clientBridge — provides client communication.
- *
- * Dependants:
- *   - buildRouter — calls this to set up resources for new connections.
- *   - task stream handler — calls this when processing task requests.
+ *   @returns Object containing connection-specific resources.
  * </Summary>
  */
 
@@ -94,23 +83,12 @@ export type PerConnectionFactoryDeps = {
  *   8. Return object containing all connection-specific resources and utilities.
  *
  * Parameters:
- *   @param {PerConnectionFactoryDeps} dependencies - Shared dependencies for connection creation.
- *   @param {string} requesterId - Unique identifier for the requesting client.
- *   @param {function} emit - Function to emit task frames to the client.
+ *   @param dependencies - Shared dependencies for connection creation.
+ *   @param requesterId - Unique identifier for the requesting client.
+ *   @param emit - Function to emit task frames to the client.
  *
  * Returns:
- *   @returns {PerConnection} - Object containing all connection-specific resources.
- *
- * Dependencies:
- *   - createStreamTransports — creates bidirectional stream communication.
- *   - PlanReviewBroker — manages plan review workflow and state.
- *   - WorkspaceManager — handles file system operations and workspace state.
- *   - TerminalExecutor — executes shell commands for the client.
- *   - clientBridge — provides client communication infrastructure.
- *
- * Dependants:
- *   - Container.createPerConnection — calls this to set up new client connections.
- *   - Router connection handlers — uses this to initialize connection state.
+ *   @returns Object containing all connection-specific resources.
  * </Summary>
  */
 export const createPerConnection = (

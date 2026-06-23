@@ -33,19 +33,11 @@ import type { DispatchContext } from "../types.js";
  *   5. Return the file contents in a standardized response format.
  *
  * Parameters:
- *   @param {DispatchContext} context — The dispatch context containing path resolution utilities.
- *   @param {Record<string, unknown>} requestBody — The request body containing the file path.
+ *   @param context - The dispatch context containing path resolution utilities.
+ *   @param requestBody - The request body containing the file path.
  *
  * Returns:
- *   @returns {Promise<unknown>} — Object containing the file content as a string.
- *
- * Dependencies:
- *   - context.resolveAbsolute — resolves the file path to an absolute path.
- *   - node:fs/promises — provides readFile() for reading file contents.
- *   - printRead — displays the read operation to the user.
- *
- * Dependants:
- *   - dispatch system — routes file.read requests to this handler.
+ *   @returns Object containing the file content as a string.
  * </Summary>
  */
 export const handleFileRead = async (
@@ -92,23 +84,11 @@ export const handleFileRead = async (
  *   9. If not approved, print skipped message and return rejection result.
  *
  * Parameters:
- *   @param {DispatchContext} context — The dispatch context containing path resolution utilities.
- *   @param {Record<string, unknown>} requestBody — The request body containing the file path and content.
+ *   @param context - The dispatch context containing path resolution utilities.
+ *   @param requestBody - The request body containing the file path and content.
  *
  * Returns:
- *   @returns {Promise<unknown>} — Object with accepted boolean and diff (if approved), or accepted false (if rejected).
- *
- * Dependencies:
- *   - context.resolveAbsolute — resolves the file path to an absolute path.
- *   - computeDiff — calculates the difference between old and new content.
- *   - formatDiffPlain — formats the diff for display and storage.
- *   - formatDisplayPath — formats the path for user display.
- *   - node:fs/promises — provides readFile(), mkdir(), and writeFile() for file operations.
- *   - printWrite — displays the diff to the user.
- *   - requestApproval — prompts user for approval.
- *
- * Dependants:
- *   - dispatch system — routes file.write requests to this handler.
+ *   @returns Object with accepted boolean and diff (if approved), or accepted false (if rejected).
  * </Summary>
  */
 export const handleFileWrite = async (
@@ -195,17 +175,11 @@ export const handleFileWrite = async (
  *   4. Return the directory structure in a standardized response format.
  *
  * Parameters:
- *   @param {DispatchContext} context — The dispatch context containing workspace state.
- *   @param {Record<string, unknown>} requestBody — The request body containing the depth parameter.
+ *   @param context - The dispatch context containing workspace state.
+ *   @param requestBody - The request body containing the depth parameter.
  *
  * Returns:
- *   @returns {Promise<unknown>} — Object containing the directory structure as a string.
- *
- * Dependencies:
- *   - listStructure — generates the hierarchical directory structure.
- *
- * Dependants:
- *   - dispatch system — routes file.list_dir requests to this handler.
+ *   @returns Object containing the directory structure as a string.
  * </Summary>
  */
 export const handleFileListDir = async (
@@ -244,17 +218,11 @@ export const handleFileListDir = async (
  *   5. Return the matched paths in a standardized response format.
  *
  * Parameters:
- *   @param {DispatchContext} context — The dispatch context containing workspace root.
- *   @param {Record<string, unknown>} requestBody — The request body containing the search pattern.
+ *   @param context - The dispatch context containing workspace root.
+ *   @param requestBody - The request body containing the search pattern.
  *
  * Returns:
- *   @returns {Promise<unknown>} — Object containing the array of matched file paths.
- *
- * Dependencies:
- *   - fast-glob — provides fast glob pattern matching for file search.
- *
- * Dependants:
- *   - dispatch system — routes file.search requests to this handler.
+ *   @returns Object containing the array of matched file paths.
  * </Summary>
  */
 export const handleFileSearch = async (
@@ -311,21 +279,11 @@ export const handleFileSearch = async (
  *   7. If not approved, print skipped message and return rejection result.
  *
  * Parameters:
- *   @param {DispatchContext} context — The dispatch context containing path resolution utilities.
- *   @param {Record<string, unknown>} requestBody — The request body containing the directory path.
+ *   @param context - The dispatch context containing path resolution utilities.
+ *   @param requestBody - The request body containing the directory path.
  *
  * Returns:
- *   @returns {Promise<unknown>} — Object with created boolean indicating success or rejection.
- *
- * Dependencies:
- *   - context.resolveAbsolute — resolves the directory path to an absolute path.
- *   - formatDisplayPath — formats the path for user display.
- *   - node:fs/promises — provides mkdir() for directory creation.
- *   - printCreateDir — displays the creation operation to the user.
- *   - requestApproval — prompts user for approval.
- *
- * Dependants:
- *   - dispatch system — routes file.create_dir requests to this handler.
+ *   @returns Object with created boolean indicating success or rejection.
  * </Summary>
  */
 export const handleFileCreateDir = async (
@@ -387,21 +345,11 @@ export const handleFileCreateDir = async (
  *   7. If not approved, print skipped message and return rejection result.
  *
  * Parameters:
- *   @param {DispatchContext} context — The dispatch context containing path resolution utilities.
- *   @param {Record<string, unknown>} requestBody — The request body containing the file path.
+ *   @param context - The dispatch context containing path resolution utilities.
+ *   @param requestBody - The request body containing the file path.
  *
  * Returns:
- *   @returns {Promise<unknown>} — Object with deleted boolean indicating success or rejection.
- *
- * Dependencies:
- *   - context.resolveAbsolute — resolves the file path to an absolute path.
- *   - formatDisplayPath — formats the path for user display.
- *   - node:fs/promises — provides unlink() for file deletion.
- *   - printDelete — displays the deletion operation to the user.
- *   - requestApproval — prompts user for approval.
- *
- * Dependants:
- *   - dispatch system — routes file.delete_file requests to this handler.
+ *   @returns Object with deleted boolean indicating success or rejection.
  * </Summary>
  */
 export const handleFileDeleteFile = async (
@@ -462,21 +410,11 @@ export const handleFileDeleteFile = async (
  *   7. If not approved, print skipped message and return rejection result.
  *
  * Parameters:
- *   @param {DispatchContext} context — The dispatch context containing path resolution utilities.
- *   @param {Record<string, unknown>} requestBody — The request body containing the directory path.
+ *   @param context - The dispatch context containing path resolution utilities.
+ *   @param requestBody - The request body containing the directory path.
  *
  * Returns:
- *   @returns {Promise<unknown>} — Object with deleted boolean indicating success or rejection.
- *
- * Dependencies:
- *   - context.resolveAbsolute — resolves the directory path to an absolute path.
- *   - formatDisplayPath — formats the path for user display.
- *   - node:fs/promises — provides rm() for directory deletion.
- *   - printDelete — displays the deletion operation to the user.
- *   - requestApproval — prompts user for approval.
- *
- * Dependants:
- *   - dispatch system — routes file.delete_dir requests to this handler.
+ *   @returns Object with deleted boolean indicating success or rejection.
  * </Summary>
  */
 export const handleFileDeleteDir = async (
@@ -540,23 +478,14 @@ export const handleFileDeleteDir = async (
  *   8. Return the new current working directory.
  *
  * Parameters:
- *   @param {DispatchContext} context — The dispatch context containing directory state.
- *   @param {Record<string, unknown>} requestBody — The request body containing the target path.
+ *   @param context - The dispatch context containing directory state.
+ *   @param requestBody - The request body containing the target path.
  *
  * Returns:
- *   @returns {Promise<unknown>} — Object containing the new current working directory path.
+ *   @returns Object containing the new current working directory path.
  *
  * Throws:
  *   @throws {Error} — When the target path is not a directory.
- *
- * Dependencies:
- *   - context.resolveAbsolute — resolves the directory path to an absolute path.
- *   - context.setCurrentDir — updates the current directory in the context.
- *   - context.onCwdChanged — notifies listeners of directory changes.
- *   - node:fs/promises — provides stat() for path validation.
- *
- * Dependants:
- *   - dispatch system — routes file.cd requests to this handler.
  * </Summary>
  */
 export const handleFileCd = async (
@@ -604,16 +533,10 @@ export const handleFileCd = async (
  *   2. Return the current directory in a standardized response format.
  *
  * Parameters:
- *   @param {DispatchContext} context — The dispatch context containing the current directory.
+ *   @param context - The dispatch context containing the current directory.
  *
  * Returns:
- *   @returns {Promise<unknown>} — Object containing the current working directory path.
- *
- * Dependencies:
- *   - context.currentDir — provides the current directory value.
- *
- * Dependants:
- *   - dispatch system — routes file.get_cwd requests to this handler.
+ *   @returns Object containing the current working directory path.
  * </Summary>
  */
 export const handleFileGetCwd = (context: DispatchContext): Promise<unknown> =>

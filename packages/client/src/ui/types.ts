@@ -7,14 +7,6 @@
  *   Provides the TypeScript type system for the entire UI layer. This includes history items,
  *   approval requests, prompts, spinner states, agent status, and static entries. These types
  *   ensure type safety across the UI components and proper data flow between the CLI and the UI.
- *
- * Dependencies:
- *   - frames — provides shared frame and stage types for consistency.
- *
- * Dependants:
- *   - All UI components — use these types for props and state.
- *   - AppContext — uses these types for context values.
- *   - uiBridge — uses these types for bridge communication.
  * </Summary>
  */
 
@@ -461,9 +453,6 @@ export type PromptResult =
  *   The Static component in Ink displays fixed-position content that doesn't scroll with the rest
  *   of the UI. This includes the application banner and all accumulated history.
  *
- * Dependencies:
- *   - HistoryItem — wraps history items for static display.
- *
  * Used by:
  *   - AppContext — creates static entries from banner and history.
  *   - AppContent — renders static entries using the Static component.
@@ -503,11 +492,6 @@ export type StaticEntry =
  *   Contains all the dependencies and configuration needed for the CLI application. These are
  *   injected at the application entry point and passed down through the component hierarchy via
  *   the AppContext.
- *
- * Dependencies:
- *   - Connection — provides RSocket communication with the server.
- *   - CommandHandler — provides CLI command processing.
- *   - LocalFileProxy — provides file system operations.
  *
  * Used by:
  *   - App — receives these props at application startup.

@@ -9,15 +9,6 @@
  *   Constructs context-aware memory headers that provide relevant project
  *   information, user preferences, and known fixes to improve agent performance.
  *   Uses token budgeting to ensure headers fit within model context windows.
- *
- * Dependencies:
- *   - node:fs/promises, node:path — pattern directory reads.
- *   - ../orchestration/interfaces.js — IPreferenceStore, IConfigManager, IOllamaAdminClient.
- *   - ../ollama/types.js — ModelInfo for context_length extraction.
- *   - ./languageHints.js — user-data/language-hints.json loader.
- *
- * Dependants:
- *   - AdvisorOrchestrator.runTask.
  * </Summary>
  */
 
@@ -74,17 +65,6 @@ type PatternFile = { name: string; body: string };
  *   - Respects model context window limits with smart token budgeting
  *   - Caches model context windows to avoid repeated API calls
  *   - Supports model-specific context optimization
- *
- * Dependencies:
- *   - IPreferenceStore — retrieves user preference rules.
- *   - IOllamaAdminClient — queries model metadata for context windows.
- *   - IConfigManager — provides advisor model configuration.
- *   - ISessionManager — provides session history for context.
- *   - File system — loads markdown pattern files.
- *
- * Dependants:
- *   - AdvisorOrchestrator — uses build() to create context for tasks.
- *   - ConfigManager — calls clearContextWindowCache on model changes.
  * </Summary>
  */
 export class ContextBuilder implements IContextBuilder {
@@ -146,13 +126,7 @@ export class ContextBuilder implements IContextBuilder {
    *   6. Store optional session manager for session history.
    *
    * Parameters:
-   *   @param {{ prefs: IPreferenceStore; ollama: IOllamaAdminClient; config: IConfigManager; rootDir?: string; session?: ISessionManager }} dependencies — Collaborators for rules, model metadata, and active advisor model.
-   *
-   * Dependencies:
-   *   - process.cwd — default root directory.
-   *
-   * Dependants:
-   *   - Container factory — creates ContextBuilder instance during startup.
+   *   @param dependencies - Collaborators for rules, model metadata, and active advisor model.
    * </Summary>
    */
   constructor(
@@ -200,9 +174,6 @@ export class ContextBuilder implements IContextBuilder {
    *   - clearContextWindowCache() → clears all cached windows (e.g., after /set advisor)
    *   - clearContextWindowCache("llama2") → removes only llama2's entry; others remain cached
    *   - Useful when model context changes or advisor model switches
-   *
-   * Dependants:
-   *   - Future ConfigManager.setAdvisorModel or memory routes.
    * </Summary>
    */
   clearContextWindowCache = (modelTag?: string): void => {
@@ -239,22 +210,15 @@ export class ContextBuilder implements IContextBuilder {
    *   6. Return the resolved context window to caller.
    *
    * Parameters:
-   *   @param {string} modelTag — Ollama model tag (e.g., "llama2", "neural-chat") from IConfigManager.getAdvisorModel.
+   *   @param modelTag - Ollama model tag (e.g., "llama2", "neural-chat") from IConfigManager.getAdvisorModel.
    *
    * Returns:
-   *   @returns {Promise<number>} — Context length in tokens (always positive).
+   *   @returns Context length in tokens (always positive).
    *
    * Performance Note:
    *   - First call: async (queries Ollama), ~100-500ms depending on network
    *   - Subsequent calls: sync cached lookup, microseconds
    *   - Cache invalidated by clearContextWindowCache() when needed
-   *
-   * Dependencies:
-   *   - IOllamaAdminClient.showModel — queries /api/show when not cached.
-   *   - resolveContextLength — extracts window from metadata response.
-   *
-   * Dependants:
-   *   - ContextBuilder.build — to calculate token budget for memory header.
    * </Summary>
    */
   private getContextWindow = async (modelTag: string): Promise<number> => {
@@ -316,24 +280,16 @@ export class ContextBuilder implements IContextBuilder {
    *   11. Return formatted header or empty string if nothing fits.
    *
    * Parameters:
-   *   @param {string} taskText — Original user task string.
+   *   @param taskText - Original user task string.
    *
    * Returns:
-   *   @returns {Promise<string>} — Header text or empty string when nothing fits.
+   *   @returns Header text or empty string when nothing fits.
    *
    * Token Budget Strategy:
    *   - Greedy first-fit allocation: prioritizes high-value (frequently-used) rules
    *   - Tracks used rule IDs to prevent duplication across sections
    *   - Smart pattern truncation: removes 16 chars at a time until fits
    *   - Preserves readability: only truncates if content is >20% useful
-   *
-   * Dependencies:
-   *   - IPreferenceStore.getAll — persisted rules.
-   *   - IConfigManager.getAdvisorModel, IOllamaAdminClient.showModel — dynamic context budget.
-   *   - fs.readdir / fs.readFile — pattern files.
-   *
-   * Dependants:
-   *   - AdvisorOrchestrator.runTask.
    * </Summary>
    */
   build = async (
@@ -625,10 +581,7 @@ export class ContextBuilder implements IContextBuilder {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<PatternFile[]>} — File name and UTF-8 body pairs.
-   *
-   * Dependants:
-   *   - ContextBuilder.build.
+   *   @returns File name and UTF-8 body pairs.
    * </Summary>
    */
   /**
@@ -651,7 +604,7 @@ export class ContextBuilder implements IContextBuilder {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<PatternFile[]>} — File name and UTF-8 body pairs.
+   *   @returns File name and UTF-8 body pairs.
    *
    * Error Handling Strategy:
    *   - ENOENT (directory missing): Expected case when patterns not yet created. Returns []
@@ -665,9 +618,6 @@ export class ContextBuilder implements IContextBuilder {
    *   - markdownFilename = "architecture.md"
    *   - absoluteFilePath = "/Users/john/project/user-data/patterns/architecture.md"
    *   - Return: [{ name: "architecture.md", body: "# Architecture...\n..." }]
-   *
-   * Dependants:
-   *   - ContextBuilder.build — to populate [Project context] section of memory header.
    * </Summary>
    */
   private loadPatterns = async (): Promise<PatternFile[]> => {

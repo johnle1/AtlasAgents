@@ -44,18 +44,11 @@ const BASH_OPERATION_ICON = "$";
  *   5. Append the styled line to the output block.
  *
  * Parameters:
- *   @param {string} command — The shell command to display.
- *   @param {BashClass} classification — The safety classification of the command.
+ *   @param command - The shell command to display.
+ *   @param classification - The safety classification of the command.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the bash command.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *   - appendBlock — displays the styled line to the user.
- *
- * Dependants:
- *   - Command execution handlers — use this to display commands before execution.
+ *   @returns Returns after displaying the bash command.
  * </Summary>
  */
 export const printBash = (command: string, classification: BashClass): void => {
@@ -92,18 +85,11 @@ export const printBash = (command: string, classification: BashClass): void => {
  *   4. Append the styled line to the output block.
  *
  * Parameters:
- *   @param {number} exitCode — The exit code returned by the shell command.
- *   @param {number} durationMs — The execution duration in milliseconds.
+ *   @param exitCode - The exit code returned by the shell command.
+ *   @param durationMs - The execution duration in milliseconds.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the command result.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *   - appendBlock — displays the styled line to the user.
- *
- * Dependants:
- *   - Command execution handlers — use this to display safe command results.
+ *   @returns Returns after displaying the command result.
  * </Summary>
  */
 export const printBashResult = (exitCode: number, durationMs: number): void => {
@@ -137,14 +123,7 @@ export const printBashResult = (exitCode: number, durationMs: number): void => {
  *   3. Append the styled line to the output block.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the skipped message.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *   - appendBlock — displays the styled line to the user.
- *
- * Dependants:
- *   - Command execution handlers — use this when user rejects command execution.
+ *   @returns Returns after displaying the skipped message.
  * </Summary>
  */
 export const printSkipped = (): void => {
@@ -173,14 +152,7 @@ export const printSkipped = (): void => {
  *   3. Append the styled line to the output block.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the approval message.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *   - appendBlock — displays the styled line to the user.
- *
- * Dependants:
- *   - Command execution handlers — use this when user approves command execution.
+ *   @returns Returns after displaying the approval message.
  * </Summary>
  */
 export const printBashApproved = (): void => {
@@ -212,20 +184,12 @@ export const printBashApproved = (): void => {
  *   8. Append all lines to the output block.
  *
  * Parameters:
- *   @param {number} exitCode — The exit code returned by the shell command.
- *   @param {string} stdout — The standard output from the command.
- *   @param {string} stderr — The standard error output from the command.
+ *   @param exitCode - The exit code returned by the shell command.
+ *   @param stdout - The standard output from the command.
+ *   @param stderr - The standard error output from the command.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the command completion status.
- *
- * Dependencies:
- *   - beginBlockOutput — starts a formatted output section.
- *   - getTheme — provides theme colors for text styling.
- *   - appendBlock — displays the styled lines to the user.
- *
- * Dependants:
- *   - Command execution handlers — use this to display command completion results.
+ *   @returns Returns after displaying the command completion status.
  * </Summary>
  */
 export const printBashRan = (
@@ -292,17 +256,10 @@ export const printBashRan = (
  *   3. Append the styled line to the output block.
  *
  * Parameters:
- *   @param {string} message — The success message to display.
+ *   @param message - The success message to display.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the success message.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *   - appendBlock — displays the styled line to the user.
- *
- * Dependants:
- *   - File operation handlers — use this to display operation success messages.
+ *   @returns Returns after displaying the success message.
  * </Summary>
  */
 export const printSuccessOp = (message: string): void => {

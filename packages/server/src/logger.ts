@@ -6,12 +6,6 @@
  * How it fits in the system:
  *   Provides a consistent logging interface throughout the application.
  *   Replaces console.log calls with structured logging.
- *
- * Dependencies:
- *   - pino - structured logging library.
- *
- * Dependants:
- *   - All application modules that need logging.
  * </Summary>
  */
 

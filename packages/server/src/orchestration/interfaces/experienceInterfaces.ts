@@ -5,13 +5,6 @@
  *
  * How it fits in the system:
  *   Records the lifecycle of orchestrated tasks and extracts reusable preference rules.
- *
- * Dependencies:
- *   - memory/types.js — ExperienceRecord, CommandOutput.
- *   - types.ts — OrchestrationOutcome.
- *
- * Dependants:
- *   - AdvisorOrchestrator, ExperienceRecorder.
  * </Summary>
  */
 
@@ -107,9 +100,6 @@ export interface IExperienceRecorder {
  *
  * Produced by:
  *   - packages/server/src/memory/patternExtractor.ts.
- *
- * Dependants:
- *   - ExperienceRecorder.finish — triggered fire-and-forget.
  * </Summary>
  */
 export interface IPatternExtractor {

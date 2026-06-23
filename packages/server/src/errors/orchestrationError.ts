@@ -7,12 +7,6 @@ import { AppError } from "./appError.js";
  *
  * How it fits in the system:
  *   Used when orchestration pipeline fails (advisor planning, agent execution, etc.).
- *
- * Dependencies:
- *   - AppError - base error class.
- *
- * Dependants:
- *   - Orchestration pipeline logic.
  * </Summary>
  */
 export class OrchestrationError extends AppError {

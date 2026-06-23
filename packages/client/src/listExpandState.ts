@@ -41,17 +41,11 @@ const expanded = new Set<string>();
  *   3. Stack now remembers this directory for potential expansion.
  *
  * Parameters:
- *   @param {string} absolutePath — Full path to the directory (e.g., "/home/user/project").
- *   @param {number} indent — Optional nesting depth (default 0 for root level).
+ *   @param absolutePath - Full path to the directory (e.g., "/home/user/project").
+ *   @param indent - Optional nesting depth (default 0 for root level).
  *
  * Returns:
  *   void — called for side effects only (modifies internal stack).
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - ListRenderer — pushes each listed directory to track for expansion.
  * </Summary>
  */
 export const pushListDir = (absolutePath: string, indent = 0): void => {
@@ -80,17 +74,10 @@ export const pushListDir = (absolutePath: string, indent = 0): void => {
  *   3. Future Ctrl+O commands will skip over expanded directories.
  *
  * Parameters:
- *   @param {string} absolutePath — Full path to the directory to mark as expanded.
+ *   @param absolutePath - Full path to the directory to mark as expanded.
  *
  * Returns:
  *   void — called for side effects only (modifies expanded set).
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - KeyboardHandler — marks directory expanded after Ctrl+O activation.
- *   - peekUnexpanded() — checks expanded set to find next unexpanded directory.
  * </Summary>
  */
 export const markExpanded = (absolutePath: string): void => {
@@ -114,20 +101,13 @@ export const markExpanded = (absolutePath: string): void => {
  *   2. Return true if found, false if not found.
  *
  * Parameters:
- *   @param {string} absolutePath — Full path to the directory to check.
+ *   @param absolutePath - Full path to the directory to check.
  *
  * Returns:
- *   @returns {boolean} — true if expanded, false if not yet expanded.
+ *   @returns true if expanded, false if not yet expanded.
  *
  * Performance:
  *   - O(1) lookup using Set (constant time, very fast).
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - peekUnexpanded() — uses this to filter unexpanded directories.
- *   - Other UI logic — may check if a directory is already expanded.
  * </Summary>
  */
 export const isExpanded = (absolutePath: string): boolean =>
@@ -153,7 +133,7 @@ export const isExpanded = (absolutePath: string): boolean =>
  *   None.
  *
  * Returns:
- *   @returns {{ found: boolean; entry?: ListExpandEntry }} — Result object
+ *   @returns Result object
  *     where found=true means entry contains the unexpanded directory,
  *     and found=false means no more directories to expand (entry omitted).
  *
@@ -177,13 +157,6 @@ export const isExpanded = (absolutePath: string): boolean =>
  *   - No forgotten null checks (TypeScript requires checking .found).
  *   - Explicit success/failure semantic (found boolean is clear).
  *   - Optional .entry prevents accidental undefined access.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - KeyboardHandler — calls this to find directory for Ctrl+O.
- *   - FileListManager — may call to check available expandable directories.
  * </Summary>
  */
 export const peekUnexpanded = (): {
@@ -239,13 +212,6 @@ export const peekUnexpanded = (): {
  *   - Called when starting a fresh file list (new command, new search results).
  *   - Prevents old directory state from carrying over to new list.
  *   - Ensures Ctrl+O starts fresh with all directories unexpanded.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - ListRenderer — calls before starting to build a new list.
- *   - FileListManager — calls when clearing the UI for fresh results.
  * </Summary>
  */
 export const clearExpandState = (): void => {

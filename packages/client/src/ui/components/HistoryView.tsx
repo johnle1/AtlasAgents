@@ -14,16 +14,10 @@ import { useAppContext } from "../../DataContext.js";
  *   2. Return true if any ANSI codes are found in the string.
  *
  * Parameters:
- *   @param {string} text — The string to check for ANSI escape codes.
+ *   @param text - The string to check for ANSI escape codes.
  *
  * Returns:
- *   @returns {boolean} — True if string contains ANSI codes, false otherwise.
- *
- * Dependencies:
- *   - None (pure regex function).
- *
- * Dependants:
- *   - renderHistoryItem — uses to determine if text already has coloring.
+ *   @returns True if string contains ANSI codes, false otherwise.
  * </Summary>
  */
 const hasAnsi = (text: string): boolean => /\x1b\[[0-9;]*m/.test(text);
@@ -42,18 +36,11 @@ const hasAnsi = (text: string): boolean => /\x1b\[[0-9;]*m/.test(text);
  *   6. For block items: render lines joined by newlines.
  *
  * Parameters:
- *   @param {HistoryItem} item — The history item to render.
- *   @param {string} key — Unique key for React rendering.
+ *   @param item - The history item to render.
+ *   @param key - Unique key for React rendering.
  *
  * Returns:
- *   @returns {React.ReactNode} — Rendered React element for the history item.
- *
- * Dependencies:
- *   - formatAdvisorThinkForDisplay — formats advisor thinking for display.
- *   - React/ink — for terminal UI rendering.
- *
- * Dependants:
- *   - Main UI components — call this to render individual history items.
+ *   @returns Rendered React element for the history item.
  * </Summary>
  */
 export const renderHistoryItem = (
@@ -170,13 +157,6 @@ export const renderHistoryItem = (
  *   Displays streaming text (like live command output or model responses)
  *   as it arrives from the server. Provides immediate feedback during
  *   long-running operations.
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering.
- *   - useAppContext — accesses streamingText state.
- *
- * Dependants:
- *   - Main UI components — renders HistoryView for real-time output display.
  * </Summary>
  */
 export const HistoryView: React.FC = () => {

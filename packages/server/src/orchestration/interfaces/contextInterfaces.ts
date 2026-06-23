@@ -7,13 +7,6 @@
  *   Defines the contract for building a memory-derived context header string that is
  *   inserted into the advisor system prompt. This context provides the advisor with
  *   relevant long-term memory snippets to improve task planning and understanding.
- *
- * Dependencies:
- *   - None at interface level.
- *
- * Dependants:
- *   - AdvisorOrchestrator — uses context before advisor planning.
- *   - ContextBuilder — implements this interface.
  * </Summary>
  */
 
@@ -49,17 +42,11 @@ export interface IContextBuilder {
    *   5. Return the formatted context string (may be empty if no relevant memory).
    *
    * Parameters:
-   *   @param {string} taskText — Original user task string for keyword extraction and relevance matching.
-   *   @param {string} advisorModelOverride — Optional advisor model name for context budget calculation (overrides config).
+   *   @param taskText - Original user task string for keyword extraction and relevance matching.
+   *   @param advisorModelOverride - Optional advisor model name for context budget calculation (overrides config).
    *
    * Returns:
-   *   @returns {Promise<string>} — Context header text (may be empty if no relevant memory found).
-   *
-   * Dependencies:
-   *   - None at interface level.
-   *
-   * Dependants:
-   *   - AdvisorOrchestrator.runTask — injects context into advisor system prompt.
+   *   @returns Context header text (may be empty if no relevant memory found).
    * </Summary>
    */
   build(taskText: string, advisorModelOverride?: string): Promise<string>;

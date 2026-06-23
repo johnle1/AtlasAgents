@@ -6,13 +6,6 @@
  * How it fits in the system:
  *   Provides configuration values for token budgets and limits when
  *   extracting preference rules from experience records.
- *
- * Dependencies:
- *   - None (pure constants).
- *
- * Dependants:
- *   - patternHelpers.ts - uses these constants for truncation and sampling.
- *   - patternExtractor.ts - uses these constants for budgeting.
  * </Summary>
  */
 

@@ -6,12 +6,6 @@
  *
  * How it fits in the system:
  *   Implements ISessionManager for ContextBuilder, ExperienceRecorder, and Router.
- *
- * Dependencies:
- *   - node:fs/promises, node:path, node:crypto — filesystem only.
- *
- * Dependants:
- *   - ContextBuilder (read), ExperienceRecorder (append), Router (exists/clear).
  * </Summary>
  */
 
@@ -38,17 +32,10 @@ const TASK_HEADER_RE = /^Task \d+/gm;
  *   2. The recursive option creates parent directories as needed.
  *
  * Parameters:
- *   @param {string} directoryPath — The directory path to ensure exists.
+ *   @param directoryPath - The directory path to ensure exists.
  *
  * Returns:
- *   @returns {Promise<void>} — Resolves when directory is guaranteed to exist.
- *
- * Dependencies:
- *   - node:fs/promises.mkdir — creates directories with recursive option.
- *
- * Dependants:
- *   - saveSnapshot — ensures session directory exists before writing.
- *   - append — ensures session directory exists before appending.
+ *   @returns Resolves when directory is guaranteed to exist.
  * </Summary>
  */
 const ensureDir = async (directoryPath: string): Promise<void> => {
@@ -68,16 +55,10 @@ const ensureDir = async (directoryPath: string): Promise<void> => {
  *   3. Otherwise, join the items with ", " separator.
  *
  * Parameters:
- *   @param {string[] | undefined} items — Array of strings to format, or undefined.
+ *   @param items - Array of strings to format, or undefined.
  *
  * Returns:
  *   {string} — Comma-separated string or "(none)" if empty/undefined.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - formatBlock — formats files written and commands run arrays.
  * </Summary>
  */
 const formatList = (items: string[] | undefined): string => {
@@ -100,16 +81,10 @@ const formatList = (items: string[] | undefined): string => {
  *   2. Return the count of matches, or 0 if none found.
  *
  * Parameters:
- *   @param {string} content — The session file content to analyze.
+ *   @param content - The session file content to analyze.
  *
  * Returns:
  *   {number} — Number of task blocks found in the content.
- *
- * Dependencies:
- *   - TASK_HEADER_RE — regex pattern for matching task headers.
- *
- * Dependants:
- *   - append — determines the next task number when appending a new task.
  * </Summary>
  */
 const countTasks = (content: string): number => {
@@ -133,17 +108,11 @@ const countTasks = (content: string): number => {
  *   5. Format these into a markdown block with the task number.
  *
  * Parameters:
- *   @param {number} taskNumber — The sequential task number (1-indexed).
- *   @param {SessionSummary} summary — The task summary object to format.
+ *   @param taskNumber - The sequential task number (1-indexed).
+ *   @param summary - The task summary object to format.
  *
  * Returns:
  *   {string} — Formatted markdown task block.
- *
- * Dependencies:
- *   - formatList — formats arrays for display.
- *
- * Dependants:
- *   - append — formats new task blocks before writing to session file.
  * </Summary>
  */
 const formatBlock = (taskNumber: number, summary: SessionSummary): string => {
@@ -198,19 +167,6 @@ const formatBlock = (taskNumber: number, summary: SessionSummary): string => {
  *   and Router to provide a shared session state that persists across tasks.
  *   The session file contains a chronological record of what was built in prior
  *   tasks, allowing agents to understand context without re-exploring the codebase.
- *
- * Dependencies:
- *   - node:fs/promises — filesystem operations (read, write, unlink, rename).
- *   - node:path — path manipulation for file paths.
- *   - node:crypto — randomUUID for atomic write temp files.
- *   - ensureDir — ensures session directory exists.
- *   - formatBlock — formats task summaries as markdown.
- *   - countTasks — counts existing tasks for numbering.
- *
- * Dependants:
- *   - ContextBuilder — reads session to provide context to agents.
- *   - ExperienceRecorder — appends task summaries to session.
- *   - Router — checks if session exists and clears it on request.
  * </Summary>
  */
 export class SessionManager implements ISessionManager {
@@ -225,18 +181,11 @@ export class SessionManager implements ISessionManager {
    *   2. Join the root directory with the relative session path to get the full path.
    *
    * Parameters:
-   *   @param {Object} deps — Dependency object with optional configuration.
+   *   @param deps - Dependency object with optional configuration.
    *     @param {string} [deps.rootDir] — Optional data root directory. Defaults to process.cwd().
    *
    * Returns:
    *   void — Constructor does not return a value.
-   *
-   * Dependencies:
-   *   - node:path — for joining path components.
-   *   - process.cwd — for default root directory.
-   *
-   * Dependants:
-   *   - Router — instantiates SessionManager for session management.
    */
   constructor(readonly deps: { rootDir?: string } = {}) {
     // Step 1: Extract the root directory from deps or default to current working directory
@@ -260,17 +209,10 @@ export class SessionManager implements ISessionManager {
    *   3. If another error occurs, re-throw it for the caller to handle.
    *
    * Returns:
-   *   @returns {Promise<string>} — The session file contents, or empty string if file doesn't exist.
+   *   @returns The session file contents, or empty string if file doesn't exist.
    *
    * Throws:
    *   @throws {Error} — Re-throws filesystem errors other than ENOENT.
-   *
-   * Dependencies:
-   *   - node:fs/promises.readFile — reads file contents.
-   *
-   * Dependants:
-   *   - ContextBuilder — reads session to provide context to agents.
-   *   - append — reads existing content before appending new task.
    * </Summary>
    */
   read = async (): Promise<string> => {
@@ -308,16 +250,10 @@ export class SessionManager implements ISessionManager {
    *   5. If another error occurs, re-throw it.
    *
    * Returns:
-   *   @returns {Promise<boolean>} — True if session file exists with content, false otherwise.
+   *   @returns True if session file exists with content, false otherwise.
    *
    * Throws:
    *   @throws {Error} — Re-throws filesystem errors other than ENOENT.
-   *
-   * Dependencies:
-   *   - node:fs/promises.readFile — reads file contents.
-   *
-   * Dependants:
-   *   - Router — checks if session exists before clearing or displaying.
    * </Summary>
    */
   exists = async (): Promise<boolean> => {
@@ -355,22 +291,13 @@ export class SessionManager implements ISessionManager {
    *   4. Atomically rename the temp file to the actual session path.
    *
    * Parameters:
-   *   @param {string} snapshot — The codebase exploration snapshot content to save.
+   *   @param snapshot - The codebase exploration snapshot content to save.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when the snapshot is saved.
+   *   @returns Resolves when the snapshot is saved.
    *
    * Throws:
    *   @throws {Error} — Throws filesystem errors if directory creation or write fails.
-   *
-   * Dependencies:
-   *   - ensureDir — ensures session directory exists.
-   *   - node:crypto.randomUUID — generates unique temp file names.
-   *   - node:fs/promises.writeFile — writes content to temp file.
-   *   - node:fs/promises.rename — atomically moves temp file to final location.
-   *
-   * Dependants:
-   *   - Router — saves codebase exploration snapshots.
    * </Summary>
    */
   saveSnapshot = async (snapshot: string): Promise<void> => {
@@ -414,25 +341,13 @@ export class SessionManager implements ISessionManager {
    *   8. Atomically rename the temp file to the session path.
    *
    * Parameters:
-   *   @param {SessionSummary} summary — The task summary to append to the session.
+   *   @param summary - The task summary to append to the session.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when the task summary is appended.
+   *   @returns Resolves when the task summary is appended.
    *
    * Throws:
    *   @throws {Error} — Throws filesystem errors if directory creation or write fails.
-   *
-   * Dependencies:
-   *   - this.read — reads existing session content.
-   *   - countTasks — determines next task number.
-   *   - formatBlock — formats the summary as markdown.
-   *   - ensureDir — ensures session directory exists.
-   *   - node:crypto.randomUUID — generates unique temp file names.
-   *   - node:fs/promises.writeFile — writes content to temp file.
-   *   - node:fs/promises.rename — atomically moves temp file to final location.
-   *
-   * Dependants:
-   *   - ExperienceRecorder — appends task summaries after completion.
    * </Summary>
    */
   append = async (summary: SessionSummary): Promise<void> => {
@@ -487,16 +402,10 @@ export class SessionManager implements ISessionManager {
    *   4. Return a confirmation message regardless of whether file existed.
    *
    * Returns:
-   *   @returns {Promise<string>} — Confirmation message "Session cleared".
+   *   @returns Confirmation message "Session cleared".
    *
    * Throws:
    *   @throws {Error} — Re-throws filesystem errors other than ENOENT.
-   *
-   * Dependencies:
-   *   - node:fs/promises.unlink — deletes the session file.
-   *
-   * Dependants:
-   *   - Router — clears the session when requested by user.
    * </Summary>
    */
   clear = async (): Promise<string> => {

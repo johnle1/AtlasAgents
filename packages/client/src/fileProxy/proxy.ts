@@ -29,18 +29,6 @@ import type { DispatchContext } from "./types.js";
  *   Acts as the central coordination point between the agent/client and local file system operations.
  *   Manages workspace state, validates paths, routes requests to handlers, and provides UI feedback.
  *   Ensures all operations stay within workspace boundaries and handles errors consistently.
- *
- * Dependencies:
- *   - classifyCommand — assesses command safety levels.
- *   - dispatch — routes requests to appropriate handlers.
- *   - directoryListing functions — provide directory traversal capabilities.
- *   - pathUtils — provides path validation and resolution.
- *   - shellRunner — executes shell commands.
- *   - agentStatus — manages UI state (spinners, indicators).
- *
- * Dependants:
- *   - Agent/client code — instantiates this class to perform file operations.
- *   - UI components — use this class for directory browsing and file operations.
  * </Summary>
  */
 export class LocalFileProxy {
@@ -89,14 +77,8 @@ export class LocalFileProxy {
    *   4. Store the optional callback for directory change notifications.
    *
    * Parameters:
-   *   @param {string} workspaceRoot — The root directory of the workspace (can be relative or absolute).
-   *   @param {(cwd: string) => void} onCwdChanged — Optional callback called when current directory changes.
-   *
-   * Dependencies:
-   *   - node:path — provides path.resolve() for absolute path conversion.
-   *
-   * Dependants:
-   *   - Agent/client code — creates instance to interact with file system.
+   *   @param workspaceRoot - The root directory of the workspace (can be relative or absolute).
+   *   @param onCwdChanged - Optional callback called when current directory changes.
    * </Summary>
    */
   constructor(
@@ -123,14 +105,7 @@ export class LocalFileProxy {
    *   1. Return the currentDir field value.
    *
    * Returns:
-   *   @returns {string} — The current working directory path.
-   *
-   * Dependencies:
-   *   - None (simple field access).
-   *
-   * Dependants:
-   *   - UI components — display current directory to user.
-   *   - Path resolution functions — use as base for relative paths.
+   *   @returns The current working directory path.
    * </Summary>
    */
   getCwd = (): string => this.currentDir;
@@ -147,16 +122,10 @@ export class LocalFileProxy {
    *   4. Call the onCwdChanged callback if provided to notify listeners.
    *
    * Parameters:
-   *   @param {string} workspacePath — The new workspace root directory (can be relative or absolute).
+   *   @param workspacePath - The new workspace root directory (can be relative or absolute).
    *
    * Returns:
-   *   @returns {void} — Returns after updating state and notifying listeners.
-   *
-   * Dependencies:
-   *   - node:path — provides path.resolve() for absolute path conversion.
-   *
-   * Dependants:
-   *   - Workspace management code — uses this to switch between different projects.
+   *   @returns Returns after updating state and notifying listeners.
    * </Summary>
    */
   setWorkspaceRoot = (workspacePath: string): void => {
@@ -189,16 +158,10 @@ export class LocalFileProxy {
    *   3. Return the validated absolute path.
    *
    * Parameters:
-   *   @param {string} relativePath — The path to resolve (can be relative or absolute).
+   *   @param relativePath - The path to resolve (can be relative or absolute).
    *
    * Returns:
-   *   @returns {string} — The validated absolute path guaranteed to be inside the workspace.
-   *
-   * Dependencies:
-   *   - resolveAbsolutePath — performs the actual path resolution and validation.
-   *
-   * Dependants:
-   *   - Path consumers — use this to safely resolve user-provided paths.
+   *   @returns The validated absolute path guaranteed to be inside the workspace.
    * </Summary>
    */
   resolveAbsolute = (relativePath: string): string =>
@@ -215,16 +178,10 @@ export class LocalFileProxy {
    *   3. Return the classification result.
    *
    * Parameters:
-   *   @param {string} command — The shell command to classify (e.g., "rm -rf file.txt").
+   *   @param command - The shell command to classify (e.g., "rm -rf file.txt").
    *
    * Returns:
-   *   @returns {BashClass} — One of "safe", "dangerous", or "cautious" indicating the command's risk level.
-   *
-   * Dependencies:
-   *   - classifyCommand — performs the actual command analysis.
-   *
-   * Dependants:
-   *   - Command execution handlers — use this to determine if user confirmation is needed.
+   *   @returns One of "safe", "dangerous", or "cautious" indicating the command's risk level.
    * </Summary>
    */
   classifyCommand = (command: string): BashClass => classifyCommand(command);
@@ -244,21 +201,11 @@ export class LocalFileProxy {
    *   7. In the finally block, restore UI state based on task activity.
    *
    * Parameters:
-   *   @param {string} route — The route identifier that determines which handler to call.
-   *   @param {unknown} payload — The request payload containing parameters for the handler.
+   *   @param route - The route identifier that determines which handler to call.
+   *   @param payload - The request payload containing parameters for the handler.
    *
    * Returns:
-   *   @returns {Promise<ClientOpResponse>} — Standardized response with ok status and either data or error.
-   *
-   * Dependencies:
-   *   - dispatch — routes the request to the appropriate handler.
-   *   - buildContext — creates the dispatch context.
-   *   - QUIET_PROXY_ROUTES — determines if spinner is needed.
-   *   - agentStatus functions — manage UI state (startWorking, startThinking, stopAnimated).
-   *   - isTaskActive — checks if there's an active task for UI state restoration.
-   *
-   * Dependants:
-   *   - Agent/client code — calls this to execute file operations and commands.
+   *   @returns Standardized response with ok status and either data or error.
    * </Summary>
    */
   handle = async (
@@ -328,16 +275,10 @@ export class LocalFileProxy {
    *   3. Return the generated directory structure string.
    *
    * Parameters:
-   *   @param {number} depth — Maximum depth to traverse (0 = current directory only, 1 = one level deep, etc.).
+   *   @param depth - Maximum depth to traverse (0 = current directory only, 1 = one level deep, etc.).
    *
    * Returns:
-   *   @returns {Promise<string>} — String representation of the directory structure with indentation.
-   *
-   * Dependencies:
-   *   - listStructureImpl — performs the actual directory traversal and structure generation.
-   *
-   * Dependants:
-   *   - Directory listing commands — use this to display project structure to users.
+   *   @returns String representation of the directory structure with indentation.
    * </Summary>
    */
   listStructure = async (depth: number): Promise<string> =>
@@ -360,17 +301,10 @@ export class LocalFileProxy {
    *   3. Return the array of entry objects with name and isDirectory properties.
    *
    * Parameters:
-   *   @param {string} dirPath — The directory path to list (can be relative or absolute).
+   *   @param dirPath - The directory path to list (can be relative or absolute).
    *
    * Returns:
-   *   @returns {Promise<Array<{ name: string; isDirectory: boolean }>>} — Array of entry objects.
-   *
-   * Dependencies:
-   *   - listDirectoryEntriesImpl — performs the actual directory listing.
-   *
-   * Dependants:
-   *   - expandDirectory — uses this to get entries when expanding a directory.
-   *   - Directory browsing commands — use this to display directory contents.
+   *   @returns Array of entry objects.
    * </Summary>
    */
   listDirectoryEntries = async (
@@ -390,18 +324,11 @@ export class LocalFileProxy {
    *   4. Return when the directory has been expanded and entries displayed.
    *
    * Parameters:
-   *   @param {string} dirPath — The directory path to expand.
-   *   @param {number} indent — The indentation level to use for displaying the entries.
+   *   @param dirPath - The directory path to expand.
+   *   @param indent - The indentation level to use for displaying the entries.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when the directory has been expanded.
-   *
-   * Dependencies:
-   *   - expandDirectoryImpl — performs the actual directory expansion.
-   *   - listDirectoryEntries — provides the bound function for getting directory contents.
-   *
-   * Dependants:
-   *   - Directory expansion commands — use this when a user expands a directory in the file browser.
+   *   @returns Resolves when the directory has been expanded.
    * </Summary>
    */
   expandDirectory = async (dirPath: string, indent: number): Promise<void> =>
@@ -431,17 +358,7 @@ export class LocalFileProxy {
    *   8. Return the complete context object.
    *
    * Returns:
-   *   @returns {DispatchContext} — The complete dispatch context with all required state and utilities.
-   *
-   * Dependencies:
-   *   - assertInsideRoot — validates paths in setCurrentDir.
-   *   - runShell — executes shell commands.
-   *   - classifyCommand — assesses command safety.
-   *   - resolveAbsolute — resolves paths.
-   *   - listStructure — generates directory structures.
-   *
-   * Dependants:
-   *   - handle — calls this to create context for dispatching requests.
+   *   @returns The complete dispatch context with all required state and utilities.
    * </Summary>
    */
   private buildContext = (): DispatchContext => ({

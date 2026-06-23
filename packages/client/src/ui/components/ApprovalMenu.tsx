@@ -30,16 +30,10 @@ type Option<T> = { label: string; value: T; color?: string };
  *   4. For other types: return Keep and Undo options.
  *
  * Parameters:
- *   @param {ApprovalRequest} request — The approval request containing type and details.
+ *   @param request - The approval request containing type and details.
  *
  * Returns:
- *   @returns {Option<boolean | PlanDecision>[]} — Array of menu options with labels and values.
- *
- * Dependencies:
- *   - None (pure function).
- *
- * Dependants:
- *   - ApprovalMenu — calls this to generate menu options for display.
+ *   @returns Array of menu options with labels and values.
  * </Summary>
  */
 const buildOptions = (
@@ -70,15 +64,6 @@ const buildOptions = (
  *   Displays approval requests (plan review, command execution, etc.) when the
  *   server requires user confirmation. Handles keyboard input for navigation
  *   and selection, then resolves the approval through the UI bridge.
- *
- * Dependencies:
- *   - React/ink — for terminal UI rendering and input handling.
- *   - useAppContext — accesses approval state and selection index.
- *   - resolveApproval — sends user decision back to server.
- *   - buildOptions — generates menu options based on request type.
- *
- * Dependants:
- *   - Main UI components — renders ApprovalMenu when approval request exists.
  * </Summary>
  */
 export const ApprovalMenu: React.FC = () => {

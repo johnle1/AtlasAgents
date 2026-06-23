@@ -7,12 +7,6 @@ import { AppError } from "./appError.js";
  *
  * How it fits in the system:
  *   Used when authentication fails or user lacks permission for an operation.
- *
- * Dependencies:
- *   - AppError - base error class.
- *
- * Dependants:
- *   - Authentication middleware and authorization checks.
  * </Summary>
  */
 export class UnauthorizedError extends AppError {

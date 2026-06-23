@@ -9,17 +9,6 @@
  *   terminal. The banner includes an ASCII art logo, welcome message, version number,
  * and advisor/agent model information. The output is styled with ANSI escape sequences
  * for colors and formatting.
- *
- * Dependencies:
- *   - Config — provides advisor and agent model configuration.
- *   - visibleLength — calculates visible string length accounting for ANSI codes.
- *   - themeManager — provides the current color theme.
- *   - ansi256 — provides foreground/background color functions.
- *   - logoArt — provides the logo grid, dimensions, and padding utilities.
- *
- * Dependants:
- *   - Banner — uses this to generate banner lines for display.
- *   - AppContext — uses this to refresh the banner when configuration changes.
  * </Summary>
  */
 
@@ -62,16 +51,10 @@ const WELCOME_TEXT = "Welcome back";
  *   4. Append ANSI reset code to reset color after the pixel.
  *
  * Parameters:
- * @param {string | null} pixelColor — The hex color string for the pixel background, or null for transparent.
+ * @param pixelColor - The hex color string for the pixel background, or null for transparent.
  *
  * Returns:
- * @returns {string} — The ANSI-styled pixel string (two spaces with background color or transparent).
- *
- * Dependencies:
- *   - ansi256.bg — applies background color to text.
- *
- * Dependants:
- *   - logoRow — uses this to render each pixel in a logo row.
+ * @returns The ANSI-styled pixel string (two spaces with background color or transparent).
  * </Summary>
  */
 const logoPixel = (pixelColor: string | null): string => {
@@ -98,16 +81,10 @@ const logoPixel = (pixelColor: string | null): string => {
  *   3. Join all pixels together into a single string.
  *
  * Parameters:
- * @param {(string | null)[]} logoRowColors — Array of hex color strings (or null) for each pixel in the row.
+ * @param logoRowColors - Array of hex color strings (or null) for each pixel in the row.
  *
  * Returns:
- * @returns {string} — The complete rendered logo row as an ANSI-styled string.
- *
- * Dependencies:
- *   - logoPixel — renders individual pixels from colors.
- *
- * Dependants:
- *   - buildBannerLines — uses this to render each logo row for the banner.
+ * @returns The complete rendered logo row as an ANSI-styled string.
  * </Summary>
  */
 const logoRow = (logoRowColors: (string | null)[]): string => {
@@ -129,17 +106,11 @@ const logoRow = (logoRowColors: (string | null)[]): string => {
  *   3. Return the complete blank line string.
  *
  * Parameters:
- * @param {string} borderColor — The ANSI code for the border color.
- * @param {string} resetCode — The ANSI reset code to reset colors.
+ * @param borderColor - The ANSI code for the border color.
+ * @param resetCode - The ANSI reset code to reset colors.
  *
  * Returns:
- * @returns {string} — A blank banner line with borders and spacing.
- *
- * Dependencies:
- *   - BANNER_INNER — provides the width of the banner content area.
- *
- * Dependants:
- *   - buildBannerLines — uses this to create blank spacer lines in the banner.
+ * @returns A blank banner line with borders and spacing.
  * </Summary>
  */
 const borderedBlank = (borderColor: string, resetCode: string): string =>
@@ -171,24 +142,11 @@ const borderedBlank = (borderColor: string, resetCode: string): string =>
  *   14. Return the complete array of banner lines.
  *
  * Parameters:
- * @param {Config} configuration — The application configuration containing model information.
- * @param {string} version — The application version string to display in the title.
+ * @param configuration - The application configuration containing model information.
+ * @param version - The application version string to display in the title.
  *
  * Returns:
- * @returns {string[]} — Array of ANSI-styled banner lines ready for terminal display.
- *
- * Dependencies:
- *   - getTheme — provides the current color theme.
- *   - ansi256.fg — provides foreground color function.
- *   - logoArt constants — provides banner dimensions and logo grid.
- *   - borderedBlank — creates blank spacer lines.
- *   - logoRow — renders logo rows.
- *   - bannerCenterPad — calculates centering padding.
- *   - visibleLength — calculates visible string length.
- *
- * Dependants:
- *   - Banner — uses this to generate banner lines for display.
- *   - AppContext — uses this to refresh the banner when configuration changes.
+ * @returns Array of ANSI-styled banner lines ready for terminal display.
  * </Summary>
  */
 export const buildBannerLines = (

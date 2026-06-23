@@ -7,12 +7,6 @@
  * How it fits in the system:
  *   Called once from packages/server/src/index.ts before accepting connections.
  *   Ensures users have default configuration files without manual setup.
- *
- * Dependencies:
- *   - node:fs/promises, node:path — copy packaged JSON into user-data/.
- *
- * Dependants:
- *   - main in index.ts.
  * </Summary>
  */
 
@@ -44,19 +38,10 @@ const PACKAGED_DEFAULT_DATA_DIR = path.resolve(__dirname, "..", "default-data");
  *   4. Copies from packaged default-data when the source file is present.
  *
  * Parameters:
- *   @param {string} rootDir — Working directory for server state (typically cwd).
+ *   @param rootDir - Working directory for server state (typically cwd).
  *
  * Returns:
- *   @returns {Promise<void>} — Completes after copy or no-op.
- *
- * Dependencies:
- *   - fs.promises — file system operations (access, mkdir, copyFile).
- *   - path — path manipulation and resolution.
- *   - PACKAGED_DEFAULT_DATA_DIR — source directory for default files.
- *   - LANGUAGE_HINTS_FILENAME — target filename constant.
- *
- * Dependants:
- *   - installUserDataDefaults.
+ *   @returns Completes after copy or no-op.
  * </Summary>
  */
 const installDefaultLanguageHints = async (rootDir: string): Promise<void> => {
@@ -138,13 +123,7 @@ const installDefaultLanguageHints = async (rootDir: string): Promise<void> => {
  *   @param {string} [rootDir] — Data root; defaults to process.cwd().
  *
  * Returns:
- *   @returns {Promise<void>} — Completes when seeding finishes.
- *
- * Dependencies:
- *   - installDefaultLanguageHints — handles language hints file installation.
- *
- * Dependants:
- *   - main in index.ts.
+ *   @returns Completes when seeding finishes.
  * </Summary>
  */
 export const installUserDataDefaults = async (

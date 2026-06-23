@@ -29,21 +29,13 @@ import { formatErrorMessage } from "./utils.js";
  *   5. Prints success or error messages for each operation.
  *
  * Parameters:
- *   @param {string} sub — Subcommand: "list", "add", or "sync".
- *   @param {string} arg — Argument for add subcommand (skill name).
- *   @param {SkillManager | undefined} skills — Optional SkillManager instance.
- *   @param {Connection} conn — RSocket connection for syncing skills.
+ *   @param sub - Subcommand: "list", "add", or "sync".
+ *   @param arg - Argument for add subcommand (skill name).
+ *   @param skills - Optional SkillManager instance.
+ *   @param conn - RSocket connection for syncing skills.
  *
  * Returns:
- *   @returns {Promise<void>} — called for side effects only.
- *
- * Dependencies:
- *   - SkillManager or listSkills, addSkill, readAllSkills — local skill files and optional manager.
- *   - Connection.syncSkills — uploads skill payloads when not using SkillManager.sync.
- *   - renderer.printSkills, printError, printSuccess — display output.
- *
- * Dependants:
- *   - CommandHandler.handle — calls this for /skills commands.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const handleSkills = async (

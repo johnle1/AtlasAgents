@@ -8,12 +8,6 @@
  *   Implements IConfigManager for Advisor, Agent, ContextBuilder, and Router
  *   config.get / config.set handlers. Provides centralized configuration management
  *   with atomic writes and model change notifications.
- *
- * Dependencies:
- *   - node:fs/promises, node:path, node:crypto — filesystem only.
- *
- * Dependants:
- *   - Advisor, Agent, ContextBuilder, Router (when wired in index.ts).
  * </Summary>
  */
 
@@ -148,13 +142,6 @@ export const SERVER_DEFAULTS = {
  *
  * Used by:
  *   - ConfigManager methods — thrown when validation fails.
- *
- * Dependencies:
- *   - Error — base JavaScript Error class.
- *
- * Dependants:
- *   - Router — catches ConfigError to provide user-friendly error messages.
- *   - Server startup — catches ConfigError during initialization validation.
  * </Summary>
  */
 export class ConfigError extends Error {
@@ -253,16 +240,10 @@ export type ConfigRole = "advisor" | "agent";
  *   3. No error if directory already exists.
  *
  * Parameters:
- *   @param {string} directory — Directory path to ensure exists.
+ *   @param directory - Directory path to ensure exists.
  *
  * Returns:
- *   @returns {Promise<void>} — Completes when directory is guaranteed to exist.
- *
- * Dependencies:
- *   - fs.promises.mkdir — directory creation.
- *
- * Dependants:
- *   - save — ensures config directory exists before writing.
+ *   @returns Completes when directory is guaranteed to exist.
  * </Summary>
  */
 const ensureDir = async (directory: string): Promise<void> => {
@@ -282,16 +263,10 @@ const ensureDir = async (directory: string): Promise<void> => {
  *   4. Return empty object on any error (corrupt file, invalid JSON).
  *
  * Parameters:
- *   @param {string} rawContent — Raw JSON string from config file.
+ *   @param rawContent - Raw JSON string from config file.
  *
  * Returns:
- *   @returns {Record<string, unknown>} — Parsed object or empty object on failure.
- *
- * Dependencies:
- *   - JSON.parse — string parsing.
- *
- * Dependants:
- *   - load — parses config file content.
+ *   @returns Parsed object or empty object on failure.
  * </Summary>
  */
 const parseStoredConfig = (rawContent: string): Record<string, unknown> => {
@@ -328,17 +303,11 @@ const parseStoredConfig = (rawContent: string): Record<string, unknown> => {
  *   3. Return fallback value otherwise.
  *
  * Parameters:
- *   @param {unknown} value — Value to convert to string.
- *   @param {string} fallback — Default value if conversion fails.
+ *   @param value - Value to convert to string.
+ *   @param fallback - Default value if conversion fails.
  *
  * Returns:
- *   @returns {string} — Valid string or fallback.
- *
- * Dependencies:
- *   - None (pure function).
- *
- * Dependants:
- *   - mergeConfig — validates string configuration values.
+ *   @returns Valid string or fallback.
  * </Summary>
  */
 const asString = (value: unknown, fallback: string): string =>
@@ -355,17 +324,11 @@ const asString = (value: unknown, fallback: string): string =>
  *   3. Return fallback value otherwise.
  *
  * Parameters:
- *   @param {unknown} value — Value to convert to number.
- *   @param {number} fallback — Default value if conversion fails.
+ *   @param value - Value to convert to number.
+ *   @param fallback - Default value if conversion fails.
  *
  * Returns:
- *   @returns {number} — Valid number or fallback.
- *
- * Dependencies:
- *   - Number.isFinite — number validation.
- *
- * Dependants:
- *   - mergeConfig — validates numeric configuration values.
+ *   @returns Valid number or fallback.
  * </Summary>
  */
 const asNumber = (value: unknown, fallback: number): number =>
@@ -382,16 +345,10 @@ const asNumber = (value: unknown, fallback: number): number =>
  *   3. Return empty string otherwise.
  *
  * Parameters:
- *   @param {unknown} value — Value to extract model name from.
+ *   @param value - Value to extract model name from.
  *
  * Returns:
- *   @returns {string} — Model name or empty string.
- *
- * Dependencies:
- *   - None (pure function).
- *
- * Dependants:
- *   - mergeConfig — extracts model names from stored config.
+ *   @returns Model name or empty string.
  * </Summary>
  */
 const storedModel = (value: unknown): string =>
@@ -414,18 +371,10 @@ const storedModel = (value: unknown): string =>
  *   9. Return complete ServerConfig object.
  *
  * Parameters:
- *   @param {Record<string, unknown>} storedConfig — Raw config from file.
+ *   @param storedConfig - Raw config from file.
  *
  * Returns:
- *   @returns {ServerConfig} — Complete configuration with defaults applied.
- *
- * Dependencies:
- *   - storedModel — model name extraction.
- *   - asNumber — numeric value validation.
- *   - SERVER_DEFAULTS — fallback values.
- *
- * Dependants:
- *   - load — creates final config from file content.
+ *   @returns Complete configuration with defaults applied.
  * </Summary>
  */
 const mergeConfig = (storedConfig: Record<string, unknown>): ServerConfig => ({
@@ -501,18 +450,6 @@ const WRITABLE_CONFIG_KEYS = [
  *   Implements IConfigManager interface for orchestration layer components.
  * Provides reliable configuration persistence without caching to ensure
  * consistency across server operations. Uses atomic writes to prevent corruption.
- *
- * Dependencies:
- *   - fs.promises — file system operations for config persistence.
- *   - path — path manipulation for config file location.
- *   - randomUUID — temporary file naming for atomic writes.
- *   - mergeConfig — configuration merging with defaults.
- *
- * Dependants:
- *   - Advisor — reads advisor model and temperature settings.
- *   - Agent — reads agent model and temperature settings.
- *   - ContextBuilder — reads model settings for cache invalidation.
- *   - Router — reads and writes configuration via command handlers.
  * </Summary>
  */
 export class ConfigManager implements IConfigManager {
@@ -547,15 +484,7 @@ export class ConfigManager implements IConfigManager {
    *   4. Stores model change callback for later invocation.
    *
    * Parameters:
-   *   @param {{ rootDir?: string; onModelChanged?: (oldModel: string, role: ConfigRole) => void }} dependencies — Data root and optional cache invalidation hook.
-   *
-   * Dependencies:
-   *   - process.cwd — default root directory.
-   *   - path.join — path construction.
-   *   - CONFIG_REL_PATH — relative config path constant.
-   *
-   * Dependants:
-   *   - Container factory — creates ConfigManager instance during startup.
+   *   @param dependencies - Data root and optional cache invalidation hook.
    * </Summary>
    */
   constructor(
@@ -585,16 +514,10 @@ export class ConfigManager implements IConfigManager {
    *   3. Callback will be invoked by setModel when model names change.
    *
    * Parameters:
-   *   @param {(oldModel: string, role: ConfigRole) => void} callback — Function to call when model changes.
+   *   @param callback - Function to call when model changes.
    *
    * Returns:
    *   void — stores callback for later invocation.
-   *
-   * Dependencies:
-   *   - None (state update only).
-   *
-   * Dependants:
-   *   - Container factory — registers ContextBuilder cache invalidation during startup.
    * </Summary>
    */
   setOnModelChanged = (
@@ -620,17 +543,7 @@ export class ConfigManager implements IConfigManager {
    *   7. Release mutex lock.
    *
    * Returns:
-   *   @returns {Promise<ServerConfig>} — Complete configuration with defaults applied.
-   *
-   * Dependencies:
-   *   - mutex — prevents concurrent load/save operations.
-   *   - fs.promises.readFile — file reading.
-   *   - parseStoredConfig — JSON parsing with validation.
-   *   - mergeConfig — default merging.
-   *
-   * Dependants:
-   *   - All getter methods — delegate to this for fresh config reads.
-   *   - set / setModel — load current config before modifications.
+   *   @returns Complete configuration with defaults applied.
    * </Summary>
    */
   load = async (): Promise<ServerConfig> => {
@@ -672,20 +585,10 @@ export class ConfigManager implements IConfigManager {
    *   7. Atomic rename prevents corruption if write fails mid-operation.
    *
    * Parameters:
-   *   @param {ServerConfig} config — Configuration object to persist.
+   *   @param config - Configuration object to persist.
    *
    * Returns:
    *   void — called for side effects (file persistence).
-   *
-   * Dependencies:
-   *   - ensureDir — directory creation.
-   *   - randomUUID — temporary file naming.
-   *   - fs.promises.writeFile — file writing.
-   *   - fs.promises.rename — atomic file replacement.
-   *
-   * Dependants:
-   *   - set — saves configuration after key update.
-   *   - setModel — saves configuration after model change.
    * </Summary>
    */
   private save = async (config: ServerConfig): Promise<void> => {
@@ -724,17 +627,10 @@ export class ConfigManager implements IConfigManager {
    *   4. Return validated model name.
    *
    * Returns:
-   *   @returns {Promise<string>} — Advisor model name.
+   *   @returns Advisor model name.
    *
    * Throws:
    *   @throws {ConfigError} — When advisor model is not configured.
-   *
-   * Dependencies:
-   *   - load — fresh config read.
-   *
-   * Dependants:
-   *   - Advisor — retrieves model for planning operations.
-   *   - Server startup — validates advisor model is configured.
    * </Summary>
    */
   getAdvisorModel = async (): Promise<string> => {
@@ -767,17 +663,10 @@ export class ConfigManager implements IConfigManager {
    *   4. Return validated model name.
    *
    * Returns:
-   *   @returns {Promise<string>} — Agent model name.
+   *   @returns Agent model name.
    *
    * Throws:
    *   @throws {ConfigError} — When agent model is not configured.
-   *
-   * Dependencies:
-   *   - load — fresh config read.
-   *
-   * Dependants:
-   *   - Agent — retrieves model for task execution.
-   *   - Server startup — validates agent model is configured.
    * </Summary>
    */
   getAgentModel = async (): Promise<string> => {
@@ -808,13 +697,7 @@ export class ConfigManager implements IConfigManager {
    *   2. Return advisor temperature value.
    *
    * Returns:
-   *   @returns {Promise<number>} — Advisor temperature (0.0 to 1.0).
-   *
-   * Dependencies:
-   *   - load — fresh config read.
-   *
-   * Dependants:
-   *   - Advisor — retrieves temperature for planning operations.
+   *   @returns Advisor temperature (0.0 to 1.0).
    * </Summary>
    */
   getAdvisorTemperature = async (): Promise<number> => {
@@ -835,13 +718,7 @@ export class ConfigManager implements IConfigManager {
    *   2. Return agent temperature value.
    *
    * Returns:
-   *   @returns {Promise<number>} — Agent temperature (0.0 to 1.0).
-   *
-   * Dependencies:
-   *   - load — fresh config read.
-   *
-   * Dependants:
-   *   - Agent — retrieves temperature for task execution.
+   *   @returns Agent temperature (0.0 to 1.0).
    * </Summary>
    */
   getAgentTemperature = async (): Promise<number> => {
@@ -862,13 +739,7 @@ export class ConfigManager implements IConfigManager {
    *   2. Return retries value.
    *
    * Returns:
-   *   @returns {Promise<number>} — Maximum retry attempts.
-   *
-   * Dependencies:
-   *   - load — fresh config read.
-   *
-   * Dependants:
-   *   - Ollama client — retrieves retry configuration for API calls.
+   *   @returns Maximum retry attempts.
    * </Summary>
    */
   getMaxRetries = async (): Promise<number> => {
@@ -890,16 +761,10 @@ export class ConfigManager implements IConfigManager {
    *   3. Return appropriate temperature value.
    *
    * Parameters:
-   *   @param {ConfigRole} role — Either "advisor" or "agent".
+   *   @param role - Either "advisor" or "agent".
    *
    * Returns:
-   *   @returns {Promise<number>} — Temperature for specified role (0.0 to 1.0).
-   *
-   * Dependencies:
-   *   - load — fresh config read.
-   *
-   * Dependants:
-   *   - ContextBuilder — retrieves temperature for context preparation.
+   *   @returns Temperature for specified role (0.0 to 1.0).
    * </Summary>
    */
   getTemperature = async (role: ConfigRole): Promise<number> => {
@@ -920,13 +785,7 @@ export class ConfigManager implements IConfigManager {
    *   2. Return retries value.
    *
    * Returns:
-   *   @returns {Promise<number>} — Maximum retry attempts.
-   *
-   * Dependencies:
-   *   - load — fresh config read.
-   *
-   * Dependants:
-   *   - Ollama client — retrieves retry configuration.
+   *   @returns Maximum retry attempts.
    * </Summary>
    */
   getRetries = async (): Promise<number> => {
@@ -947,13 +806,7 @@ export class ConfigManager implements IConfigManager {
    *   2. Return timeout value.
    *
    * Returns:
-   *   @returns {Promise<number>} — Timeout in milliseconds.
-   *
-   * Dependencies:
-   *   - load — fresh config read.
-   *
-   * Dependants:
-   *   - Ollama client — sets timeout for API requests.
+   *   @returns Timeout in milliseconds.
    * </Summary>
    */
   getTimeout = async (): Promise<number> => {
@@ -974,13 +827,7 @@ export class ConfigManager implements IConfigManager {
    *   2. Return max context budget value.
    *
    * Returns:
-   *   @returns {Promise<number>} — Max context budget (0.0 to 1.0).
-   *
-   * Dependencies:
-   *   - load — fresh config read.
-   *
-   * Dependants:
-   *   - ContextBuilder — retrieves budget for context window management.
+   *   @returns Max context budget (0.0 to 1.0).
    * </Summary>
    */
   getMaxContextBudget = async (): Promise<number> => {
@@ -1001,13 +848,7 @@ export class ConfigManager implements IConfigManager {
    *   2. Return complete ServerConfig object.
    *
    * Returns:
-   *   @returns {Promise<ServerConfig>} — Complete configuration object.
-   *
-   * Dependencies:
-   *   - load — fresh config read.
-   *
-   * Dependants:
-   *   - Router — retrieves full config for display or inspection.
+   *   @returns Complete configuration object.
    * </Summary>
    */
   getAll = async (): Promise<ServerConfig> => {
@@ -1029,22 +870,14 @@ export class ConfigManager implements IConfigManager {
    *   5. Save updated configuration atomically.
    *
    * Parameters:
-   *   @param {string} key — Configuration key to update.
-   *   @param {unknown} value — New value for the configuration key.
+   *   @param key - Configuration key to update.
+   *   @param value - New value for the configuration key.
    *
    * Returns:
    *   void — called for side effects (configuration update).
    *
    * Throws:
    *   @throws {ConfigError} — When key is not in writable list.
-   *
-   * Dependencies:
-   *   - WRITABLE_CONFIG_KEYS — key validation.
-   *   - load — current config read.
-   *   - save — atomic config persistence.
-   *
-   * Dependants:
-   *   - Router config.set handler — updates configuration via user commands.
    * </Summary>
    */
   set = async (key: string, value: unknown): Promise<void> => {
@@ -1124,22 +957,14 @@ export class ConfigManager implements IConfigManager {
    *   7. If model changed, invoke onModelChanged callback.
    *
    * Parameters:
-   *   @param {ConfigRole} role — Either "advisor" or "agent".
-   *   @param {string} modelName — New model name to set.
+   *   @param role - Either "advisor" or "agent".
+   *   @param modelName - New model name to set.
    *
    * Returns:
    *   void — called for side effects (model update and cache invalidation).
    *
    * Throws:
    *   @throws {ConfigError} — When model name is empty.
-   *
-   * Dependencies:
-   *   - load — current config read.
-   *   - save — atomic config persistence.
-   *   - onModelChanged — cache invalidation callback.
-   *
-   * Dependants:
-   *   - Router config.set handler — updates models via user commands.
    * </Summary>
    */
   setModel = async (role: ConfigRole, modelName: string): Promise<void> => {

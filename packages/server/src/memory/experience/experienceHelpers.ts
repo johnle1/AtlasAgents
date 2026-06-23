@@ -7,14 +7,6 @@
  * How it fits in the system:
  *   Provides utility functions for file I/O and experience record processing.
  *   These helpers encapsulate common operations used by the ExperienceRecorder class.
- *
- * Dependencies:
- *   - node:fs/promises - async filesystem operations.
- *   - types.js - ExperienceRecord, TaskOutcome.
- *   - orchestration/types.js - OrchestrationOutcome.
- *
- * Dependants:
- *   - experienceRecorder.ts - uses these helpers in the ExperienceRecorder class.
  * </Summary>
  */
 
@@ -36,16 +28,10 @@ import type { ExperienceRecord, TaskOutcome } from "../types.js";
  *   2. Complete when the directory exists (no-op if already present).
  *
  * Parameters:
- *   @param {string} directoryPath — Absolute directory path.
+ *   @param directoryPath - Absolute directory path.
  *
  * Returns:
- *   @returns {Promise<void>} — Completes after mkdir -p.
- *
- * Dependencies:
- *   - node:fs/promises.mkdir.
- *
- * Dependants:
- *   - ExperienceRecorder.finish — before atomic experience write.
+ *   @returns Completes after mkdir -p.
  * </Summary>
  */
 export const ensureDir = async (directoryPath: string): Promise<void> => {
@@ -68,16 +54,10 @@ export const ensureDir = async (directoryPath: string): Promise<void> => {
  *   6. Return true if any array is non-empty.
  *
  * Parameters:
- *   @param {ExperienceRecord} record — In-memory task record.
+ *   @param record - In-memory task record.
  *
  * Returns:
- *   @returns {boolean} — True when at least one log category has entries.
- *
- * Dependencies:
- *   None.
- *
- * Dependants:
- *   - deriveOutcome — distinguishes partial vs bare failure.
+ *   @returns True when at least one log category has entries.
  * </Summary>
  */
 export const hasActivity = (experienceRecord: ExperienceRecord): boolean => {
@@ -105,17 +85,11 @@ export const hasActivity = (experienceRecord: ExperienceRecord): boolean => {
  *   3. Else return failure (task failed without meaningful attempt data).
  *
  * Parameters:
- *   @param {OrchestrationOutcome} orchestration — Result from AdvisorOrchestrator.
- *   @param {ExperienceRecord} record — Same task's in-memory log arrays.
+ *   @param orchestration - Result from AdvisorOrchestrator.
+ *   @param record - Same task's in-memory log arrays.
  *
  * Returns:
- *   @returns {TaskOutcome} — success | partial | failure.
- *
- * Dependencies:
- *   - hasActivity.
- *
- * Dependants:
- *   - ExperienceRecorder.finish.
+ *   @returns success | partial | failure.
  * </Summary>
  */
 export const deriveOutcome = (

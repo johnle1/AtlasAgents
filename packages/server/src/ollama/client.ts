@@ -7,18 +7,6 @@
  *   Provides a unified interface for communicating with the local Ollama server.
  *   Handles both chat operations (for AI agents and advisors) and model management
  *   (pulling, deleting, listing models). Uses undici for HTTP with configurable timeouts.
- *
- * Dependencies:
- *   - undici — HTTP fetch with configurable timeouts.
- *   - enrichOllamaFetchError — enriches fetch errors with context.
- *   - OllamaError — custom error type for Ollama-specific errors.
- *
- * Dependants:
- *   - container.ts — creates OllamaClient instances for dependency injection.
- *   - Advisor — uses chat for planning and advising agents.
- *   - Agent — uses chatStream for task execution.
- *   - PatternExtractor — uses chat for extracting preference rules.
- *   - Router handlers — use model admin APIs for model management.
  * </Summary>
  */
 
@@ -54,17 +42,10 @@ const DEFAULT_TIMEOUT_MS = 600_000;
  *   3. Set connectTimeout to 60 seconds (reasonable default for establishing connections).
  *
  * Parameters:
- *   @param {number} timeoutMs — Timeout in milliseconds for headers and body.
+ *   @param timeoutMs - Timeout in milliseconds for headers and body.
  *
  * Returns:
  *   {Agent} — Configured undici Agent for HTTP requests.
- *
- * Dependencies:
- *   - undici.Agent — HTTP connection agent with timeout support.
- *
- * Dependants:
- *   - OllamaClient constructor — creates dispatcher with configured timeout.
- *   - setTimeoutMs — rebuilds dispatcher when timeout changes.
  * </Summary>
  */
 const buildDispatcher = (timeoutMs: number): Agent =>
@@ -84,17 +65,11 @@ const buildDispatcher = (timeoutMs: number): Agent =>
  *   2. If reading fails (e.g., connection already closed), return empty string.
  *
  * Parameters:
- *   @param {Object} response — HTTP response object with text method.
- *   @param {() => Promise<string>} response.text — Method to read response body as text.
+ *   @param response - HTTP response object with text method.
+ *   @param response - .text — Method to read response body as text.
  *
  * Returns:
  *   {string} — Response body text, or empty string if reading fails.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - ollamaFetch error handling — extracts error details from failed responses.
  * </Summary>
  */
 const readErrorBody = async (response: {
@@ -121,17 +96,10 @@ const readErrorBody = async (response: {
  *   4. Return complete lines and the partial buffer.
  *
  * Parameters:
- *   @param {string} buffer — String buffer containing NDJSON data.
+ *   @param buffer - String buffer containing NDJSON data.
  *
  * Returns:
- *   @returns {{ lines: string[]; rest: string }} — Object with complete lines and remaining partial data.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - chatStream — parses streaming NDJSON responses from Ollama.
- *   - pullModel — parses streaming NDJSON responses during model pull.
+ *   @returns Object with complete lines and remaining partial data.
  * </Summary>
  */
 const parseNdjsonLines = (
@@ -162,21 +130,6 @@ const parseNdjsonLines = (
  *   Provides a unified interface for communicating with the local Ollama server with
  *   configurable timeouts and error handling. Handles streaming responses for chat and
  *   model pull operations.
- *
- * Dependencies:
- *   - undici — HTTP fetch with configurable timeouts.
- *   - buildDispatcher — creates HTTP agent with timeout configuration.
- *   - parseNdjsonLines — parses streaming NDJSON responses.
- *   - readErrorBody — extracts error details from failed responses.
- *   - enrichOllamaFetchError — enriches fetch errors with context.
- *   - OllamaError — custom error type for Ollama-specific errors.
- *
- * Dependants:
- *   - container.ts — creates OllamaClient instances for dependency injection.
- *   - Advisor — uses chat for planning and advising agents.
- *   - Agent — uses chatStream for task execution.
- *   - PatternExtractor — uses chat for extracting preference rules.
- *   - Router handlers — use model admin APIs for model management.
  * </Summary>
  */
 export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
@@ -199,18 +152,12 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
    *   4. Build dispatcher with the configured timeout.
    *
    * Parameters:
-   *   @param {Object} deps — Dependency object with optional configuration.
+   *   @param deps - Dependency object with optional configuration.
    *     @param {string} [deps.baseUrl] — Ollama server URL. Defaults to http://localhost:11434.
    *     @param {number} [deps.timeoutMs] — Request timeout in milliseconds. Defaults to 600000 (10 min).
    *
    * Returns:
    *   void — Constructor does not return a value.
-   *
-   * Dependencies:
-   *   - buildDispatcher — creates HTTP agent with timeout configuration.
-   *
-   * Dependants:
-   *   - container.ts — instantiates OllamaClient with configuration.
    */
   constructor(readonly deps: { baseUrl?: string; timeoutMs?: number } = {}) {
     // Step 1: Extract baseUrl from deps or use DEFAULT_BASE_URL
@@ -239,16 +186,10 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
    *   3. Rebuild the dispatcher with the new timeout.
    *
    * Parameters:
-   *   @param {number} timeoutMs — New timeout in milliseconds.
+   *   @param timeoutMs - New timeout in milliseconds.
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   - buildDispatcher — creates new HTTP agent with updated timeout.
-   *
-   * Dependants:
-   *   - Router — may adjust timeout based on user configuration.
    * </Summary>
    */
   setTimeoutMs = (timeoutMs: number): void => {
@@ -276,24 +217,11 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
    *   2. Call undiciFetch with the URL and merged options.
    *
    * Parameters:
-   *   @param {string} url — The full URL to fetch.
-   *   @param {Object} init — Optional fetch init options (method, headers, body, etc.).
+   *   @param url - The full URL to fetch.
+   *   @param init - Optional fetch init options (method, headers, body, etc.).
    *
    * Returns:
    *   {Promise<Response>} — The fetch Response object.
-   *
-   * Dependencies:
-   *   - undici.fetch — performs the HTTP request.
-   *   - this.dispatcher — provides timeout configuration.
-   *
-   * Dependants:
-   *   - chat — sends chat requests to Ollama.
-   *   - chatStream — sends streaming chat requests.
-   *   - listModelsDetailed — lists available models.
-   *   - pullModel — pulls a model from registry.
-   *   - deleteModel — deletes a local model.
-   *   - showModel — shows model details.
-   *   - listRunning — lists currently running models.
    * </Summary>
    */
   private ollamaFetch = (
@@ -316,19 +244,12 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
    *   3. Return the complete accumulated response.
    *
    * Parameters:
-   *   @param {string} model — The Ollama model name to use.
-   *   @param {Message[]} messages — Array of conversation messages.
-   *   @param {ChatOptions} options — Chat options including temperature.
+   *   @param model - The Ollama model name to use.
+   *   @param messages - Array of conversation messages.
+   *   @param options - Chat options including temperature.
    *
    * Returns:
-   *   @returns {Promise<string>} — The complete AI response text.
-   *
-   * Dependencies:
-   *   - chatStream — performs the actual streaming request.
-   *
-   * Dependants:
-   *   - Advisor — uses for non-streaming planning and advising.
-   *   - PatternExtractor — uses for extracting preference rules.
+   *   @returns The complete AI response text.
    *
    * Implementation Note:
    *   We use the streaming endpoint internally even for non-streaming requests.
@@ -378,26 +299,16 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
    *   8. Handle any trailing partial data after stream ends.
    *
    * Parameters:
-   *   @param {string} model — The Ollama model name to use.
-   *   @param {Message[]} messages — Array of conversation messages.
-   *   @param {ChatOptions} options — Chat options including temperature.
+   *   @param model - The Ollama model name to use.
+   *   @param messages - Array of conversation messages.
+   *   @param options - Chat options including temperature.
    *
    * Returns:
-   *   @returns {AsyncGenerator<string>} — Async generator yielding response text chunks.
+   *   @returns Async generator yielding response text chunks.
    *
    * Throws:
    *   @throws {OllamaError} — When HTTP request fails or returns error status.
    *   @throws {Error} — When network error occurs (enriched with context).
-   *
-   * Dependencies:
-   *   - this.ollamaFetch — performs HTTP request with timeout handling.
-   *   - enrichOllamaFetchError — adds context to network errors.
-   *   - readErrorBody — extracts error details from failed responses.
-   *   - parseNdjsonLines — parses streaming NDJSON responses.
-   *
-   * Dependants:
-   *   - chat — consumes this generator for non-streaming responses.
-   *   - Agent — uses directly for real-time task execution.
    * </Summary>
    */
   chatStream = async function* (
@@ -537,18 +448,10 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
    *   5. Map to standardized OllamaModelSummary format.
    *
    * Returns:
-   *   @returns {Promise<OllamaModelSummary[]>} — Array of detailed model information.
+   *   @returns Array of detailed model information.
    *
    * Throws:
    *   @throws {OllamaError} — When HTTP request fails or returns error status.
-   *
-   * Dependencies:
-   *   - this.ollamaFetch — performs HTTP request.
-   *   - readErrorBody — extracts error details from failed responses.
-   *
-   * Dependants:
-   *   - listModels — extracts just model names from detailed list.
-   *   - Router — displays detailed model information.
    * </Summary>
    */
   listModelsDetailed = async (): Promise<OllamaModelSummary[]> => {
@@ -609,14 +512,7 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
    *   2. Extract just the model names from the detailed list.
    *
    * Returns:
-   *   @returns {Promise<string[]>} — Array of model names.
-   *
-   * Dependencies:
-   *   - listModelsDetailed — gets detailed model information.
-   *
-   * Dependants:
-   *   - Router — lists available models for user selection.
-   *   - deleteModel — validates model existence before deletion.
+   *   @returns Array of model names.
    * </Summary>
    */
   listModels = async (): Promise<string[]> => {
@@ -643,21 +539,13 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
    *   6. Handle any trailing partial data after stream ends.
    *
    * Parameters:
-   *   @param {string} name — The model name to pull (e.g., "llama2:13b").
+   *   @param name - The model name to pull (e.g., "llama2:13b").
    *
    * Returns:
-   *   @returns {AsyncGenerator<PullProgress>} — Async generator yielding pull progress updates.
+   *   @returns Async generator yielding pull progress updates.
    *
    * Throws:
    *   @throws {OllamaError} — When HTTP request fails or returns error status.
-   *
-   * Dependencies:
-   *   - this.ollamaFetch — performs HTTP request.
-   *   - readErrorBody — extracts error details from failed responses.
-   *   - parseNdjsonLines — parses streaming NDJSON responses.
-   *
-   * Dependants:
-   *   - Router — pulls models on user request.
    * </Summary>
    */
   pullModel = async function* (
@@ -737,21 +625,13 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
    *   4. Validate response status.
    *
    * Parameters:
-   *   @param {string} name — The model name to delete.
+   *   @param name - The model name to delete.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when deletion completes.
+   *   @returns Resolves when deletion completes.
    *
    * Throws:
    *   @throws {OllamaError} — When model not found or deletion fails.
-   *
-   * Dependencies:
-   *   - listModels — checks if model exists before deletion.
-   *   - this.ollamaFetch — performs HTTP DELETE request.
-   *   - readErrorBody — extracts error details from failed responses.
-   *
-   * Dependants:
-   *   - Router — deletes models on user request.
    * </Summary>
    */
   deleteModel = async (name: string): Promise<void> => {
@@ -794,22 +674,14 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
    *   5. Parse and return model information.
    *
    * Parameters:
-   *   @param {string} name — The model name to show details for.
+   *   @param name - The model name to show details for.
    *
    * Returns:
-   *   @returns {Promise<ModelInfo>} — Detailed model information.
+   *   @returns Detailed model information.
    *
    * Throws:
    *   @throws {OllamaError} — When HTTP request fails or returns error status.
    *   @throws {Error} — When network error occurs (enriched with context).
-   *
-   * Dependencies:
-   *   - this.ollamaFetch — performs HTTP request.
-   *   - enrichOllamaFetchError — adds context to network errors.
-   *   - readErrorBody — extracts error details from failed responses.
-   *
-   * Dependants:
-   *   - Router — displays detailed model information.
    * </Summary>
    */
   showModel = async (name: string): Promise<ModelInfo> => {
@@ -856,17 +728,10 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
    *   3. Parse JSON response and extract models array.
    *
    * Returns:
-   *   @returns {Promise<RunningModel[]>} — Array of currently running models.
+   *   @returns Array of currently running models.
    *
    * Throws:
    *   @throws {OllamaError} — When HTTP request fails or returns error status.
-   *
-   * Dependencies:
-   *   - this.ollamaFetch — performs HTTP request.
-   *   - readErrorBody — extracts error details from failed responses.
-   *
-   * Dependants:
-   *   - Router — displays currently running models.
    * </Summary>
    */
   listRunning = async (): Promise<RunningModel[]> => {
