@@ -21,18 +21,11 @@ import { printSuccess, printLine } from "../renderer.js";
  *   4. Otherwise displays current spinner status.
  *
  * Parameters:
- *   @param {string} sub — Subcommand: "on", "off", or empty.
- *   @param {string} arg — Alternative position for "on" or "off".
+ *   @param sub - Subcommand: "on", "off", or empty.
+ *   @param arg - Alternative position for "on" or "off".
  *
  * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - loadConfig, updateConfig — read and write config.
- *   - renderer.printSuccess, printLine — display output.
- *
- * Dependants:
- *   - CommandHandler.handle — calls this for /spinner commands.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const handleSpinner = (sub: string, arg: string): void => {
@@ -70,18 +63,11 @@ export const handleSpinner = (sub: string, arg: string): void => {
  *   4. Otherwise displays current think output status.
  *
  * Parameters:
- *   @param {string} sub — Subcommand: "on", "off", or empty.
- *   @param {string} arg — Alternative position for "on" or "off".
+ *   @param sub - Subcommand: "on", "off", or empty.
+ *   @param arg - Alternative position for "on" or "off".
  *
  * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - loadConfig, updateConfig — read and write config.
- *   - renderer.printSuccess, printLine — display output.
- *
- * Dependants:
- *   - CommandHandler.handle — calls this for /think commands.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const handleThink = (sub: string, arg: string): void => {

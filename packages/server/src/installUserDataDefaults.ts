@@ -6,25 +6,24 @@
  *
  * How it fits in the system:
  *   Called once from packages/server/src/index.ts before accepting connections.
- *
- * Dependencies:
- *   - node:fs/promises, node:path — copy packaged JSON into user-data/.
- *
- * Dependants:
- *   - main in index.ts.
+ *   Ensures users have default configuration files without manual setup.
  * </Summary>
  */
 
-import * as fs from 'node:fs/promises'
-import * as path from 'node:path'
+// ===== FILE SYSTEM IMPORTS =====
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 
-import { LANGUAGE_HINTS_FILENAME } from './memory/languageHints.js'
+// ===== PROJECT IMPORTS =====
+import { LANGUAGE_HINTS_FILENAME } from "./memory/context/languageHints.js";
 
-const PACKAGED_DEFAULT_DATA_DIR = path.resolve(
-  __dirname,
-  '..',
-  'default-data',
-)
+// ===== CONSTANTS =====
+/**
+ * Directory containing packaged default data files.
+ * Resolves to the default-data folder in the server package distribution.
+ * Used as source for copying default configuration files to user data directory.
+ */
+const PACKAGED_DEFAULT_DATA_DIR = path.resolve(__dirname, "..", "default-data");
 
 /**
  * @async
@@ -39,40 +38,75 @@ const PACKAGED_DEFAULT_DATA_DIR = path.resolve(
  *   4. Copies from packaged default-data when the source file is present.
  *
  * Parameters:
- *   @param {string} rootDir — Working directory for server state (typically cwd).
+ *   @param rootDir - Working directory for server state (typically cwd).
  *
  * Returns:
- *   @returns {Promise<void>} — Completes after copy or no-op.
- *
- * Dependants:
- *   - installUserDataDefaults.
+ *   @returns Completes after copy or no-op.
  * </Summary>
  */
 const installDefaultLanguageHints = async (rootDir: string): Promise<void> => {
-  const userDataDir = path.join(rootDir, 'user-data')
-  const dest = path.join(userDataDir, LANGUAGE_HINTS_FILENAME)
+  // ===== STEP 1: RESOLVE DESTINATION PATH =====
+  // Step 1a: Construct user-data directory path
+  // Combines root directory with user-data subdirectory
+  const userDataDir = path.join(rootDir, "user-data");
+
+  // Step 1b: Construct full destination path for language hints file
+  // Combines user-data directory with the language hints filename
+  const destinationPath = path.join(userDataDir, LANGUAGE_HINTS_FILENAME);
+
+  // ===== STEP 2: CHECK IF DESTINATION FILE ALREADY EXISTS =====
   try {
-    await fs.access(dest)
-    return
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code
-    if (code !== 'ENOENT') {
-      throw err
+    // Step 2a: Attempt to access the destination file
+    // This checks if the file already exists and is readable
+    await fs.access(destinationPath);
+
+    // Step 2b: File exists - no need to copy, return immediately
+    return;
+  } catch (error) {
+    // Step 2c: Handle file access errors
+    const errorCode = (error as NodeJS.ErrnoException).code;
+
+    // Step 2d: If error is "file not found", continue with installation
+    if (errorCode !== "ENOENT") {
+      // Step 2e: For other errors (permissions, etc.), re-throw
+      throw error;
     }
   }
-  await fs.mkdir(userDataDir, { recursive: true })
-  const src = path.join(PACKAGED_DEFAULT_DATA_DIR, LANGUAGE_HINTS_FILENAME)
+
+  // ===== STEP 3: ENSURE USER-DATA DIRECTORY EXISTS =====
+  // Step 3a: Create user-data directory if it doesn't exist
+  // recursive: true ensures parent directories are created if needed
+  await fs.mkdir(userDataDir, { recursive: true });
+
+  // ===== STEP 4: RESOLVE SOURCE PATH =====
+  // Step 4a: Construct full source path from packaged default data
+  const sourcePath = path.join(
+    PACKAGED_DEFAULT_DATA_DIR,
+    LANGUAGE_HINTS_FILENAME,
+  );
+
+  // ===== STEP 5: VERIFY SOURCE FILE EXISTS =====
   try {
-    await fs.access(src)
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code
-    if (code === 'ENOENT') {
-      return
+    // Step 5a: Attempt to access the source file
+    await fs.access(sourcePath);
+  } catch (error) {
+    // Step 5b: Handle source file access errors
+    const errorCode = (error as NodeJS.ErrnoException).code;
+
+    // Step 5c: If source file doesn't exist, silently skip installation
+    // This allows graceful handling if default data is not packaged
+    if (errorCode === "ENOENT") {
+      return;
     }
-    throw err
+
+    // Step 5d: For other errors, re-throw
+    throw error;
   }
-  await fs.copyFile(src, dest)
-}
+
+  // ===== STEP 6: COPY SOURCE TO DESTINATION =====
+  // Step 6a: Copy the default language hints file to user data directory
+  await fs.copyFile(sourcePath, destinationPath);
+};
 
 /**
  * @async
@@ -80,18 +114,29 @@ const installDefaultLanguageHints = async (rootDir: string): Promise<void> => {
  * What it does:
  *   Installs all packaged user-data defaults (currently language-hints.json only).
  *
+ * How it does it (step by step):
+ *   1. Accepts root directory parameter with default to current working directory.
+ *   2. Calls installDefaultLanguageHints to seed language hints configuration.
+ *   3. Future: Can be extended to install additional default files.
+ *
  * Parameters:
  *   @param {string} [rootDir] — Data root; defaults to process.cwd().
  *
  * Returns:
- *   @returns {Promise<void>} — Completes when seeding finishes.
- *
- * Dependants:
- *   - main in index.ts.
+ *   @returns Completes when seeding finishes.
  * </Summary>
  */
 export const installUserDataDefaults = async (
   rootDir: string = process.cwd(),
 ): Promise<void> => {
-  await installDefaultLanguageHints(rootDir)
-}
+  // ===== STEP 1: INSTALL LANGUAGE HINTS DEFAULTS =====
+  // Step 1a: Call the language hints installation function
+  // This copies default language hints from packaged data to user directory
+  await installDefaultLanguageHints(rootDir);
+
+  // ===== FUTURE EXTENSION POINT =====
+  // Additional default file installations can be added here
+  // Example:
+  // await installDefaultSkills(rootDir);
+  // await installDefaultPatterns(rootDir);
+};

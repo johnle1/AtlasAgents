@@ -1,20 +1,12 @@
 /**
  * <Summary>
  * What it does:
- *   Single HTTP gateway to a local Ollama server: blocking chat, streaming chat,
- *   model listing, pull progress, delete, show, and running process list.
+ *   HTTP client for Ollama chat and model admin APIs.
  *
  * How it fits in the system:
- *   Implements IOllamaClient and IOllamaAdminClient; Advisor and Agent depend on
- *   the chat surface only.
- *
- * Dependencies:
- *   - global fetch, TextDecoder — Node 18+ HTTP and byte decoding.
- *   - ../orchestration/interfaces.js — IOllamaClient, IOllamaAdminClient contracts.
- *   - ./types.js — OllamaError and admin DTOs.
- *
- * Dependants:
- *   - Advisor, Agent, future Router command handlers.
+ *   Provides a unified interface for communicating with the local Ollama server.
+ *   Handles both chat operations (for AI agents and advisors) and model management
+ *   (pulling, deleting, listing models). Uses undici for HTTP with configurable timeouts.
  * </Summary>
  */
 
@@ -23,157 +15,248 @@ import type {
   IOllamaClient,
 } from "../orchestration/interfaces.js";
 import type { ChatOptions, Message } from "../orchestration/types.js";
-import type { ModelInfo, PullProgress, RunningModel } from "./types.js";
+import type {
+  ModelInfo,
+  OllamaModelSummary,
+  PullProgress,
+  RunningModel,
+} from "./types.js";
+import { Agent, fetch as undiciFetch } from "undici";
+import { enrichOllamaFetchError } from "../orchestration/taskErrors.js";
 import { OllamaError } from "./types.js";
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, ms);
+/** Default Ollama server URL when not specified in configuration. */
+const DEFAULT_BASE_URL = "http://localhost:11434";
+
+/** Default timeout for HTTP requests in milliseconds (10 minutes). */
+const DEFAULT_TIMEOUT_MS = 600_000;
+
+/**
+ * <Summary>
+ * What it does:
+ *   Builds an undici Agent with configured timeouts for HTTP requests.
+ *
+ * How it does it (step by step):
+ *   1. Create a new Agent with the specified timeout settings.
+ *   2. Set headersTimeout and bodyTimeout to the provided value.
+ *   3. Set connectTimeout to 60 seconds (reasonable default for establishing connections).
+ *
+ * Parameters:
+ *   @param timeoutMs - Timeout in milliseconds for headers and body.
+ *
+ * Returns:
+ *   {Agent} — Configured undici Agent for HTTP requests.
+ * </Summary>
+ */
+const buildDispatcher = (timeoutMs: number): Agent =>
+  new Agent({
+    headersTimeout: timeoutMs,
+    bodyTimeout: timeoutMs,
+    connectTimeout: 60_000,
   });
 
 /**
  * <Summary>
  * What it does:
- *   Decides whether a thrown error should trigger a transport-level retry.
+ *   Safely reads the error body from an HTTP response.
+ *
+ * How it does it (step by step):
+ *   1. Attempt to read the response body as text.
+ *   2. If reading fails (e.g., connection already closed), return empty string.
  *
  * Parameters:
- *   @param {unknown} err — Caught rejection from fetch or stream read.
+ *   @param response - HTTP response object with text method.
+ *   @param response - .text — Method to read response body as text.
  *
  * Returns:
- *   @returns {boolean} — True for likely network failures, false for OllamaError.
- *
- * Dependencies:
- *   - OllamaError — excluded from retry.
- *
- * Dependants:
- *   - OllamaClient.chat retry loop.
+ *   {string} — Response body text, or empty string if reading fails.
  * </Summary>
  */
-const isRetryableNetworkError = (err: unknown): boolean => {
-  // OllamaError is an application-level error; retrying won't help
-  if (err instanceof OllamaError) {
-    return false;
+const readErrorBody = async (response: {
+  text: () => Promise<string>;
+}): Promise<string> => {
+  try {
+    // Step 1: Attempt to read the response body as text
+    return await response.text();
+  } catch {
+    // Step 2: If reading fails (e.g., connection already closed), return empty string
+    return "";
   }
-
-  // TypeError is typically a low-level protocol or parsing issue worth retrying
-  if (err instanceof TypeError) {
-    return true;
-  }
-
-  // Check for specific system-level network error codes
-  if (err instanceof Error) {
-    const nodeErr = err as NodeJS.ErrnoException;
-    const code = nodeErr.code;
-
-    // Retry on transient network failures:
-    // ECONNRESET - connection forcibly closed by peer
-    // ECONNREFUSED - server actively refused connection
-    // ETIMEDOUT - request exceeded time limit
-    // ENOTFOUND - DNS lookup failed (temporary)
-    // EAI_AGAIN - DNS server temporarily unavailable
-    if (
-      code === "ECONNRESET" ||
-      code === "ECONNREFUSED" ||
-      code === "ETIMEDOUT" ||
-      code === "ENOTFOUND" ||
-      code === "EAI_AGAIN"
-    ) {
-      return true;
-    }
-  }
-
-  // Unknown error or unrecognized error type: don't retry
-  return false;
 };
 
 /**
  * <Summary>
  * What it does:
- *   Reads a Response body as UTF-8 text (non-streaming helpers).
+ *   Parses a buffer containing newline-delimited JSON (NDJSON) into complete lines and leftover partial data.
+ *
+ * How it does it (step by step):
+ *   1. Split the buffer by newlines.
+ *   2. Remove and return the last element as the partial (might be incomplete).
+ *   3. Filter out empty lines from the remaining parts.
+ *   4. Return complete lines and the partial buffer.
  *
  * Parameters:
- *   @param {Response} res — Fetch response with a body.
+ *   @param buffer - String buffer containing NDJSON data.
  *
  * Returns:
- *   @returns {Promise<string>} — Full decoded text (may be empty).
- *
- * Dependants:
- *   - OllamaClient JSON helpers.
+ *   @returns Object with complete lines and remaining partial data.
  * </Summary>
  */
-const readResponseText = async (res: Response): Promise<string> => {
-  return res.text();
+const parseNdjsonLines = (
+  buffer: string,
+): { lines: string[]; rest: string } => {
+  // Step 1: Split the buffer by newlines
+  const bufferParts = buffer.split("\n");
+
+  // Step 2: Remove and return the last element as the partial (might be incomplete)
+  // The last element might be an incomplete line that continues in the next chunk
+  const partialBuffer = bufferParts.pop() ?? "";
+
+  // Step 3: Filter out empty lines from the remaining parts
+  // Empty lines don't contain valid JSON and should be ignored
+  const completeLines = bufferParts.filter((line) => line.trim().length > 0);
+
+  // Step 4: Return complete lines and the partial buffer
+  return { lines: completeLines, rest: partialBuffer };
 };
 
 /**
  * <Summary>
  * What it does:
- *   Throws OllamaError when HTTP status is not ok, attaching a short body snippet.
+ *   HTTP client for Ollama chat and model admin APIs.
  *
- * Parameters:
- *   @param {Response} res — Fetch response to inspect.
- *
- * Returns:
- *   @returns {Promise<void>} — Resolves only when res.ok.
- *
- * @throws {OllamaError} — Always when !res.ok.
- *
- * Dependants:
- *   - OllamaClient admin methods.
+ * How it fits in the system:
+ *   Implements both IOllamaClient (chat operations) and IOllamaAdminClient (model management).
+ *   Provides a unified interface for communicating with the local Ollama server with
+ *   configurable timeouts and error handling. Handles streaming responses for chat and
+ *   model pull operations.
  * </Summary>
  */
-const assertOk = async (res: Response): Promise<void> => {
-  // If the HTTP response status is 2xx, the request succeeded — exit early
-  if (res.ok) {
-    return;
-  }
-
-  // Request failed; extract the response body as text for error context
-  const text = await readResponseText(res);
-
-  // Throw an OllamaError with the HTTP status code and response body
-  // This terminates the operation and signals the error to the caller
-  throw new OllamaError(res.status, text);
-};
-
 export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
+  /** Base URL for the Ollama server API. */
   private readonly baseUrl: string;
 
+  /** Timeout in milliseconds for HTTP requests. */
+  private timeoutMs: number;
+
+  /** Undici Agent for HTTP connection management with timeouts. */
+  private dispatcher: Agent;
+
   /**
-   * Constructor initializes the Ollama client pointing to the local server instance.
-   * Ollama always runs on localhost:11434 for this application.
+   * Constructor
+   *
+   * How it does it (step by step):
+   *   1. Extract baseUrl from deps or use DEFAULT_BASE_URL.
+   *   2. Remove trailing slash from baseUrl to ensure consistent URL construction.
+   *   3. Extract timeoutMs from deps or use DEFAULT_TIMEOUT_MS.
+   *   4. Build dispatcher with the configured timeout.
+   *
+   * Parameters:
+   *   @param deps - Dependency object with optional configuration.
+   *     @param {string} [deps.baseUrl] — Ollama server URL. Defaults to http://localhost:11434.
+   *     @param {number} [deps.timeoutMs] — Request timeout in milliseconds. Defaults to 600000 (10 min).
+   *
+   * Returns:
+   *   void — Constructor does not return a value.
    */
-  constructor() {
-    this.baseUrl = "http://localhost:11434";
+  constructor(readonly deps: { baseUrl?: string; timeoutMs?: number } = {}) {
+    // Step 1: Extract baseUrl from deps or use DEFAULT_BASE_URL
+    const configuredBaseUrl = deps.baseUrl ?? DEFAULT_BASE_URL;
+
+    // Step 2: Remove trailing slash from baseUrl to ensure consistent URL construction
+    // This prevents double slashes when constructing API endpoints
+    this.baseUrl = configuredBaseUrl.replace(/\/$/, "");
+
+    // Step 3: Extract timeoutMs from deps or use DEFAULT_TIMEOUT_MS
+    this.timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+    // Step 4: Build dispatcher with the configured timeout
+    // The dispatcher manages HTTP connections with the specified timeouts
+    this.dispatcher = buildDispatcher(this.timeoutMs);
   }
 
   /**
-   * @async
    * <Summary>
    * What it does:
-   *   POST /api/chat with stream false, retrying transient network failures up to
-   *   three times with exponential backoff, then returns assistant message content.
+   *   Updates the timeout for HTTP requests and rebuilds the dispatcher.
    *
    * How it does it (step by step):
-   *   1. Builds JSON body with model, messages, nested options, stream false.
-   *   2. POSTs to /api/chat in a loop with up to three retries on network errors.
-   *   3. Parses JSON and returns message.content string.
+   *   1. Validate the timeout value (must be finite and positive).
+   *   2. If valid, update the timeoutMs property.
+   *   3. Rebuild the dispatcher with the new timeout.
    *
    * Parameters:
-   *   @param {string} model — Ollama model id.
-   *   @param {Message[]} messages — Chat turns.
-   *   @param {ChatOptions} options — Sampling options (temperature).
+   *   @param timeoutMs - New timeout in milliseconds.
    *
    * Returns:
-   *   @returns {Promise<string>} — Assistant text only.
+   *   void — called for side effects only.
+   * </Summary>
+   */
+  setTimeoutMs = (timeoutMs: number): void => {
+    // Step 1: Validate the timeout value (must be finite and positive)
+    // Invalid timeouts could cause unexpected behavior or errors
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return; // Silently ignore invalid values
+    }
+
+    // Step 2: If valid, update the timeoutMs property
+    this.timeoutMs = timeoutMs;
+
+    // Step 3: Rebuild the dispatcher with the new timeout
+    // The dispatcher must be rebuilt because timeout is set during Agent construction
+    this.dispatcher = buildDispatcher(timeoutMs);
+  };
+
+  /**
+   * <Summary>
+   * What it does:
+   *   Private method to perform HTTP requests to Ollama with the configured dispatcher.
    *
-   * @throws {OllamaError} — On non-200 after retries or malformed JSON.
+   * How it does it (step by step):
+   *   1. Merge the provided init options with the dispatcher.
+   *   2. Call undiciFetch with the URL and merged options.
    *
-   * Dependencies:
-   *   - fetch, JSON.parse — HTTP and parsing.
+   * Parameters:
+   *   @param url - The full URL to fetch.
+   *   @param init - Optional fetch init options (method, headers, body, etc.).
    *
-   * Dependants:
-   *   - Advisor.plan, Advisor.advise.
+   * Returns:
+   *   {Promise<Response>} — The fetch Response object.
+   * </Summary>
+   */
+  private ollamaFetch = (
+    url: string,
+    init: Parameters<typeof undiciFetch>[1] = {},
+  ): ReturnType<typeof undiciFetch> =>
+    // Step 1: Merge the provided init options with the dispatcher
+    // The dispatcher provides timeout configuration for the request
+    // Step 2: Call undiciFetch with the URL and merged options
+    undiciFetch(url, { ...init, dispatcher: this.dispatcher });
+
+  /**
+   * <Summary>
+   * What it does:
+   *   Sends a non-streaming chat request to Ollama and returns the complete response.
+   *
+   * How it does it (step by step):
+   *   1. Consume the streaming endpoint to avoid timeout issues.
+   *   2. Accumulate all streaming response chunks.
+   *   3. Return the complete accumulated response.
+   *
+   * Parameters:
+   *   @param model - The Ollama model name to use.
+   *   @param messages - Array of conversation messages.
+   *   @param options - Chat options including temperature.
+   *
+   * Returns:
+   *   @returns The complete AI response text.
+   *
+   * Implementation Note:
+   *   We use the streaming endpoint internally even for non-streaming requests.
+   *   With stream:false, Ollama only sends headers after the FULL generation completes,
+   *   which can exceed undici's default headersTimeout (~300s) for large/slow models
+   *   and surface as UND_ERR_HEADERS_TIMEOUT. Using stream=true ensures headers arrive
+   *   immediately, avoiding this timeout issue.
    * </Summary>
    */
   chat = async (
@@ -181,571 +264,497 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
     messages: Message[],
     options: ChatOptions,
   ): Promise<string> => {
-    // Build the URL to Ollama's chat API endpoint
-    const url = `${this.baseUrl}/api/chat`;
+    // Step 1: Consume the streaming endpoint to avoid timeout issues
+    // We use streaming internally to avoid header timeout problems with slow models
+    let accumulatedResponse = "";
 
-    // Construct the request body with model, messages, and settings
-    const body = JSON.stringify({
-      model, // Which AI model to use (e.g., "llama2")
-      messages, // Chat history (user/assistant turns)
-      stream: false, // Get full response at once, not streamed
-      options: { temperature: options.temperature }, // Creativity level (0-1)
-    });
-
-    // Exponential backoff delays: wait longer on each retry (200ms → 400ms → 800ms)
-    const delaysMs = [200, 400, 800];
-    let attempt = 0; // Track which attempt we're on
-
-    // Infinite loop with retry logic
-    while (true) {
-      try {
-        // Send the POST request to Ollama
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body,
-        });
-
-        // If HTTP status is not 2xx (success), extract error message and throw
-        if (!res.ok) {
-          const text = await readResponseText(res);
-          throw new OllamaError(res.status, text);
-        }
-
-        // Parse the JSON response
-        const data = (await res.json()) as {
-          message?: { content?: string };
-        };
-
-        // Extract the assistant's text from the nested structure
-        const content = data.message?.content;
-
-        // Validate that content is actually a string (not undefined/null)
-        if (typeof content !== "string") {
-          throw new OllamaError(
-            res.status,
-            "missing message.content in chat response",
-          );
-        }
-
-        // Success! Return the assistant's response
-        return content;
-      } catch (err) {
-        // If error is NOT retryable OR we've exhausted all retry attempts, fail immediately
-        if (!isRetryableNetworkError(err) || attempt >= delaysMs.length) {
-          throw err;
-        }
-
-        // Wait before retrying (delays get longer each time: 200ms, 400ms, 800ms)
-        await sleep(delaysMs[attempt] ?? 800);
-
-        // Increment attempt counter and retry the loop
-        attempt += 1;
-      }
+    // Step 2: Accumulate all streaming response chunks
+    // Iterate through the async generator and collect all response pieces
+    for await (const responseChunk of this.chatStream(
+      model,
+      messages,
+      options,
+    )) {
+      accumulatedResponse += responseChunk;
     }
+
+    // Step 3: Return the complete accumulated response
+    return accumulatedResponse;
   };
 
   /**
+   * @async
    * <Summary>
    * What it does:
-   *   POST /api/chat with stream true and yields incremental assistant deltas from
-   *   NDJSON lines until a terminal done chunk.
+   *   Sends a streaming chat request to Ollama and yields response chunks as they arrive.
    *
    * How it does it (step by step):
-   *   1. Opens a streaming POST and reads bytes from the response body.
-   *   2. Decodes UTF-8, splits on newlines, JSON.parses each complete line.
-   *   3. Yields message.content while done is false; stops when done is true.
+   *   1. Construct the chat API URL.
+   *   2. Send POST request with model, messages, and stream=true.
+   *   3. Handle network errors with enrichment.
+   *   4. Validate response status and body existence.
+   *   5. Set up stream reader and text decoder.
+   *   6. Read stream chunks until completion.
+   *   7. Parse each chunk as NDJSON and yield content pieces.
+   *   8. Handle any trailing partial data after stream ends.
    *
    * Parameters:
-   *   @param {string} model — Ollama model id.
-   *   @param {Message[]} messages — Chat turns.
-   *   @param {ChatOptions} options — Sampling options.
+   *   @param model - The Ollama model name to use.
+   *   @param messages - Array of conversation messages.
+   *   @param options - Chat options including temperature.
    *
    * Returns:
-   *   @returns {AsyncGenerator<string>} — Token-ish content fragments from Ollama.
+   *   @returns Async generator yielding response text chunks.
    *
-   * @throws {OllamaError} — When HTTP not ok or stream missing.
-   *
-   * Dependants:
-   *   - Advisor.combine, Agent.run.
+   * Throws:
+   *   @throws {OllamaError} — When HTTP request fails or returns error status.
+   *   @throws {Error} — When network error occurs (enriched with context).
    * </Summary>
    */
-  async *chatStream(
+  chatStream = async function* (
+    this: OllamaClient,
     model: string,
     messages: Message[],
     options: ChatOptions,
   ): AsyncGenerator<string> {
-    // Build the URL to Ollama's streaming chat API endpoint
-    const url = `${this.baseUrl}/api/chat`;
+    // Step 1: Construct the chat API URL
+    const chatApiUrl = `${this.baseUrl}/api/chat`;
 
-    // POST request with stream: true to enable NDJSON response
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model, // Which AI model to use
-        messages, // Chat history
-        stream: true, // Enable streaming response (NDJSON format)
-        options: { temperature: options.temperature }, // Sampling parameters
-      }),
-    });
-
-    // Validate HTTP response status is successful
-    if (!res.ok) {
-      const text = await readResponseText(res);
-      throw new OllamaError(res.status, text);
-    }
-
-    // Verify response has a readable body stream
-    if (!res.body) {
-      throw new OllamaError(
-        res.status,
-        "missing response body for chat stream",
+    let fetchResponse: Awaited<ReturnType<typeof undiciFetch>>;
+    try {
+      // Step 2: Send POST request with model, messages, and stream=true
+      // We set stream=true to get incremental responses and avoid header timeouts
+      fetchResponse = await this.ollamaFetch(chatApiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: true,
+          options: { temperature: options.temperature },
+        }),
+      });
+    } catch (networkError) {
+      // Step 3: Handle network errors with enrichment
+      // enrichOllamaFetchError adds context about what operation failed
+      throw enrichOllamaFetchError(
+        this.baseUrl,
+        "chat stream",
+        model,
+        networkError,
       );
     }
 
-    // Create a reader to incrementally consume the response stream
-    const reader = res.body.getReader();
+    // Validate response status and body existence
+    if (!fetchResponse.ok) {
+      // If the request returned an error status, extract and throw the error details
+      throw new OllamaError(
+        fetchResponse.status,
+        await readErrorBody(fetchResponse),
+      );
+    }
 
-    // TextDecoder converts byte chunks into UTF-8 strings
-    const decoder = new TextDecoder();
+    if (!fetchResponse.body) {
+      // If there's no response body, the stream is invalid
+      throw new OllamaError(500, "No response body from Ollama chat stream");
+    }
 
-    // Buffer to hold incomplete lines that span multiple read() calls
-    let carry = "";
+    // Step 5: Set up stream reader and text decoder
+    // The reader allows us to consume the stream chunk by chunk
+    const streamReader = fetchResponse.body.getReader();
+    // The decoder converts binary chunks to text strings
+    const textDecoder = new TextDecoder();
+    // Carry buffer holds partial data between chunks (incomplete lines)
+    let carryBuffer = "";
 
-    // Main loop: read bytes until stream ends (done === true)
+    // Step 6: Read stream chunks until completion
     while (true) {
-      const { done, value } = await reader.read();
+      // Read the next chunk from the stream
+      const { done, value } = await streamReader.read();
 
-      // Stream exhausted; process any remaining buffered data below
+      // If the stream is complete, exit the loop
       if (done) {
         break;
       }
 
-      // Decode the byte chunk as UTF-8 text and append to buffer
-      carry += decoder.decode(value, { stream: true });
+      // Decode the binary chunk to text and append to carry buffer
+      // { stream: true } handles incomplete multibyte characters correctly
+      carryBuffer += textDecoder.decode(value, { stream: true });
 
-      // Split on newlines to extract complete NDJSON lines
-      const parts = carry.split("\n");
+      // Parse the carry buffer into complete lines and partial remainder
+      const { lines: completeLines, rest: partialData } =
+        parseNdjsonLines(carryBuffer);
 
-      // Keep the last (incomplete) part in carry for the next read
-      carry = parts.pop() ?? "";
+      // Update carry buffer with the partial remainder for next iteration
+      carryBuffer = partialData;
 
-      // Process all complete lines
-      for (const line of parts) {
-        // Remove leading/trailing whitespace from the line
-        const ndjsonLine = line.trim();
-
-        // Skip empty lines (often between NDJSON objects)
-        if (ndjsonLine.length === 0) {
-          continue;
-        }
-
-        // Parse the NDJSON line into a chunk object
-        let chunk: { done?: boolean; message?: { content?: string } };
+      // Step 7: Parse each complete line as NDJSON and yield content pieces
+      for (const jsonLine of completeLines) {
         try {
-          chunk = JSON.parse(ndjsonLine) as typeof chunk;
+          // Parse the JSON line to get the response chunk
+          const responseChunk = JSON.parse(jsonLine) as {
+            message?: { content?: string };
+          };
+
+          // Extract the content piece from the response
+          const contentPiece = responseChunk.message?.content;
+
+          // Only yield non-empty strings to avoid empty yields
+          if (typeof contentPiece === "string" && contentPiece.length > 0) {
+            yield contentPiece;
+          }
         } catch {
-          // Invalid JSON in stream; fail with error context
-          throw new OllamaError(
-            500,
-            `invalid NDJSON line in chat stream: ${ndjsonLine.slice(0, 200)}`,
-          );
-        }
-
-        // If this chunk signals completion, stop yielding and exit
-        if (chunk.done === true) {
-          return;
-        }
-
-        // Extract the message content from the nested structure
-        const piece = chunk.message?.content;
-
-        // Yield the content only if it's a non-empty string
-        if (typeof piece === "string" && piece.length > 0) {
-          yield piece;
+          // Skip malformed NDJSON lines (shouldn't happen normally)
+          // This is defensive programming to handle unexpected Ollama behavior
         }
       }
     }
 
-    // After stream ends, process any remaining buffered data
-    const tail = carry.trim();
-
-    // If there's leftover data, it should be one final NDJSON object
-    if (tail.length > 0) {
-      let chunk: { done?: boolean; message?: { content?: string } };
+    // Step 8: Handle any trailing partial data after stream ends
+    // There might be one final incomplete line in the carry buffer
+    if (carryBuffer.trim().length > 0) {
       try {
-        chunk = JSON.parse(tail) as typeof chunk;
-      } catch {
-        // Malformed trailing NDJSON; fail with error context
-        throw new OllamaError(
-          500,
-          `invalid trailing NDJSON in chat stream: ${tail.slice(0, 200)}`,
-        );
-      }
+        // Try to parse the trailing partial data
+        const finalChunk = JSON.parse(carryBuffer) as {
+          message?: { content?: string };
+        };
+        const finalContentPiece = finalChunk.message?.content;
 
-      // Only yield if this final chunk has content and is not marked done
-      if (chunk.done !== true) {
-        const piece = chunk.message?.content;
-        if (typeof piece === "string" && piece.length > 0) {
-          yield piece;
+        // Yield if it's valid content
+        if (
+          typeof finalContentPiece === "string" &&
+          finalContentPiece.length > 0
+        ) {
+          yield finalContentPiece;
         }
+      } catch {
+        // Ignore trailing partial line that couldn't be parsed
+        // This is normal if the stream ended mid-line
       }
     }
-  }
+  };
 
   /**
    * @async
    * <Summary>
    * What it does:
-   *   GET /api/tags endpoint and extracts just the model names (strings only).
+   *   Lists all available Ollama models with detailed information.
    *
-   * Parameters:
-   *   None.
+   * How it does it (step by step):
+   *   1. Send GET request to /api/tags endpoint.
+   *   2. Validate response status.
+   *   3. Parse JSON response and extract models array.
+   *   4. Filter out invalid model entries.
+   *   5. Map to standardized OllamaModelSummary format.
    *
    * Returns:
-   *   @returns {Promise<string[]>} — Array of installed model names (e.g., ["llama2", "mistral"]).
+   *   @returns Array of detailed model information.
    *
-   * @throws {OllamaError} — When HTTP request fails or response not ok.
+   * Throws:
+   *   @throws {OllamaError} — When HTTP request fails or returns error status.
+   * </Summary>
+   */
+  listModelsDetailed = async (): Promise<OllamaModelSummary[]> => {
+    // Step 1: Send GET request to /api/tags endpoint
+    // This endpoint returns all available models with their metadata
+    const fetchResponse = await this.ollamaFetch(`${this.baseUrl}/api/tags`, {
+      method: "GET",
+    });
+
+    // Step 2: Validate response status
+    if (!fetchResponse.ok) {
+      throw new OllamaError(
+        fetchResponse.status,
+        await readErrorBody(fetchResponse),
+      );
+    }
+
+    // Step 3: Parse JSON response and extract models array
+    const responseData = (await fetchResponse.json()) as {
+      models?: Array<{
+        name?: string;
+        size?: number;
+        digest?: string;
+        modified_at?: string;
+        details?: OllamaModelSummary["details"];
+      }>;
+    };
+
+    // Extract models array, defaulting to empty array if missing
+    const modelEntries = responseData.models ?? [];
+
+    // Step 4: Filter out invalid model entries
+    // Only include models with valid, non-empty names
+    const validModels = modelEntries.filter(
+      (modelEntry) =>
+        typeof modelEntry.name === "string" && modelEntry.name.length > 0,
+    );
+
+    // Step 5: Map to standardized OllamaModelSummary format
+    // This ensures consistent type safety across the application
+    return validModels.map((modelEntry) => ({
+      name: modelEntry.name as string,
+      size: modelEntry.size,
+      digest: modelEntry.digest,
+      modified_at: modelEntry.modified_at,
+      details: modelEntry.details,
+    }));
+  };
+
+  /**
+   * @async
+   * <Summary>
+   * What it does:
+   *   Lists all available Ollama model names (simplified version).
    *
-   * Dependants:
-   *   - Router.models.list, deleteModel (pre-existence check).
+   * How it does it (step by step):
+   *   1. Call listModelsDetailed to get full model information.
+   *   2. Extract just the model names from the detailed list.
+   *
+   * Returns:
+   *   @returns Array of model names.
    * </Summary>
    */
   listModels = async (): Promise<string[]> => {
-    // Step 1: Fetch the list of installed models from Ollama's /api/tags endpoint
-    const res = await fetch(`${this.baseUrl}/api/tags`, { method: "GET" });
+    // Step 1: Call listModelsDetailed to get full model information
+    const detailedModels = await this.listModelsDetailed();
 
-    // Step 2: Validate HTTP response is successful (2xx status)
-    await assertOk(res);
-
-    // Step 3: Parse response JSON into typed structure
-    const data = (await res.json()) as { models?: { name?: string }[] };
-
-    // Step 4: Safely extract models array (default to empty if undefined)
-    const modelObjects = Array.isArray(data.models) ? data.models : [];
-
-    // Step 5: Extract and filter names in a single pass (optimal performance)
-    // Loop through each model object and build the final list directly
-    const validNames: string[] = [];
-    for (const model of modelObjects) {
-      // Check if name is a valid string
-      if (typeof model.name === "string") {
-        // Check if name is non-empty
-        if (model.name.length > 0) {
-          // Add to final list immediately (no intermediate arrays)
-          validNames.push(model.name);
-        }
-      }
-    }
-
-    // Step 6: Return the cleaned list of model names
-    return validNames;
+    // Step 2: Extract just the model names from the detailed list
+    // This provides a simpler interface when only names are needed
+    return detailedModels.map((model) => model.name);
   };
 
   /**
+   * @async
    * <Summary>
    * What it does:
-   *   POST /api/pull with stream true and yields PullProgress objects per NDJSON line
-   *   until a success status chunk.
+   *   Pulls a model from the Ollama registry and yields progress updates.
    *
    * How it does it (step by step):
-   *   1. Builds POST request to /api/pull with stream enabled.
-   *   2. Validates HTTP response is successful.
-   *   3. Creates a reader to incrementally consume NDJSON response bytes.
-   *   4. Decodes UTF-8, splits on newlines, JSON.parses each complete line.
-   *   5. Yields progress objects (status, completed, total) per chunk.
-   *   6. Stops when status is "success" or stream ends.
+   *   1. Send POST request to /api/pull with model name and stream=true.
+   *   2. Validate response status and body existence.
+   *   3. Set up stream reader and text decoder.
+   *   4. Read stream chunks until completion.
+   *   5. Parse each chunk as NDJSON and yield progress updates.
+   *   6. Handle any trailing partial data after stream ends.
    *
    * Parameters:
-   *   @param {string} name — Model name to pull from Ollama registry.
+   *   @param name - The model name to pull (e.g., "llama2:13b").
    *
    * Returns:
-   *   @returns {AsyncGenerator<PullProgress>} — Progress updates ending at success.
+   *   @returns Async generator yielding pull progress updates.
    *
-   * @throws {OllamaError} — When HTTP not ok or malformed NDJSON.
-   *
-   * Dependants:
-   *   - Future pull UI, model download handlers.
+   * Throws:
+   *   @throws {OllamaError} — When HTTP request fails or returns error status.
    * </Summary>
    */
-  async *pullModel(name: string): AsyncGenerator<PullProgress> {
-    // Step 1: Build the URL to Ollama's pull API endpoint
-    const url = `${this.baseUrl}/api/pull`;
-
-    // Step 2: Send POST request with stream enabled to get progress updates
-    const res = await fetch(url, {
+  pullModel = async function* (
+    this: OllamaClient,
+    name: string,
+  ): AsyncGenerator<PullProgress> {
+    // Step 1: Send POST request to /api/pull with model name and stream=true
+    // Stream=true allows us to show real-time progress during the download
+    const fetchResponse = await this.ollamaFetch(`${this.baseUrl}/api/pull`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: name, stream: true }),
+      body: JSON.stringify({ name, stream: true }),
     });
 
-    // Step 3: Validate HTTP response is successful (2xx status)
-    if (!res.ok) {
-      const text = await readResponseText(res);
-      throw new OllamaError(res.status, text);
-    }
-
-    // Step 4: Verify response has a readable body stream
-    if (!res.body) {
+    // Step 2: Validate response status and body existence
+    if (!fetchResponse.ok) {
       throw new OllamaError(
-        res.status,
-        "missing response body for pull stream",
+        fetchResponse.status,
+        await readErrorBody(fetchResponse),
       );
     }
 
-    // Step 5: Create a reader to incrementally consume the response stream
-    const reader = res.body.getReader();
+    if (!fetchResponse.body) {
+      throw new OllamaError(500, "No response body from Ollama pull stream");
+    }
 
-    // Step 6: TextDecoder converts byte chunks into UTF-8 strings
-    const decoder = new TextDecoder();
+    // Step 3: Set up stream reader and text decoder
+    const streamReader = fetchResponse.body.getReader();
+    const textDecoder = new TextDecoder();
+    let carryBuffer = "";
 
-    // Step 7: Buffer to hold incomplete lines that span multiple read() calls
-    // Example: if a 50-byte NDJSON object is split across two reads (30 bytes + 20 bytes),
-    // we keep the incomplete first 30 bytes in carry for the next iteration
-    let carry = "";
-
-    // Step 8: Main loop: read bytes until stream ends
+    // Step 4: Read stream chunks until completion
     while (true) {
-      // Read the next chunk of bytes from the response stream
-      const { done, value } = await reader.read();
-
-      // Stream exhausted; process any remaining buffered data below
+      const { done, value } = await streamReader.read();
       if (done) {
         break;
       }
 
-      // Decode the byte chunk as UTF-8 text and append to buffer
-      // stream: true allows partial UTF-8 sequences to be carried over
-      carry += decoder.decode(value, { stream: true });
+      // Decode the binary chunk to text and append to carry buffer
+      carryBuffer += textDecoder.decode(value, { stream: true });
 
-      // Split on newlines to extract complete NDJSON lines
-      // Example: carry = '{"status":"downloading"}\n{"status":"v'
-      // parts = ['{"status":"downloading"}', '{"status":"v']
-      const parts = carry.split("\n");
+      // Parse the carry buffer into complete lines and partial remainder
+      const { lines: completeLines, rest: partialData } =
+        parseNdjsonLines(carryBuffer);
+      carryBuffer = partialData;
 
-      // Keep the last (incomplete) part in carry for the next read
-      // We pop from parts, so carry gets the last element (still incomplete)
-      carry = parts.pop() ?? "";
-
-      // Step 9: Process all complete lines (all except the last incomplete one)
-      for (const line of parts) {
-        // Remove leading/trailing whitespace from the line
-        const ndjsonLine = line.trim();
-
-        // Skip empty lines (often between NDJSON objects or at boundaries)
-        if (ndjsonLine.length === 0) {
-          continue;
-        }
-
-        // Parse the NDJSON line into a progress chunk object
-        let chunk: {
-          status?: string;
-          completed?: number;
-          total?: number;
-        };
+      // Step 5: Parse each complete line as NDJSON and yield progress updates
+      for (const jsonLine of completeLines) {
         try {
-          chunk = JSON.parse(ndjsonLine) as typeof chunk;
+          yield JSON.parse(jsonLine) as PullProgress;
         } catch {
-          // Invalid JSON in stream; fail with error context showing first 200 chars
-          throw new OllamaError(
-            500,
-            `invalid NDJSON line in pull stream: ${ndjsonLine.slice(0, 200)}`,
-          );
-        }
-
-        // Step 10: Extract the status field, defaulting to "unknown" if missing
-        // Example statuses: "pulling manifest", "downloading", "verifying", "success"
-        const status =
-          typeof chunk.status === "string" ? chunk.status : "unknown";
-
-        // Step 11: Build the progress object with download metrics
-        const progress: PullProgress = {
-          status, // Current operation (e.g., "downloading", "verifying")
-          completed: chunk.completed, // Bytes downloaded so far
-          total: chunk.total, // Total bytes to download
-        };
-
-        // Step 12: Yield progress to caller (allows streaming progress updates)
-        yield progress;
-
-        // Step 13: Terminal status — model download complete, stop generator
-        if (status === "success") {
-          return;
+          // Skip malformed NDJSON lines (defensive programming)
         }
       }
     }
 
-    // Step 14: After stream ends, process any remaining buffered data
-    // This handles the last partial line that may not end with a newline
-    const tail = carry.trim();
-
-    // Step 15: If there's leftover data, it should be one final NDJSON object
-    if (tail.length > 0) {
-      let chunk: { status?: string; completed?: number; total?: number };
+    // Step 6: Handle any trailing partial data after stream ends
+    if (carryBuffer.trim().length > 0) {
       try {
-        chunk = JSON.parse(tail) as typeof chunk;
+        yield JSON.parse(carryBuffer) as PullProgress;
       } catch {
-        // Malformed trailing NDJSON; fail with error context
-        throw new OllamaError(
-          500,
-          `invalid trailing NDJSON in pull stream: ${tail.slice(0, 200)}`,
-        );
+        // Ignore trailing partial line that couldn't be parsed
       }
-
-      // Extract the status field from the trailing chunk
-      const status =
-        typeof chunk.status === "string" ? chunk.status : "unknown";
-
-      // Step 16: Yield the final progress object before exiting
-      yield {
-        status,
-        completed: chunk.completed,
-        total: chunk.total,
-      };
     }
-  }
+  };
 
   /**
    * @async
    * <Summary>
    * What it does:
-   *   Verifies a model exists via listModels, then DELETE /api/delete with JSON body.
+   *   Deletes a local model from the Ollama server.
    *
    * How it does it (step by step):
-   *   1. Fetch the list of all installed models from Ollama.
-   *   2. Check if the target model exists in the list.
-   *   3. If not found, throw a 404 error immediately.
-   *   4. If found, build a DELETE request to /api/delete endpoint.
-   *   5. Send the DELETE request with the model name in the body.
-   *   6. Validate HTTP response is successful (2xx status).
-   *   7. Return (Promise resolves to void on success).
+   *   1. List available models to check if the model exists.
+   *   2. If model not found, throw 404 error.
+   *   3. Send DELETE request to /api/delete with model name.
+   *   4. Validate response status.
    *
    * Parameters:
-   *   @param {string} name — Model name to delete from Ollama.
+   *   @param name - The model name to delete.
    *
    * Returns:
-   *   @returns {Promise<void>} — Completes on success.
+   *   @returns Resolves when deletion completes.
    *
-   * @throws {OllamaError} — 404 when model missing; HTTP error code on delete failure.
-   *
-   * Dependants:
-   *   - Future admin routes, model cleanup handlers.
+   * Throws:
+   *   @throws {OllamaError} — When model not found or deletion fails.
    * </Summary>
    */
   deleteModel = async (name: string): Promise<void> => {
-    // Step 1: Fetch the list of all installed models from Ollama
-    // This ensures the model exists before attempting deletion
-    const names = await this.listModels();
+    // Step 1: List available models to check if the model exists
+    const availableModels = await this.listModels();
 
-    // Step 2: Check if the target model exists in the list
-    // Step 3: If model is not found, throw 404 error immediately
-    // This prevents attempting to delete non-existent models
-    if (!names.includes(name)) {
-      throw new OllamaError(404, `model not found: ${name}`);
+    // Step 2: If model not found, throw 404 error
+    // This provides a clear error message before attempting deletion
+    if (!availableModels.includes(name)) {
+      throw new OllamaError(404, `Model not found: ${name}`);
     }
 
-    // Step 4: Build DELETE request to /api/delete endpoint
-    // Step 5: Send the DELETE request with model name in JSON body
-    const res = await fetch(`${this.baseUrl}/api/delete`, {
+    // Step 3: Send DELETE request to /api/delete with model name
+    const fetchResponse = await this.ollamaFetch(`${this.baseUrl}/api/delete`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: name }), // Model identifier for deletion
+      body: JSON.stringify({ name }),
     });
 
-    // Step 6: Validate HTTP response is successful (2xx status)
-    // Throws OllamaError with status code and response body on failure
-    await assertOk(res);
-
-    // Step 7: Return (Promise resolves to void on success)
-    // Implicit return; no additional processing needed
+    // Step 4: Validate response status
+    if (!fetchResponse.ok) {
+      throw new OllamaError(
+        fetchResponse.status,
+        await readErrorBody(fetchResponse),
+      );
+    }
   };
 
   /**
    * @async
    * <Summary>
    * What it does:
-   *   POST /api/show and returns the parsed JSON as ModelInfo.
+   *   Retrieves detailed information about a specific model.
    *
    * How it does it (step by step):
-   *   1. Build POST request to /api/show with model name in body.
-   *   2. Send the request to fetch detailed model metadata.
-   *   3. Validate HTTP response is successful (2xx status).
-   *   4. Parse the response JSON into ModelInfo typed object.
-   *   5. Return the model information to caller.
+   *   1. Construct the show API URL.
+   *   2. Send POST request with model name.
+   *   3. Handle network errors with enrichment.
+   *   4. Validate response status.
+   *   5. Parse and return model information.
    *
    * Parameters:
-   *   @param {string} name — Model name to show (e.g., "llama2", "mistral").
+   *   @param name - The model name to show details for.
    *
    * Returns:
-   *   @returns {Promise<ModelInfo>} — Parsed model metadata (name, size, format, etc.).
+   *   @returns Detailed model information.
    *
-   * @throws {OllamaError} — When HTTP not ok or JSON parse fails.
-   *
-   * Dependants:
-   *   - Future tooling routes, model inspection handlers.
+   * Throws:
+   *   @throws {OllamaError} — When HTTP request fails or returns error status.
+   *   @throws {Error} — When network error occurs (enriched with context).
    * </Summary>
    */
   showModel = async (name: string): Promise<ModelInfo> => {
-    // Step 1: Build POST request to /api/show with model name in body
-    // Step 2: Send the request to fetch detailed model metadata from Ollama
-    const res = await fetch(`${this.baseUrl}/api/show`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: name }), // Model identifier to query
-    });
+    // Step 1: Construct the show API URL
+    const showApiUrl = `${this.baseUrl}/api/show`;
 
-    // Step 3: Validate HTTP response is successful (2xx status)
-    // Throws OllamaError with status code and response body on failure
-    await assertOk(res);
+    let fetchResponse: Awaited<ReturnType<typeof undiciFetch>>;
+    try {
+      // Step 2: Send POST request with model name
+      fetchResponse = await this.ollamaFetch(showApiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+    } catch (networkError) {
+      // Step 3: Handle network errors with enrichment
+      throw enrichOllamaFetchError(
+        this.baseUrl,
+        "show model",
+        name,
+        networkError,
+      );
+    }
 
-    // Step 4: Parse the response JSON into ModelInfo typed object
-    // ModelInfo contains model details: name, size, format, parameters, etc.
-    // Step 5: Return the model information to caller
-    return (await res.json()) as ModelInfo;
+    // Step 4: Validate response status
+    if (!fetchResponse.ok) {
+      const errorBody = await readErrorBody(fetchResponse);
+      throw new OllamaError(fetchResponse.status, errorBody);
+    }
+
+    // Step 5: Parse and return model information
+    return (await fetchResponse.json()) as ModelInfo;
   };
 
   /**
    * @async
    * <Summary>
    * What it does:
-   *   GET /api/ps and returns the list of currently running models from Ollama.
+   *   Lists currently running models on the Ollama server.
    *
    * How it does it (step by step):
-   *   1. Send GET request to /api/ps to fetch running models status.
-   *   2. Validate HTTP response is successful (2xx status).
-   *   3. Parse the response JSON into typed structure.
-   *   4. Safely extract models array (default to empty if undefined).
-   *   5. Return the array of running models to caller.
-   *
-   * Parameters:
-   *   None.
+   *   1. Send GET request to /api/ps endpoint.
+   *   2. Validate response status.
+   *   3. Parse JSON response and extract models array.
    *
    * Returns:
-   *   @returns {Promise<RunningModel[]>} — Array of running models (empty when none active).
+   *   @returns Array of currently running models.
    *
-   * @throws {OllamaError} — When HTTP not ok or response malformed.
-   *
-   * Dependants:
-   *   - Future diagnostics routes, model status monitoring.
+   * Throws:
+   *   @throws {OllamaError} — When HTTP request fails or returns error status.
    * </Summary>
    */
   listRunning = async (): Promise<RunningModel[]> => {
-    // Step 1: Send GET request to /api/ps to fetch running models status
-    // /api/ps returns JSON with currently active models and their memory usage
-    const res = await fetch(`${this.baseUrl}/api/ps`, { method: "GET" });
+    // Step 1: Send GET request to /api/ps endpoint
+    // This endpoint returns information about currently loaded/running models
+    const fetchResponse = await this.ollamaFetch(`${this.baseUrl}/api/ps`, {
+      method: "GET",
+    });
 
-    // Step 2: Validate HTTP response is successful (2xx status)
-    // Throws OllamaError with status code and response body on failure
-    await assertOk(res);
+    // Step 2: Validate response status
+    if (!fetchResponse.ok) {
+      throw new OllamaError(
+        fetchResponse.status,
+        await readErrorBody(fetchResponse),
+      );
+    }
 
-    // Step 3: Parse the response JSON into typed structure
-    const data = (await res.json()) as { models?: RunningModel[] };
+    // Step 3: Parse JSON response and extract models array
+    const responseData = (await fetchResponse.json()) as {
+      models?: RunningModel[];
+    };
 
-    // Step 4: Safely extract models array (default to empty if undefined)
-    // This handles the case where no models are currently running
-    // Returns empty array if data.models is undefined or not an array
-    // Step 5: Return the array of running models to caller
-    return Array.isArray(data.models) ? data.models : [];
+    // Return models array, defaulting to empty array if missing
+    return responseData.models ?? [];
   };
 }

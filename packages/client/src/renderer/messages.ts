@@ -10,16 +10,10 @@ import { appendBlock, appendText } from "./sink.js";
  *   1. Append the text to the output sink with "system" category.
  *
  * Parameters:
- *   @param {string} text — The text message to display.
+ *   @param text - The text message to display.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the text line.
- *
- * Dependencies:
- *   - appendText — displays the text to the output sink.
- *
- * Dependants:
- *   - System message functions — use this to display plain system messages.
+ *   @returns Returns after displaying the text line.
  * </Summary>
  */
 export const printLine = (text: string): void => {
@@ -40,17 +34,10 @@ export const printLine = (text: string): void => {
  *   3. Append the styled line to the output block.
  *
  * Parameters:
- *   @param {string} message — The error message to display.
+ *   @param message - The error message to display.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the error message.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for error styling.
- *   - appendBlock — displays the styled line to the user.
- *
- * Dependants:
- *   - Error handling functions — use this to display error messages to users.
+ *   @returns Returns after displaying the error message.
  * </Summary>
  */
 export const printError = (message: string): void => {
@@ -76,17 +63,10 @@ export const printError = (message: string): void => {
  *   3. Append the styled line to the output block.
  *
  * Parameters:
- *   @param {string} message — The success message to display.
+ *   @param message - The success message to display.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the success message.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for success styling.
- *   - appendBlock — displays the styled line to the user.
- *
- * Dependants:
- *   - Success notification functions — use this to display success messages to users.
+ *   @returns Returns after displaying the success message.
  * </Summary>
  */
 export const printSuccess = (message: string): void => {

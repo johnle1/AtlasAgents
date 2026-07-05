@@ -83,16 +83,10 @@ const EXTENSION_TO_LANGUAGE_MAP: Record<string, string> = {
  *   6. If no match is found, default to "text" as a fallback language.
  *
  * Parameters:
- *   @param {string} filePath — Full file path including directory and filename (e.g., "/src/components/Button.tsx").
+ *   @param filePath - Full file path including directory and filename (e.g., "/src/components/Button.tsx").
  *
  * Returns:
- *   @returns {string} — Language identifier string (e.g., "typescript", "javascript", "text").
- *
- * Dependencies:
- *   - EXTENSION_TO_LANGUAGE_MAP — provides the mapping from file extensions to language names.
- *
- * Dependants:
- *   - None (entry point).
+ *   @returns Language identifier string (e.g., "typescript", "javascript", "text").
  * </Summary>
  */
 export const detectLang = (filePath: string): string => {

@@ -1,103 +1,89 @@
 /**
- * Task status — Ink spinner when active, no-op otherwise.
+ * Coordinates agent activity spinners and terminal output with the Ink UI.
  *
- * This module manages the visual state of an agent's activity through UI spinners.
- * It coordinates between task execution state and the UI spinner (Ink) to provide
- * visual feedback about what the agent is currently doing (thinking, working, etc.).
+ * @remarks
+ * The LoopyCode client renders a live spinner while an agent or advisor is
+ * working. This module is the thin bridge between task lifecycle code
+ * (file proxy, renderers) and the Ink spinner in {@link ./ui/uiBridge.js | uiBridge}.
  *
- * Key concepts:
- * - Task Activity: Tracks whether an agent is currently executing a task
- * - Spinner State: Controls the visual spinner shown to the user
- * - Mode: Different spinner animations for different agent states (thinking vs working)
+ * Spinners only appear when **both** conditions hold:
+ * - A task is marked active via {@link setTaskActive}.
+ * - The Ink UI is running ({@link ./ui/uiBridge.js | isInkActive}).
+ *
+ * Call {@link beginBlockOutput} before printing multi-line tool results so
+ * the spinner is cleared and the terminal cursor moves to a fresh line.
+ *
+ * @example
+ * ```ts
+ * import { setTaskActive, startWorking, stopAnimated, beginBlockOutput } from "./agentStatus.js";
+ *
+ * setTaskActive(true);
+ * startWorking("Reading files");
+ * // ... agent runs ...
+ * beginBlockOutput();
+ * console.log("diff output here");
+ * stopAnimated();
+ * setTaskActive(false);
+ * ```
  */
 
-// Import UI bridge functions to interface with the Ink spinner system
-// isInkActive: Checks if the Ink spinner system is currently available/active
-// setSpinner: Updates the spinner state with new configuration
-import { isInkActive, setSpinner } from "./ui/uiBridge.js";
-// Import the SpinnerState type to ensure type safety when setting spinner configurations
+import {
+  getTaskActive,
+  isInkActive,
+  setSpinner,
+  setTaskActive as setTaskActiveBridge,
+} from "./ui/uiBridge.js";
 import type { SpinnerState } from "./ui/types.js";
 
-// Internal state variable to track whether a task is currently active
-// This acts as a global flag that determines if spinner operations should proceed
-let taskActive = false;
-
 /**
- * <Summary>
- * What it does:
- *   Returns whether a task is currently active.
+ * Returns whether a server task is currently executing on the client.
  *
- * How it does it (step by step):
- *   1. Reads the global taskActive flag.
- *   2. Returns the boolean value directly.
+ * @returns `true` while a task is in progress; `false` when idle.
  *
- * Parameters:
- *   None.
- *
- * Returns:
- *   @returns {boolean} — true if a task is active, false otherwise.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - localFileProxy.handleServerMessage — checks before starting spinners.
- * </Summary>
+ * @example
+ * ```ts
+ * if (isTaskActive()) {
+ *   startWorking("Agent");
+ * }
+ * ```
  */
-export const isTaskActive = (): boolean => taskActive;
+export const isTaskActive = (): boolean => getTaskActive();
 
 /**
- * <Summary>
- * What it does:
- *   Sets whether a task is currently active.
+ * Marks whether a server task is currently executing.
  *
- * How it does it (step by step):
- *   1. Updates the global taskActive flag with the provided boolean value.
- *   2. This change affects all subsequent spinner operations.
+ * @remarks
+ * Spinner helpers ({@link startThinking}, {@link startWorking}) no-op when
+ * this flag is `false`, so callers can safely invoke them without checking
+ * task state first.
  *
- * Parameters:
- *   @param {boolean} active — true to mark task as active, false to mark as inactive.
+ * @param active - Pass `true` when a task starts and `false` when it finishes
+ *   or is cancelled.
  *
- * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - taskStream.startStream — sets true when starting a task.
- *   - taskStream.handleResponse — sets false when task completes.
- * </Summary>
+ * @example
+ * ```ts
+ * setTaskActive(true);
+ * startWorking("Agent");
+ * // task completes
+ * setTaskActive(false);
+ * ```
  */
 export const setTaskActive = (active: boolean): void => {
-  taskActive = active;
+  setTaskActiveBridge(active);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Stops any currently active animated spinner.
+ * Clears the active Ink spinner, if any.
  *
- * How it does it (step by step):
- *   1. Checks if the Ink spinner system is currently active.
- *   2. If active, clears the spinner by passing null to setSpinner.
- *   3. This removes the spinner from the UI.
+ * @remarks
+ * Safe to call when no spinner is showing or when Ink is not active.
+ * Does not change the task-active flag — pair with {@link setTaskActive}
+ * when a task ends.
  *
- * Parameters:
- *   None.
- *
- * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - uiBridge.isInkActive — checks if Ink system is available.
- *   - uiBridge.setSpinner — clears the spinner by passing null.
- *
- * Dependants:
- *   - agentStatus.beginBlockOutput — stops spinner before text output.
- *   - agentStatus.startAnimated — stops before starting new spinner state.
- *   - localFileProxy.handleServerMessage — stops spinner on task completion.
- * </Summary>
+ * @example
+ * ```ts
+ * stopAnimated();
+ * ```
  */
 export const stopAnimated = (): void => {
   if (isInkActive()) {
@@ -106,122 +92,66 @@ export const stopAnimated = (): void => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Starts an animated spinner with a specific mode and label.
+ * Shows a spinner with the given mode and label when a task is active.
  *
- * How it does it (step by step):
- *   1. Checks if a task is currently active using the taskActive flag.
- *   2. If no task is active, returns without updating the spinner.
- *   3. If task is active, checks if the Ink spinner system is available.
- *   4. If Ink is active, updates the spinner with the new configuration.
- *
- * Parameters:
- *   @param {SpinnerState["mode"]} mode — The spinner animation mode ("thinking" or "working").
- *   @param {string} label — The text label to display next to the spinner.
- *
- * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - agentStatus.taskActive — checks if task is currently active.
- *   - uiBridge.isInkActive — checks if Ink system is available.
- *   - uiBridge.setSpinner — updates spinner state.
- *
- * Dependants:
- *   - agentStatus.startThinking — calls with mode="thinking".
- *   - agentStatus.startWorking — calls with mode="working".
- * </Summary>
+ * @remarks
+ * No-op when the task is inactive or Ink is not running. Replaces any
+ * existing spinner rather than stacking multiple spinners.
  */
 const startAnimated = (mode: SpinnerState["mode"], label: string): void => {
-  if (!taskActive) return;
+  if (!getTaskActive()) return;
   if (isInkActive()) {
     setSpinner({ active: true, label, mode });
   }
 };
 
 /**
- * <Summary>
- * What it does:
- *   Starts a "thinking" spinner to indicate the agent is processing.
+ * Shows a "thinking" spinner, typically while the advisor is planning.
  *
- * How it does it (step by step):
- *   1. Calls the internal startAnimated function with mode="thinking".
- *   2. Passes the provided label or "Advisor" if none provided.
- *   3. Spinner only appears if taskActive is true and Ink is available.
+ * @param nextLabel - Text shown beside the spinner. Defaults to `"Advisor"`.
  *
- * Parameters:
- *   @param {string} nextLabel — The text label to display (defaults to "Advisor").
- *
- * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - agentStatus.startAnimated — handles the actual spinner update.
- *
- * Dependants:
- *   - localFileProxy.handleServerMessage — starts thinking spinner during analysis.
- * </Summary>
+ * @example
+ * ```ts
+ * setTaskActive(true);
+ * startThinking("Advisor");
+ * ```
  */
 export const startThinking = (nextLabel = "Advisor"): void => {
   startAnimated("thinking", nextLabel);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Starts a "working" spinner to indicate the agent is executing actions.
+ * Shows a "working" spinner, typically while an agent runs tools.
  *
- * How it does it (step by step):
- *   1. Calls the internal startAnimated function with mode="working".
- *   2. Passes the provided label or "Agent" if none provided.
- *   3. Spinner only appears if taskActive is true and Ink is available.
+ * @param nextLabel - Text shown beside the spinner. Defaults to `"Agent"`.
  *
- * Parameters:
- *   @param {string} nextLabel — The text label to display (defaults to "Agent").
- *
- * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - agentStatus.startAnimated — handles the actual spinner update.
- *
- * Dependants:
- *   - localFileProxy.handleServerMessage — starts working spinner during execution.
- * </Summary>
+ * @example
+ * ```ts
+ * setTaskActive(true);
+ * startWorking("Running tests");
+ * ```
  */
 export const startWorking = (nextLabel = "Agent"): void => {
   startAnimated("working", nextLabel);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Prepares the terminal for block output by stopping any active spinner.
+ * Prepares the terminal for block output after an animated spinner.
  *
- * How it does it (step by step):
- *   1. Stops any animated spinner using stopAnimated.
- *   2. Checks if Ink is NOT currently active.
- *   3. If Ink is not available, writes a newline to stdout for formatting.
+ * @remarks
+ * Stops any active spinner first. When Ink is **not** active (plain stdout
+ * mode), writes a leading newline so the next `console.log` does not append
+ * to the spinner line.
  *
- * Parameters:
- *   None.
- *
- * Returns:
- *   @returns {void} — called for side effects only.
- *
- * Dependencies:
- *   - agentStatus.stopAnimated — clears the active spinner.
- *   - uiBridge.isInkActive — checks if Ink system is available.
- *   - process.stdout.write — writes newline when Ink is unavailable.
- *
- * Dependants:
- *   - renderer.formatOutput — prepares terminal before displaying output.
- *   - localFileProxy.handleServerMessage — prepares terminal before block output.
- * </Summary>
+ * @example
+ * ```ts
+ * beginBlockOutput();
+ * console.log(fileDiff);
+ * ```
  */
 export const beginBlockOutput = (): void => {
   stopAnimated();
+  // Plain stdout has no Ink frame — newline avoids appending to the prior line.
   if (!isInkActive()) {
     process.stdout.write("\n");
   }

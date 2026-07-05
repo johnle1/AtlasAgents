@@ -13,22 +13,14 @@ import * as path from "node:path";
  *   5. If neither condition is true, the path is safe and the function returns normally.
  *
  * Parameters:
- *   @param {string} workspaceRoot — The root directory of the workspace that serves as the security boundary.
- *   @param {string} candidate — The path to validate (can be absolute or relative).
+ *   @param workspaceRoot - The root directory of the workspace that serves as the security boundary.
+ *   @param candidate - The path to validate (can be absolute or relative).
  *
  * Returns:
- *   @returns {void} — Returns normally if the path is safe, throws an error if the path escapes the workspace.
+ *   @returns Returns normally if the path is safe, throws an error if the path escapes the workspace.
  *
  * Throws:
  *   @throws {Error} — When the candidate path escapes the workspace root.
- *
- * Dependencies:
- *   - node:path — provides path.relative() and path.isAbsolute() for path manipulation.
- *
- * Dependants:
- *   - resolveAbsolutePath — calls this to validate resolved paths.
- *   - directoryListing — calls this to validate directory paths during traversal.
- *   - File handlers — call this to validate file paths before operations.
  * </Summary>
  */
 export const assertInsideRoot = (
@@ -61,11 +53,11 @@ export const assertInsideRoot = (
  *   Rejects empty or whitespace-only path strings with a clear error.
  *
  * Parameters:
- *   @param {string} value — Raw path or pattern from a request body.
+ *   @param value - Raw path or pattern from a request body.
  *   @param {string} [field] — Field name for the error message.
  *
  * Returns:
- *   @returns {string} — Trimmed non-empty path.
+ *   @returns Trimmed non-empty path.
  *
  * Throws:
  *   @throws {Error} — When value is empty after trimming.
@@ -91,21 +83,15 @@ export const requireNonEmptyPath = (value: string, field = "path"): string => {
  *   4. Return the validated absolute path.
  *
  * Parameters:
- *   @param {string} workspaceRoot — The root directory of the workspace that serves as the security boundary.
- *   @param {string} currentDir — The current working directory (used for resolving relative paths).
- *   @param {string} relativePath — Path relative to currentDir (absolute paths are rejected).
+ *   @param workspaceRoot - The root directory of the workspace that serves as the security boundary.
+ *   @param currentDir - The current working directory (used for resolving relative paths).
+ *   @param relativePath - Path relative to currentDir (absolute paths are rejected).
  *
  * Returns:
- *   @returns {string} — The validated absolute path guaranteed to be inside the workspace root.
+ *   @returns The validated absolute path guaranteed to be inside the workspace root.
  *
  * Throws:
  *   @throws {Error} — When an absolute path is supplied or the resolved path escapes the workspace.
- *
- * Dependencies:
- *   - assertInsideRoot — validates the resolved path is inside the workspace.
- *
- * Dependants:
- *   - File handlers — use this to safely resolve user-provided paths before operations.
  * </Summary>
  */
 export const resolveAbsolutePath = (

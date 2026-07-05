@@ -13,6 +13,7 @@ import {
 } from "../skills.js";
 import { printSkills, printError, printSuccess } from "../renderer.js";
 import type { Connection } from "../connection/index.js";
+import { formatErrorMessage } from "./utils.js";
 
 /**
  * <Summary>
@@ -28,21 +29,13 @@ import type { Connection } from "../connection/index.js";
  *   5. Prints success or error messages for each operation.
  *
  * Parameters:
- *   @param {string} sub — Subcommand: "list", "add", or "sync".
- *   @param {string} arg — Argument for add subcommand (skill name).
- *   @param {SkillManager | undefined} skills — Optional SkillManager instance.
- *   @param {Connection} conn — RSocket connection for syncing skills.
+ *   @param sub - Subcommand: "list", "add", or "sync".
+ *   @param arg - Argument for add subcommand (skill name).
+ *   @param skills - Optional SkillManager instance.
+ *   @param conn - RSocket connection for syncing skills.
  *
  * Returns:
- *   @returns {Promise<void>} — called for side effects only.
- *
- * Dependencies:
- *   - SkillManager or listSkills, addSkill, readAllSkills — local skill files and optional manager.
- *   - Connection.syncSkills — uploads skill payloads when not using SkillManager.sync.
- *   - renderer.printSkills, printError, printSuccess — display output.
- *
- * Dependants:
- *   - CommandHandler.handle — calls this for /skills commands.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const handleSkills = async (
@@ -71,7 +64,7 @@ export const handleSkills = async (
         }
         printSuccess(`Skill "${skillName}" created.`);
       } catch (err) {
-        printError(err instanceof Error ? err.message : String(err));
+        printError(formatErrorMessage(err));
       }
       break;
     }
@@ -87,7 +80,7 @@ export const handleSkills = async (
           printSuccess(`Synced ${syncedCount} skill(s) to server.`);
         } catch (err) {
           printError(
-            `Sync failed: ${err instanceof Error ? err.message : err}`,
+            `Sync failed: ${formatErrorMessage(err)}`,
           );
         }
         break;
@@ -102,7 +95,7 @@ export const handleSkills = async (
         await conn.syncSkills(skillList);
         printSuccess(`Synced ${skillList.length} skill(s) to server.`);
       } catch (err) {
-        printError(`Sync failed: ${err instanceof Error ? err.message : err}`);
+        printError(`Sync failed: ${formatErrorMessage(err)}`);
       }
       break;
     }

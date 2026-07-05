@@ -48,20 +48,12 @@ const OPERATION_ICONS = {
  *   4. Return the complete styled operation line.
  *
  * Parameters:
- *   @param {string} icon — The operation icon to display (e.g., "│", "*", "+").
- *   @param {string} label — The operation label (e.g., "Read", "Write", "Create").
- *   @param {string} target — The target path the operation applies to.
+ *   @param icon - The operation icon to display (e.g., "│", "*", "+").
+ *   @param label - The operation label (e.g., "Read", "Write", "Create").
+ *   @param target - The target path the operation applies to.
  *
  * Returns:
- *   @returns {string} — The styled operation line with secondary text color.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *   - formatDisplayPath — formats the target path for display.
- *
- * Dependants:
- *   - printRead — uses this to display read operations.
- *   - printCd — uses this to display directory changes.
+ *   @returns The styled operation line with secondary text color.
  * </Summary>
  */
 const operationLineDim = (
@@ -94,21 +86,12 @@ const operationLineDim = (
  *   5. Return the complete styled operation line.
  *
  * Parameters:
- *   @param {string} icon — The operation icon to display (e.g., "+", "-", "+/").
- *   @param {string} label — The operation label (e.g., "Create", "Delete", "CreateDir").
- *   @param {string} target — The target path the operation applies to.
+ *   @param icon - The operation icon to display (e.g., "+", "-", "+/").
+ *   @param label - The operation label (e.g., "Create", "Delete", "CreateDir").
+ *   @param target - The target path the operation applies to.
  *
  * Returns:
- *   @returns {string} — The styled operation line with bold path text.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *   - formatDisplayPath — formats the target path for display.
- *
- * Dependants:
- *   - printCreate — uses this to display file creation operations.
- *   - printCreateDir — uses this to display directory creation operations.
- *   - printDelete — uses this to display deletion operations.
+ *   @returns The styled operation line with bold path text.
  * </Summary>
  */
 const operationLineBoldPath = (
@@ -141,18 +124,10 @@ const operationLineBoldPath = (
  *   5. Append the styled line to the output block.
  *
  * Parameters:
- *   @param {string} path — The directory path being listed.
+ *   @param path - The directory path being listed.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the directory listing operation.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *   - formatDisplayPath — formats the path for display.
- *   - appendBlock — displays the styled line to the user.
- *
- * Dependants:
- *   - Directory listing operations — use this to display list operations.
+ *   @returns Returns after displaying the directory listing operation.
  * </Summary>
  */
 export const printListDir = (path: string): void => {
@@ -182,17 +157,10 @@ export const printListDir = (path: string): void => {
  *   3. Append the styled line to the output block.
  *
  * Parameters:
- *   @param {string} path — The file path being read.
+ *   @param path - The file path being read.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the read operation.
- *
- * Dependencies:
- *   - operationLineDim — generates the styled operation line.
- *   - appendBlock — displays the styled line to the user.
- *
- * Dependants:
- *   - File read operations — use this to display read operations.
+ *   @returns Returns after displaying the read operation.
  * </Summary>
  */
 export const printRead = (path: string): void => {
@@ -214,20 +182,11 @@ export const printRead = (path: string): void => {
  *   3. Append the diff with the file path as the header.
  *
  * Parameters:
- *   @param {string} path — The file path being written.
- *   @param {DiffChunk[]} chunks — Array of diff chunks representing the changes.
+ *   @param path - The file path being written.
+ *   @param chunks - Array of diff chunks representing the changes.
  *
  * Returns:
- *   @returns {Promise<void>} — Resolves after displaying the write operation with diff.
- *
- * Dependencies:
- *   - beginBlockOutput — starts a formatted output section.
- *   - renderDiffFromChunks — renders the diff with syntax highlighting.
- *   - formatDisplayPath — formats the path for display.
- *   - appendDiff — displays the diff to the user.
- *
- * Dependants:
- *   - File write operations — use this to display write operations with changes.
+ *   @returns Resolves after displaying the write operation with diff.
  * </Summary>
  */
 export const printWrite = async (
@@ -263,19 +222,11 @@ export const printWrite = async (
  *   6. Append the complete lines to the output block.
  *
  * Parameters:
- *   @param {string} path — The file path being created.
- *   @param {string} preview — The content preview to display.
+ *   @param path - The file path being created.
+ *   @param preview - The content preview to display.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the create operation with preview.
- *
- * Dependencies:
- *   - beginBlockOutput — starts a formatted output section.
- *   - operationLineBoldPath — generates the styled operation line.
- *   - appendBlock — displays the styled lines to the user.
- *
- * Dependants:
- *   - File creation operations — use this to display file creation operations.
+ *   @returns Returns after displaying the create operation with preview.
  * </Summary>
  */
 export const printCreate = (path: string, preview: string): void => {
@@ -317,18 +268,10 @@ export const printCreate = (path: string, preview: string): void => {
  *   4. Append the complete lines to the output block.
  *
  * Parameters:
- *   @param {string} path — The directory path being created.
+ *   @param path - The directory path being created.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the directory creation operation.
- *
- * Dependencies:
- *   - beginBlockOutput — starts a formatted output section.
- *   - operationLineBoldPath — generates the styled operation line.
- *   - appendBlock — displays the styled lines to the user.
- *
- * Dependants:
- *   - Directory creation operations — use this to display directory creation operations.
+ *   @returns Returns after displaying the directory creation operation.
  * </Summary>
  */
 export const printCreateDir = (path: string): void => {
@@ -360,19 +303,10 @@ export const printCreateDir = (path: string): void => {
  *   6. Append the complete lines to the output block.
  *
  * Parameters:
- *   @param {string} path — The file path being deleted.
+ *   @param path - The file path being deleted.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the deletion operation with warning.
- *
- * Dependencies:
- *   - beginBlockOutput — starts a formatted output section.
- *   - operationLineBoldPath — generates the styled operation line.
- *   - getTheme — provides theme colors for warning styling.
- *   - appendBlock — displays the styled lines to the user.
- *
- * Dependants:
- *   - File deletion operations — use this to display deletion operations with warnings.
+ *   @returns Returns after displaying the deletion operation with warning.
  * </Summary>
  */
 export const printDelete = (path: string): void => {
@@ -409,17 +343,10 @@ export const printDelete = (path: string): void => {
  *   3. Append the styled line to the output block.
  *
  * Parameters:
- *   @param {string} path — The directory path being changed to.
+ *   @param path - The directory path being changed to.
  *
  * Returns:
- *   @returns {void} — Returns after displaying the directory change operation.
- *
- * Dependencies:
- *   - operationLineDim — generates the styled operation line.
- *   - appendBlock — displays the styled line to the user.
- *
- * Dependants:
- *   - Directory change operations — use this to display directory change operations.
+ *   @returns Returns after displaying the directory change operation.
  * </Summary>
  */
 export const printCd = (path: string): void => {
@@ -474,18 +401,11 @@ export type DirEntry = {
  *   7. Append all styled lines to the output block.
  *
  * Parameters:
- *   @param {DirEntry[]} entries — Array of directory entries to display.
- *   @param {number} indent — The indentation level (number of spaces to indent).
+ *   @param entries - Array of directory entries to display.
+ *   @param indent - The indentation level (number of spaces to indent).
  *
  * Returns:
- *   @returns {void} — Returns after displaying the directory entries.
- *
- * Dependencies:
- *   - getTheme — provides theme colors for text styling.
- *   - OPERATION_ICONS — provides icons for different entry types.
- *
- * Dependants:
- *   - Directory expansion operations — use this to display expanded directory contents.
+ *   @returns Returns after displaying the directory entries.
  * </Summary>
  */
 export const printListDirEntries = (

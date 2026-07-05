@@ -10,6 +10,8 @@
 import type { Connection } from "../connection/index.js";
 import { printLine, printError, printSuccess } from "../renderer.js";
 import { appendLog, setStreamingText } from "../ui/uiBridge.js";
+import { formatErrorMessage } from "./utils.js";
+import { logger } from "../utils/logger.js";
 
 /**
  * <Summary>
@@ -24,18 +26,10 @@ import { appendLog, setStreamingText } from "../ui/uiBridge.js";
  *   5. Handles and displays any errors that occur.
  *
  * Parameters:
- *   @param {Connection} conn — RSocket connection for server communication.
+ *   @param conn - RSocket connection for server communication.
  *
  * Returns:
- *   @returns {Promise<void>} — called for side effects only.
- *
- * Dependencies:
- *   - Connection.sendStream — sends explore request to server.
- *   - uiBridge.setStreamingText, appendLog — UI updates.
- *   - renderer.printLine, printError — display output.
- *
- * Dependants:
- *   - CommandHandler.handle — calls this for /explore command.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const handleExplore = async (conn: Connection): Promise<void> => {
@@ -62,7 +56,7 @@ export const handleExplore = async (conn: Connection): Promise<void> => {
       appendLog(explorationBuffer, "assistant");
     }
   } catch (err) {
-    printError(`Failed: ${err instanceof Error ? err.message : err}`);
+    printError(`Failed: ${formatErrorMessage(err)}`);
   }
 };
 
@@ -77,17 +71,10 @@ export const handleExplore = async (conn: Connection): Promise<void> => {
  *   3. Handles and displays any errors that occur.
  *
  * Parameters:
- *   @param {Connection} conn — RSocket connection for server communication.
+ *   @param conn - RSocket connection for server communication.
  *
  * Returns:
- *   @returns {Promise<void>} — called for side effects only.
- *
- * Dependencies:
- *   - Connection.sendCommand — sends clear session command to server.
- *   - renderer.printSuccess, printError — display output.
- *
- * Dependants:
- *   - CommandHandler.handle — calls this for /new command.
+ *   @returns called for side effects only.
  * </Summary>
  */
 export const handleNew = async (conn: Connection): Promise<void> => {
@@ -98,7 +85,7 @@ export const handleNew = async (conn: Connection): Promise<void> => {
     );
     printSuccess(response.message ?? "Session cleared");
   } catch (err) {
-    printError(`Failed: ${err instanceof Error ? err.message : err}`);
+    printError(`Failed: ${formatErrorMessage(err)}`);
   }
 };
 
@@ -113,16 +100,10 @@ export const handleNew = async (conn: Connection): Promise<void> => {
  *   3. Calls process.exit(0) to terminate immediately.
  *
  * Parameters:
- *   @param {(() => void) | undefined} onExit — Optional custom exit handler.
+ *   @param onExit - Optional custom exit handler.
  *
  * Returns:
- *   @returns {void} — never returns, exits process.
- *
- * Dependencies:
- *   - None (uses console.log and process.exit).
- *
- * Dependants:
- *   - CommandHandler.handle — calls this for /exit command.
+ *   @returns never returns, exits process.
  * </Summary>
  */
 export const handleExit = (onExit: (() => void) | undefined): void => {
@@ -132,8 +113,8 @@ export const handleExit = (onExit: (() => void) | undefined): void => {
     return;
   }
   // Default exit behavior: print goodbye message and exit process
-  console.log();
-  console.log("  Goodbye!");
-  console.log();
+  logger.blank();
+  logger.info("  Goodbye!");
+  logger.blank();
   process.exit(0);
 };

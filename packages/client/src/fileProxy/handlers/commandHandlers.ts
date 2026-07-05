@@ -11,6 +11,7 @@ import {
 } from "../../renderer.js";
 import { requestApproval } from "../../ui/uiBridge.js";
 import type { DispatchContext } from "../types.js";
+import { logger } from "../../utils/logger.js";
 
 /**
  * <Summary>
@@ -23,18 +24,11 @@ import type { DispatchContext } from "../types.js";
  *   3. Return the classification result in a standardized response format.
  *
  * Parameters:
- *   @param {DispatchContext} context — The dispatch context containing the classifyCommand utility.
- *   @param {Record<string, unknown>} requestBody — The request body containing the command to classify.
+ *   @param context - The dispatch context containing the classifyCommand utility.
+ *   @param requestBody - The request body containing the command to classify.
  *
  * Returns:
- *   @returns {Promise<unknown>} — Object containing the classification result (safe, dangerous, or cautious).
- *
- * Dependencies:
- *   - context.classifyCommand — performs the actual command safety analysis.
- *
- * Dependants:
- *   - dispatch system — routes command.classify requests to this handler.
- *   - UI components — use this to assess command safety before execution.
+ *   @returns Object containing the classification result (safe, dangerous, or cautious).
  * </Summary>
  */
 export const handleCommandClassify = (
@@ -65,23 +59,11 @@ export const handleCommandClassify = (
  *   9. Return the shell execution results.
  *
  * Parameters:
- *   @param {DispatchContext} context — The dispatch context containing utilities for command execution.
- *   @param {Record<string, unknown>} requestBody — The request body containing the command and execution options.
+ *   @param context - The dispatch context containing utilities for command execution.
+ *   @param requestBody - The request body containing the command and execution options.
  *
  * Returns:
- *   @returns {Promise<unknown>} — The shell execution results (stdout, stderr, exitCode) or skip results.
- *
- * Dependencies:
- *   - context.classifyCommand — assesses command safety level.
- *   - context.runShell — executes the shell command.
- *   - context.currentDir — provides working directory for background processes.
- *   - requestApproval — prompts user for command execution approval.
- *   - Renderer functions — display command status and results to user.
- *   - getTheme — provides theme colors for warning messages.
- *   - beginBlockOutput — formats output for dangerous commands.
- *
- * Dependants:
- *   - dispatch system — routes command.run requests to this handler.
+ *   @returns The shell execution results (stdout, stderr, exitCode) or skip results.
  * </Summary>
  */
 export const handleCommandRun = async (
@@ -200,17 +182,17 @@ export const handleCommandRun = async (
       beginBlockOutput();
 
       // Step 6a-1c: Add spacing before the warning
-      console.log();
+      logger.blank();
 
       // Step 6a-1d: Get the current theme for colored warning message
       {
         const theme = getTheme();
         // Step 6a-1e: Print warning with theme colors for visibility
-        console.log(`  ${theme.warning}⚠${theme.reset}  Dangerous command.`);
+        logger.info(`  ${theme.warning}⚠${theme.reset}  Dangerous command.`);
       }
 
       // Step 6a-1f: Add spacing after the warning
-      console.log();
+      logger.blank();
     }
 
     // ===== STEP 6a-2: Request user approval =====

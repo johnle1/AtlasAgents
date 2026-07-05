@@ -24,21 +24,12 @@ import type { DispatchContext } from "./types.js";
  *   10. Join all lines with newlines and return the complete structure string.
  *
  * Parameters:
- *   @param {Pick<DispatchContext, "workspaceRoot" | "currentDir">} context — Dispatch context containing
+ *   @param context - Dispatch context containing
  *     workspace root path and current directory path.
- *   @param {number} depth — Maximum depth to traverse (0 = current directory only, 1 = one level deep, etc.).
+ *   @param depth - Maximum depth to traverse (0 = current directory only, 1 = one level deep, etc.).
  *
  * Returns:
- *   @returns {Promise<string>} — String representation of the directory structure with indentation for nesting.
- *
- * Dependencies:
- *   - printListDir — displays the current directory path to the user.
- *   - pushListDir — tracks the directory in navigation state.
- *   - SKIP_DIR_NAMES — provides list of directories to skip during traversal.
- *   - assertInsideRoot — ensures all paths remain within the workspace for security.
- *
- * Dependants:
- *   - Directory listing commands — use this to display project structure to users.
+ *   @returns String representation of the directory structure with indentation for nesting.
  * </Summary>
  */
 export const listStructure = async (
@@ -137,20 +128,12 @@ export const listStructure = async (
  *   6. Return the filtered and mapped entry list.
  *
  * Parameters:
- *   @param {string} workspaceRoot — The root directory of the workspace for security validation.
- *   @param {string} dirPath — The directory path to list (can be relative or absolute).
+ *   @param workspaceRoot - The root directory of the workspace for security validation.
+ *   @param dirPath - The directory path to list (can be relative or absolute).
  *
  * Returns:
- *   @returns {Promise<Array<{ name: string; isDirectory: boolean }>>} — Array of entry objects
+ *   @returns Array of entry objects
  *     containing the entry name and whether it's a directory.
- *
- * Dependencies:
- *   - assertInsideRoot — ensures the directory path is within the workspace.
- *   - SKIP_DIR_NAMES — provides list of directories to exclude from the listing.
- *
- * Dependants:
- *   - expandDirectory — uses this to get entries when expanding a directory in the UI.
- *   - Directory browsing commands — use this to display directory contents.
  * </Summary>
  */
 export const listDirectoryEntries = async (
@@ -195,21 +178,13 @@ export const listDirectoryEntries = async (
  *   5. For each subdirectory found, push it to the navigation state for potential expansion.
  *
  * Parameters:
- *   @param {Pick<DispatchContext, "workspaceRoot"> & { listDirectoryEntries: (dirPath: string) => Promise<Array<{ name: string; isDirectory: boolean }>> }} context —
+ *   @param context
  *     Dispatch context containing workspace root and the listDirectoryEntries function.
- *   @param {string} dirPath — The directory path to expand.
- *   @param {number} indent — The indentation level to use for displaying the entries.
+ *   @param dirPath - The directory path to expand.
+ *   @param indent - The indentation level to use for displaying the entries.
  *
  * Returns:
- *   @returns {Promise<void>} — Resolves when the directory has been expanded and entries displayed.
- *
- * Dependencies:
- *   - markExpanded — marks the directory as expanded in the UI state.
- *   - printListDirEntries — displays the directory entries to the user.
- *   - pushListDir — tracks subdirectories in navigation state for later expansion.
- *
- * Dependants:
- *   - Directory expansion commands — use this when a user expands a directory in the file browser.
+ *   @returns Resolves when the directory has been expanded and entries displayed.
  * </Summary>
  */
 export const expandDirectory = async (

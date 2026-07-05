@@ -9,7 +9,6 @@ import {
   fetchModelsDetailed as fetchModelsDetailedFn,
   forgetMemory as forgetMemoryFn,
   getMemory as getMemoryFn,
-  respondConfirmation as respondConfirmationFn,
   respondPlan as respondPlanFn,
   sendCommand as sendCommandFn,
   syncSkills as syncSkillsFn,
@@ -25,6 +24,8 @@ import type {
   StatusListener,
 } from "./types.js";
 import { authMetadata, requireSocket } from "./utils.js";
+import { CONNECT_RETRY_INTERVAL_MS } from "./constants.js";
+import { ConnectionLifecycle } from "./lifecycle.js";
 
 export type { PullProgress, TaskFrame } from "../frames.js";
 
@@ -38,18 +39,6 @@ export type { PullProgress, TaskFrame } from "../frames.js";
  *   Sits between the CLI input loop (index.ts / CommandHandler) and the
  *   server. All server communication flows through this class so transport
  *   logic is centralised in one place.
- *
- * Dependencies:
- *   - RSocketConnector — establishes the RSocket session.
- *   - TcpClientTransport — TCP transport layer under RSocket.
- *   - commands.js, streaming.js — wire-level send helpers.
- *   - utils.js — auth metadata and socket guard helpers.
- *   - fileResponder.js — handles server-initiated file operations.
- *
- * Dependants:
- *   - index.ts main() — creates a Connection instance on startup.
- *   - CommandHandler — calls listModels, syncSkills, getMemory, etc.
- *   - taskStream.runTaskStream — calls sendTask for user tasks.
  * </Summary>
  */
 export class Connection {
@@ -62,50 +51,21 @@ export class Connection {
   /** In-flight connect promise used as a mutex to prevent duplicate connections. */
   private establishing: Promise<void> | null = null;
 
-  /** Current connection state for status emission. */
-  private status: ConnectionStatus = "disconnected";
-
-  /** Set of callbacks notified on every status change. */
-  private readonly statusListeners = new Set<StatusListener>();
-
-  /** Counter driving exponential backoff delay between reconnect attempts. */
-  private reconnectAttempt = 0;
-
-  /** Handle for the pending reconnect setTimeout so it can be cancelled. */
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
-  /** When true, socket close does not schedule reconnect (reload / shutdown). */
-  private suppressReconnect = false;
+  private readonly lifecycle: ConnectionLifecycle;
 
   /** Local file proxy used by the RSocket responder for server-initiated file ops. */
   private fileProxy: LocalFileProxy | null = null;
 
-  /**
-   * <Summary>
-   * What it does:
-   *   Initializes a new Connection instance with the provided configuration.
-   *
-   * How it does it (step by step):
-   *   1. Stores the provided config object in the instance.
-   *
-   * Parameters:
-   *   @param {Config} config — Initial configuration with server address, port,
-   *     password, model names, and timeout settings.
-   *
-   * Returns:
-   *   void — constructor returns nothing.
-   *
-   * Dependencies:
-   *   None.
-   *
-   * Dependants:
-   *   - index.ts main() — creates a Connection instance on startup.
-   * </Summary>
-   */
   constructor(config: Config) {
-    // ===== STEP 1: Store Configuration =====
-    // Step 1a: Save the provided config for use in connection methods
     this.config = config;
+    this.lifecycle = new ConnectionLifecycle({
+      connect: async () => {
+        await this.connect();
+      },
+      clearSocket: () => {
+        this.rsocket = null;
+      },
+    });
   }
 
   /**
@@ -120,79 +80,32 @@ export class Connection {
    *   3. Returns a function that removes the callback from the set.
    *
    * Parameters:
-   *   @param {StatusListener} cb — Callback invoked with the new status string.
+   *   @param statusListenerCallback - Callback invoked with the new status string.
    *
    * Returns:
-   *   @returns {() => void} — Call this to unsubscribe.
+   *   @returns Call this to unsubscribe.
    *
-   * Dependencies:
    *   None.
-   *
-   * Dependants:
-   *   - index.ts main() — subscribes to print connection status in the CLI.
-   *   - App.tsx — drives ConnectionStatusLine in the Ink UI.
    * </Summary>
    */
-  onConnectionStatus = (cb: StatusListener): (() => void) => {
-    // ===== STEP 1: Register Listener =====
-    // Step 1a: Add the callback to the statusListeners set
-    // Step 1b: Set ensures no duplicate callbacks
-    this.statusListeners.add(cb);
+  onConnectionStatus = (statusListenerCallback: StatusListener): (() => void) =>
+    this.lifecycle.onConnectionStatus(statusListenerCallback);
 
-    // ===== STEP 2: Notify Listener of Current Status =====
-    // Step 2a: Immediately invoke the callback with the current status
-    // Step 2b: Ensures listener has the latest state even if connection already established
-    cb(this.status);
-
-    // ===== STEP 3: Return Unsubscribe Function =====
-    // Step 3a: Return a function that removes this callback when called
-    // Step 3b: Allows listeners to clean up their subscription
-    return () => {
-      this.statusListeners.delete(cb);
-    };
+  private emitStatus = (nextStatus: ConnectionStatus): void => {
+    // ===== STEP 1: Delegate to Lifecycle Manager =====
+    // Step 1a: Pass the new status to the lifecycle manager for emission
+    // Step 1b: The lifecycle manager handles notifying all registered listeners
+    this.lifecycle.emitStatus(nextStatus);
   };
 
-  /**
-   * <Summary>
-   * What it does:
-   *   Updates the internal status and notifies all registered listeners.
-   *
-   * How it does it (step by step):
-   *   1. Skips if the new status equals the current status (no duplicate events).
-   *   2. Stores the new status.
-   *   3. Iterates the statusListeners set and calls each callback.
-   *
-   * Parameters:
-   *   @param {ConnectionStatus} next — The new connection state.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   None.
-   *
-   * Dependants:
-   *   - Connection.connect — emits "connecting" and "connected" or "disconnected".
-   *   - Connection.handleSocketClosed — emits "disconnected".
-   *   - Connection.scheduleReconnect — emits "reconnecting".
-   * </Summary>
-   */
-  private emitStatus = (next: ConnectionStatus): void => {
-    // ===== STEP 1: Check for Duplicate Status =====
-    // Step 1a: If status hasn't changed, skip emission to avoid duplicate events
-    if (this.status === next) return;
-
-    // ===== STEP 2: Update Internal State =====
-    // Step 2a: Store the new status for future subscribers and queries
-    this.status = next;
-
-    // ===== STEP 3: Notify All Listeners =====
-    // Step 3a: Iterate through the set of registered listener callbacks
-    // Step 3b: Call each listener with the new status value
-    for (const fn of this.statusListeners) {
-      fn(next);
-    }
+  private handleSocketClosed = (): void => {
+    this.lifecycle.handleSocketClosed();
   };
+
+  /** @internal Used by connection tests for reload reconnect suppression. */
+  get suppressReconnect(): boolean {
+    return this.lifecycle.isReconnectSuppressed();
+  }
 
   /**
    * @async
@@ -212,16 +125,9 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when connected.
+   *   @returns Resolves when connected.
    *
    * @throws {Error} — When the timeout elapses without a successful connection.
-   *
-   * Dependencies:
-   *   - Connection.connect — attempts to open the TCP + RSocket session.
-   *
-   * Dependants:
-   *   - Connection.sendCommand — waits for connection before sending.
-   *   - Connection.sendTask — waits for connection before streaming.
    * </Summary>
    */
   private waitUntilConnected = async (): Promise<void> => {
@@ -253,7 +159,9 @@ export class Connection {
       } catch {
         // ===== STEP 2e: Connect Failed; Sleep Before Retry =====
         // Sleep 200ms to avoid tight retry loop on repeated failures
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((resolve) =>
+          setTimeout(resolve, CONNECT_RETRY_INTERVAL_MS),
+        );
       }
     }
   };
@@ -282,20 +190,9 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when the connection is established.
+   *   @returns Resolves when the connection is established.
    *
    * @throws {Error} — When TCP connection or RSocket handshake fails.
-   *
-   * Dependencies:
-   *   - TcpClientTransport — opens the raw TCP socket.
-   *   - RSocketConnector — performs the RSocket SETUP handshake.
-   *   - createFileResponder — registers server-initiated file request handler.
-   *
-   * Dependants:
-   *   - index.ts main() — calls await conn.connect() on startup.
-   *   - Connection.waitUntilConnected — retries this on failure.
-   *   - Connection.scheduleReconnect — calls this after backoff delay.
-   *   - Connection.reload — calls this after closing the old socket.
    * </Summary>
    */
   connect = async (): Promise<void> => {
@@ -355,7 +252,7 @@ export class Connection {
 
         // ===== STEP 9: Reset Reconnect Counter =====
         // Step 9a: Since we're now connected, reset the exponential backoff counter
-        this.reconnectAttempt = 0;
+        this.lifecycle.resetReconnectAttempt();
 
         // ===== STEP 10: Register Close Handler =====
         // Step 10a: When socket closes, trigger handleSocketClosed for cleanup and reconnect
@@ -407,170 +304,13 @@ export class Connection {
    * Returns:
    *   void — called for side effects only.
    *
-   * Dependencies:
    *   None (uses clearTimeout).
-   *
-   * Dependants:
-   *   - Connection.reload — clears timer before intentional close.
    * </Summary>
    */
   private clearReconnectTimer = (): void => {
-    // ===== STEP 1: Check if Timer is Active =====
-    // Step 1a: Test if reconnectTimer is set (null means no timer pending)
-    if (this.reconnectTimer) {
-      // ===== STEP 2: Cancel Timer =====
-      // Step 2a: Call clearTimeout to prevent the scheduled reconnect from firing
-      clearTimeout(this.reconnectTimer);
-
-      // ===== STEP 3: Clear Handle =====
-      // Step 3a: Null out the timer handle to indicate no timer is active
-      this.reconnectTimer = null;
-    }
+    this.lifecycle.cancelReconnect();
   };
 
-  /**
-   * <Summary>
-   * What it does:
-   *   Reacts to the RSocket socket closing by resetting state and optionally
-   *   scheduling an automatic reconnect.
-   *
-   * How it does it (step by step):
-   *   1. Nulls out this.rsocket since the connection is dead.
-   *   2. Emits "disconnected" status.
-   *   3. If suppressReconnect is true (intentional close), returns without reconnecting.
-   *   4. Otherwise calls scheduleReconnect to try again with backoff.
-   *
-   * Parameters:
-   *   None.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   - Connection.emitStatus — broadcasts "disconnected".
-   *   - Connection.scheduleReconnect — begins the backoff retry loop.
-   *
-   * Dependants:
-   *   - RSocket.onClose callback — registered in connect().
-   * </Summary>
-   */
-  private handleSocketClosed = (): void => {
-    // ===== STEP 1: Clear Connection Reference =====
-    // Step 1a: Null out rsocket to mark the connection as dead
-    // Step 1b: Future sendCommand/sendTask calls will fail until reconnected
-    this.rsocket = null;
-
-    // ===== STEP 2: Notify Subscribers of Disconnect =====
-    // Step 2a: Emit "disconnected" status to all registered listeners
-    // Step 2b: Allows UI to update and show disconnection message
-    this.emitStatus("disconnected");
-
-    // ===== STEP 3: Check if Reconnect is Suppressed =====
-    // Step 3a: If suppressReconnect is true (intentional close), skip reconnect
-    // Step 3b: Used during reload() or shutdown to prevent auto-reconnect
-    if (this.suppressReconnect) return;
-
-    // ===== STEP 4: Schedule Reconnect Attempt =====
-    // Step 4a: Start exponential backoff retry loop to restore connection
-    this.scheduleReconnect();
-  };
-
-  /**
-   * <Summary>
-   * What it does:
-   *   Schedules a reconnect attempt after an exponential backoff delay with
-   *   random jitter, capped at 30 seconds.
-   *
-   * How it does it (step by step):
-   *   1. Returns if a timer is already scheduled or reconnect is suppressed.
-   *   2. Emits "reconnecting" status.
-   *   3. Computes delay: min(30000, 500 * 2^attempt) + random 0–250ms jitter.
-   *   4. Sets a setTimeout that calls connect().
-   *   5. On connect success: resets reconnectAttempt to 0.
-   *   6. On connect failure: increments reconnectAttempt and schedules again.
-   *
-   * Parameters:
-   *   None.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   - Connection.connect — the actual reconnect attempt.
-   *   - Connection.emitStatus — broadcasts "reconnecting".
-   *
-   * Dependants:
-   *   - Connection.handleSocketClosed — calls this when the socket drops unexpectedly.
-   * </Summary>
-   */
-  private scheduleReconnect = (): void => {
-    // ===== STEP 1: Check if Reconnect Already Scheduled =====
-    // Step 1a: If a timer is already pending, skip to avoid duplicate timers
-    // Step 1b: If suppressReconnect is true, don't schedule (intentional close)
-    if (this.reconnectTimer || this.suppressReconnect) return;
-
-    // ===== STEP 2: Emit Reconnecting Status =====
-    // Step 2a: Notify subscribers that we're attempting to restore connection
-    this.emitStatus("reconnecting");
-
-    // ===== STEP 3: Calculate Exponential Backoff Delay =====
-    // Step 3a: Base delay = 500 * 2^reconnectAttempt (exponential growth)
-    // Step 3b: Cap at 30 seconds to avoid excessively long waits
-    const exp = Math.min(30_000, 500 * 2 ** this.reconnectAttempt);
-
-    // ===== STEP 4: Add Random Jitter =====
-    // Step 4a: Add 0–250ms of random jitter to prevent thundering herd
-    // Step 4b: If many clients reconnect at once, jitter spreads requests
-    const delay = exp + Math.floor(Math.random() * 250);
-
-    // ===== STEP 5: Set Timeout to Reconnect =====
-    // Step 5a: Schedule a reconnect attempt after the calculated delay
-    this.reconnectTimer = setTimeout(() => {
-      // ===== STEP 5b: Clear Timer Handle =====
-      // Mark that this scheduled timeout has fired
-      this.reconnectTimer = null;
-
-      // ===== STEP 5c: Attempt to Connect =====
-      // Start the connection process
-      void this.connect()
-        .then(() => {
-          // ===== STEP 5d: Connection Succeeded =====
-          // Reset attempt counter since we're now connected
-          this.reconnectAttempt = 0;
-        })
-        .catch(() => {
-          // ===== STEP 5e: Connection Failed; Retry with Backoff =====
-          // Increment attempt counter for next exponential backoff
-          this.reconnectAttempt++;
-          // Schedule another reconnect attempt
-          this.scheduleReconnect();
-        });
-    }, delay);
-  };
-
-  /**
-   * <Summary>
-   * What it does:
-   *   Updates the internal config reference without reconnecting.
-   *
-   * How it does it (step by step):
-   *   1. Replaces this.config with the new config.
-   *   2. Does NOT trigger reconnection, even if server/port/password change.
-   *
-   * Parameters:
-   *   @param {Config} config — The updated configuration object.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   None.
-   *
-   * Dependants:
-   *   - modelSelectionHandlers.handleSet — updates config after user picks a new model.
-   *   - Note: For connection-level changes (server, port, password), use reload() instead.
-   * </Summary>
-   */
   updateConfig = (config: Config): void => {
     // ===== STEP 1: Replace Config Reference =====
     // Step 1a: Store the new config in the instance
@@ -588,16 +328,12 @@ export class Connection {
    *   1. Stores the proxy reference for use in the RSocket responder callback.
    *
    * Parameters:
-   *   @param {LocalFileProxy} proxy — The file proxy instance.
+   *   @param proxy - The file proxy instance.
    *
    * Returns:
    *   void — called for side effects only.
    *
-   * Dependencies:
    *   None.
-   *
-   * Dependants:
-   *   - index.ts main() — calls this after creating the LocalFileProxy.
    * </Summary>
    */
   setFileProxy = (proxy: LocalFileProxy): void => {
@@ -626,25 +362,18 @@ export class Connection {
    *   9. Establishes a new connection with the updated config.
    *
    * Parameters:
-   *   @param {Config} config — The new configuration object.
+   *   @param config - The new configuration object.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when reconnect completes or immediately
+   *   @returns Resolves when reconnect completes or immediately
    *     if connection settings are unchanged.
-   *
-   * Dependencies:
-   *   - Connection.clearReconnectTimer — cancels pending reconnect attempts.
-   *   - Connection.connect — establishes the new connection.
-   *
-   * Dependants:
-   *   - configHandlers.handleConfig — calls this after user changes server settings.
-   *   - modelSelectionHandlers.handleSet — calls this after model config update.
    * </Summary>
    */
   reload = async (config: Config): Promise<void> => {
     // ===== STEP 1: Snapshot Previous Connection Settings =====
     // Step 1a: Save the current server, port, and password for comparison
-    const prev = {
+    // Step 1b: This allows us to detect if connection-level settings actually changed
+    const previousConnectionSettings = {
       server: this.config.server,
       port: this.config.port,
       password: this.config.password,
@@ -652,15 +381,17 @@ export class Connection {
 
     // ===== STEP 2: Install New Config =====
     // Step 2a: Replace config immediately so we have the new values
+    // Step 2b: This ensures all methods use the updated configuration going forward
     this.config = config;
 
     // ===== STEP 3: Check if Connection Settings Changed =====
     // Step 3a: Compare previous and new connection-level fields
     // Step 3b: If unchanged, just update config and return (no reconnect needed)
+    // Step 3c: This avoids unnecessary disconnection when only non-connection settings changed
     if (
-      prev.server === config.server &&
-      prev.port === config.port &&
-      prev.password === config.password
+      previousConnectionSettings.server === config.server &&
+      previousConnectionSettings.port === config.port &&
+      previousConnectionSettings.password === config.password
     ) {
       return;
     }
@@ -668,30 +399,39 @@ export class Connection {
     // ===== STEP 4: Suppress Auto-Reconnect During Close =====
     // Step 4a: Set flag so that when the old socket closes, it doesn't auto-reconnect
     // Step 4b: We want to reconnect to the NEW server, not the old one
-    this.suppressReconnect = true;
+    // Step 4c: This prevents a race condition where the old socket triggers reconnect to old server
+    this.lifecycle.setSuppressReconnect(true);
 
-    // ===== STEP 5: Clean Up Pending Reconnect Timer =====
-    // Step 5a: Cancel any scheduled reconnect from the old connection
+    // ===== STEP 5: Cancel Pending Reconnect Timer =====
+    // Step 5a: Clear any existing reconnect timer
+    // Step 5b: This prevents a delayed reconnect attempt from firing after we close the socket
     this.clearReconnectTimer();
 
     // ===== STEP 6: Close Old Connection =====
-    // Step 6a: Save reference to the old RSocket
-    const old = this.rsocket;
+    // Step 6a: Save reference to the old RSocket before closing
+    // Step 6b: This allows us to close it after nulling the reference
+    const oldRSocket = this.rsocket;
 
-    // Step 6b: Null out the reference immediately to mark as disconnected
+    // Step 6c: Null out the reference immediately to mark as disconnected
+    // Step 6d: This prevents any new operations from trying to use the closing socket
     this.rsocket = null;
 
-    // Step 6c: Close the old RSocket (if it exists)
-    old?.close();
+    // Step 6e: Close the old RSocket (if it exists)
+    // Step 6f: This gracefully terminates the TCP connection
+    oldRSocket?.close();
 
     // ===== STEP 7: Connect to New Server =====
     // Step 7a: Establish connection with the updated config
     // Step 7b: Keep suppressReconnect true until connect settles so a late
     //          old-socket onClose cannot schedule a competing reconnect
     try {
+      // Reset reconnect counter for fresh backoff sequence on new server
+      this.lifecycle.resetReconnectAttempt();
       await this.connect();
     } finally {
-      this.suppressReconnect = false;
+      // Step 7c: Clear the suppress flag once connection attempt completes
+      // Step 7d: This allows normal auto-reconnect behavior for future disconnections
+      this.lifecycle.setSuppressReconnect(false);
     }
   };
 
@@ -707,13 +447,7 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Buffer} — UTF-8 JSON password metadata for RSocket frames.
-   *
-   * Dependencies:
-   *   - authMetadata — serialises password from config.
-   *
-   * Dependants:
-   *   - All Connection send methods — attach metadata to every frame.
+   *   @returns UTF-8 JSON password metadata for RSocket frames.
    * </Summary>
    */
   private meta = (): Buffer => authMetadata(this.config);
@@ -730,15 +464,9 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {RSocket} — The live RSocket connection object.
+   *   @returns The live RSocket connection object.
    *
    * @throws {Error} — When the connection is not established.
-   *
-   * Dependencies:
-   *   - requireSocket — validates non-null socket.
-   *
-   * Dependants:
-   *   - Connection.sendCommand, sendTask, sendStream — after waitUntilConnected.
    * </Summary>
    */
   private socket = (): RSocket => requireSocket(this.rsocket);
@@ -754,21 +482,13 @@ export class Connection {
    *   2. Delegates to sendCommand in commands.js with socket and metadata.
    *
    * Parameters:
-   *   @param {string} type — Command route e.g. "models.list", "memory.get".
-   *   @param {unknown} payload — JSON-serialisable command payload.
+   *   @param type - Command route e.g. "models.list", "memory.get".
+   *   @param payload - JSON-serialisable command payload.
    *
    * Returns:
-   *   @returns {Promise<TResponse>} — Parsed data field from the server response.
+   *   @returns Parsed data field from the server response.
    *
    * @throws {Error} — When the server returns ok: false or connection fails.
-   *
-   * Dependencies:
-   *   - Connection.waitUntilConnected — ensures live socket.
-   *   - sendCommand — commands.js requestResponse helper.
-   *
-   * Dependants:
-   *   - index.ts — session.exists check on startup.
-   *   - modelHandlers — models.delete, models.show, etc.
    * </Summary>
    */
   sendCommand = async <TResponse>(
@@ -798,13 +518,7 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<InstalledModel[]>} — Array of model metadata objects.
-   *
-   * Dependencies:
-   *   - fetchModelsDetailed — commands.js helper.
-   *
-   * Dependants:
-   *   - modelHandlers.handleModels — list and find subcommands.
+   *   @returns Array of model metadata objects.
    * </Summary>
    */
   fetchModelsDetailed = async () => {
@@ -826,13 +540,7 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<string[]>} — Array of model name strings.
-   *
-   * Dependencies:
-   *   - fetchModels — commands.js helper.
-   *
-   * Dependants:
-   *   - Connection.listModels — deprecated alias.
+   *   @returns Array of model name strings.
    * </Summary>
    */
   fetchModels = async (): Promise<string[]> => {
@@ -853,13 +561,7 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<string[]>} — Array of model names.
-   *
-   * Dependencies:
-   *   - Connection.fetchModels — the real implementation.
-   *
-   * Dependants:
-   *   - modelSelectionHandlers.handleSet — populates the model picker.
+   *   @returns Array of model names.
    * </Summary>
    */
   listModels = async (): Promise<string[]> => this.fetchModels();
@@ -875,17 +577,10 @@ export class Connection {
    *   2. Delegates to syncSkills in commands.js.
    *
    * Parameters:
-   *   @param {SkillPayload[]} skills — Skill objects with name and markdown content.
+   *   @param skills - Skill objects with name and markdown content.
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   - syncSkills — commands.js helper.
-   *
-   * Dependants:
-   *   - skillHandlers.handleSkills — after reading local skill files.
-   *   - SkillManager.autoSync — on startup.
    * </Summary>
    */
   syncSkills = async (skills: SkillPayload[]): Promise<void> => {
@@ -907,13 +602,7 @@ export class Connection {
    *   None.
    *
    * Returns:
-   *   @returns {Promise<MemoryEntry[]>} — Array of topics with their rules.
-   *
-   * Dependencies:
-   *   - getMemory — commands.js helper.
-   *
-   * Dependants:
-   *   - memoryHandlers.handleMemory — show subcommand.
+   *   @returns Array of topics with their rules.
    * </Summary>
    */
   getMemory = async () => {
@@ -932,16 +621,10 @@ export class Connection {
    *   2. Delegates to forgetMemory in commands.js.
    *
    * Parameters:
-   *   @param {string} topic — Topic name to forget e.g. "coding-style".
+   *   @param topic - Topic name to forget e.g. "coding-style".
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   - forgetMemory — commands.js helper.
-   *
-   * Dependants:
-   *   - memoryHandlers.handleMemory — forget subcommand.
    * </Summary>
    */
   forgetMemory = async (topic: string): Promise<void> => {
@@ -964,12 +647,6 @@ export class Connection {
    *
    * Returns:
    *   void — called for side effects only.
-   *
-   * Dependencies:
-   *   - clearMemory — commands.js helper.
-   *
-   * Dependants:
-   *   - memoryHandlers.handleMemory — clear subcommand.
    * </Summary>
    */
   clearMemory = async (): Promise<void> => {
@@ -988,19 +665,13 @@ export class Connection {
    *   2. Delegates to sendTask in streaming.js with config and callbacks.
    *
    * Parameters:
-   *   @param {Object} opts — Task options with text, maxAgents, onFrame, onToken.
+   *   @param opts - Task options with text, maxAgents, onFrame, onToken.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when the server finishes streaming.
-   *
-   * Dependencies:
-   *   - sendTask — streaming.js helper.
-   *
-   * Dependants:
-   *   - taskStream.runTaskStream — primary task execution entry point.
+   *   @returns Resolves when the server finishes streaming.
    * </Summary>
    */
-  sendTask = async (opts: {
+  sendTask = async (taskOptions: {
     task: string;
     maxAgents?: 1 | 2 | "max" | number;
     onFrame: (frame: TaskFrame) => void | Promise<void>;
@@ -1008,18 +679,20 @@ export class Connection {
   }): Promise<void> => {
     // ===== STEP 1: Wait for Connection =====
     // Step 1a: Block until RSocket is live before starting the task stream
+    // Step 1b: This ensures we have a valid connection before sending the task
     await this.waitUntilConnected();
 
     // ===== STEP 2: Delegate to Streaming Helper =====
     // Step 2a: Pass task text, config, metadata, socket, and callbacks to sendTask
+    // Step 2b: The streaming helper manages the requestStream protocol and frame handling
     await sendTaskFn(
-      opts.task,
+      taskOptions.task,
       this.config,
       this.meta(),
       this.socket(),
-      opts.onFrame,
-      opts.onToken,
-      opts.maxAgents,
+      taskOptions.onFrame,
+      taskOptions.onToken,
+      taskOptions.maxAgents,
     );
   };
 
@@ -1034,21 +707,14 @@ export class Connection {
    *   2. Delegates to sendStream in streaming.js.
    *
    * Parameters:
-   *   @param {Object} opts — Operation kind, payload, and onFrame callback.
+   *   @param opts - Operation kind, payload, and onFrame callback.
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when the server finishes streaming.
-   *
-   * Dependencies:
-   *   - sendStream — streaming.js helper.
-   *
-   * Dependants:
-   *   - modelHandlers.handleModels — pull subcommand.
-   *   - sessionHandlers.handleExplore — explore subcommand.
+   *   @returns Resolves when the server finishes streaming.
    * </Summary>
    */
   sendStream = async (
-    opts:
+    streamOptions:
       | {
           kind: "models.pull";
           payload: { name: string };
@@ -1062,43 +728,13 @@ export class Connection {
   ): Promise<void> => {
     // ===== STEP 1: Wait for Connection =====
     // Step 1a: Block until RSocket is live before starting the operation stream
+    // Step 1b: This ensures we have a valid connection before starting the streaming operation
     await this.waitUntilConnected();
 
     // ===== STEP 2: Delegate to Streaming Helper =====
     // Step 2a: Pass operation options, metadata, and socket to sendStream
-    await sendStreamFn(opts, this.meta(), this.socket());
-  };
-
-  /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Responds to a pending server confirmation request (approve or reject).
-   *
-   * How it does it (step by step):
-   *   1. Waits until connected.
-   *   2. Delegates to respondConfirmation in commands.js.
-   *
-   * Parameters:
-   *   @param {string} id — Confirmation ID from the server frame.
-   *   @param {boolean} approved — True to approve, false to reject.
-   *
-   * Returns:
-   *   @returns {Promise<void>} — Resolves when the server acknowledges.
-   *
-   * Dependencies:
-   *   - respondConfirmation — commands.js helper.
-   *
-   * Dependants:
-   *   - taskStream.runTaskStream — user approval prompts in Ink UI.
-   * </Summary>
-   */
-  respondConfirmation = async (
-    id: string,
-    approved: boolean,
-  ): Promise<void> => {
-    await this.waitUntilConnected();
-    await respondConfirmationFn(this.socket(), this.meta(), id, approved);
+    // Step 2b: The streaming helper manages the requestStream protocol for long-running operations
+    await sendStreamFn(streamOptions, this.meta(), this.socket());
   };
 
   /**
@@ -1112,18 +748,12 @@ export class Connection {
    *   2. Delegates to respondPlan in commands.js.
    *
    * Parameters:
-   *   @param {string} id — Plan ID from the server frame.
-   *   @param {"implement" | "skip" | "edit"} decision — User's plan decision.
+   *   @param id - Plan ID from the server frame.
+   *   @param decision - User's plan decision.
    *   @param {string[]} [steps] — Modified steps when decision is "edit".
    *
    * Returns:
-   *   @returns {Promise<void>} — Resolves when the server acknowledges.
-   *
-   * Dependencies:
-   *   - respondPlan — commands.js helper.
-   *
-   * Dependants:
-   *   - taskStream.runTaskStream — plan review prompts in Ink UI.
+   *   @returns Resolves when the server acknowledges.
    * </Summary>
    */
   respondPlan = async (

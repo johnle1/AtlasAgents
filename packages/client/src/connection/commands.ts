@@ -22,25 +22,19 @@ import type {
  *   5. In onError: rejects the Promise with the error.
  *
  * Parameters:
- *   @param {RSocket} rsocket — The live RSocket connection instance.
- *   @param {Payload} payload — The request payload with data and metadata.
+ *   @param rsocket - The live RSocket connection instance.
+ *   @param payload - The request payload with data and metadata.
  *
  * Returns:
- *   @returns {Promise<Buffer>} — The raw response bytes from the server.
+ *   @returns The raw response bytes from the server.
  *
  * @throws {Error} — When the server returns an error frame or an empty response.
- *
- * Dependencies:
- *   - RSocket.requestResponse — the underlying RSocket API.
- *
- * Dependants:
- *   - sendCommand — uses this to get raw bytes before JSON parsing.
  * </Summary>
  */
-export function requestResponseBuffer(
+export const requestResponseBuffer = (
   rsocket: RSocket,
   payload: Payload,
-): Promise<Buffer> {
+): Promise<Buffer> => {
   // ===== STEP 1: Create Promise Wrapper =====
   // Wrap RSocket's callback-based API into a Promise for async/await use
   return new Promise((resolve, reject) => {
@@ -124,27 +118,15 @@ export function requestResponseBuffer(
  *   6. Returns env.data cast to the caller's expected response type.
  *
  * Parameters:
- *   @param {RSocket} rsocket — The live RSocket connection instance.
- *   @param {string} type — Command route string e.g. "models.list", "memory.get".
- *   @param {unknown} payload — JSON-serialisable payload specific to the command.
- *   @param {Buffer} metadata — The auth metadata Buffer.
+ *   @param rsocket - The live RSocket connection instance.
+ *   @param type - Command route string e.g. "models.list", "memory.get".
+ *   @param payload - JSON-serialisable payload specific to the command.
+ *   @param metadata - The auth metadata Buffer.
  *
  * Returns:
- *   @returns {Promise<TResponse>} — The parsed data field from the server response.
+ *   @returns The parsed data field from the server response.
  *
  * @throws {Error} — When the server returns ok: false or the connection fails.
- *
- * Dependencies:
- *   - requestResponseBuffer — wraps requestResponse as a Promise.
- *
- * Dependants:
- *   - fetchModels — sends "models.list".
- *   - syncSkills — sends "skills.sync".
- *   - getMemory — sends "memory.get".
- *   - forgetMemory — sends "memory.forget".
- *   - clearMemory — sends "memory.clear".
- *   - respondConfirmation — sends "confirm.respond".
- *   - respondPlan — sends "plan.respond".
  * </Summary>
  */
 export async function sendCommand<TResponse>(
@@ -202,20 +184,13 @@ export async function sendCommand<TResponse>(
  *   3. Returns the array of model name strings.
  *
  * Parameters:
- *   @param {RSocket} rsocket — The live RSocket connection instance.
- *   @param {Buffer} metadata — The auth metadata Buffer.
+ *   @param rsocket - The live RSocket connection instance.
+ *   @param metadata - The auth metadata Buffer.
  *
  * Returns:
- *   @returns {Promise<InstalledModel[]>} — Array of model metadata.
+ *   @returns Array of model metadata.
  *
  * @throws {Error} — When the server returns an invalid response shape.
- *
- * Dependencies:
- *   - sendCommand — sends the requestResponse.
- *
- * Dependants:
- *   - fetchModels — calls this to get the full model metadata.
- *   - listModels — deprecated alias that delegates here.
  * </Summary>
  */
 export async function fetchModelsDetailed(
@@ -259,17 +234,11 @@ export async function fetchModelsDetailed(
  *   3. Returns the simplified array of model name strings.
  *
  * Parameters:
- *   @param {RSocket} rsocket — The live RSocket connection instance.
- *   @param {Buffer} metadata — The auth metadata Buffer.
+ *   @param rsocket - The live RSocket connection instance.
+ *   @param metadata - The auth metadata Buffer.
  *
  * Returns:
- *   @returns {Promise<string[]>} — Array of model names e.g. ["gemma3:4b", "gemma3:27b"].
- *
- * Dependencies:
- *   - fetchModelsDetailed — fetches the full model metadata.
- *
- * Dependants:
- *   - listModels — deprecated alias that delegates here.
+ *   @returns Array of model names e.g. ["gemma3:4b", "gemma3:27b"].
  * </Summary>
  */
 export async function fetchModels(
@@ -295,18 +264,12 @@ export async function fetchModels(
  *   1. Sends a "skills.sync" command via sendCommand with the skills array.
  *
  * Parameters:
- *   @param {RSocket} rsocket — The live RSocket connection instance.
- *   @param {Buffer} metadata — The auth metadata Buffer.
- *   @param {SkillPayload[]} skills — Array of skill objects with name and content.
+ *   @param rsocket - The live RSocket connection instance.
+ *   @param metadata - The auth metadata Buffer.
+ *   @param skills - Array of skill objects with name and content.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - sendCommand — sends the requestResponse.
- *
- * Dependants:
- *   - CommandHandler.handleSkills (sync subcommand) — calls this after reading local files.
  * </Summary>
  */
 export async function syncSkills(
@@ -329,17 +292,11 @@ export async function syncSkills(
  *   3. Returns the array of MemoryEntry objects.
  *
  * Parameters:
- *   @param {RSocket} rsocket — The live RSocket connection instance.
- *   @param {Buffer} metadata — The auth metadata Buffer.
+ *   @param rsocket - The live RSocket connection instance.
+ *   @param metadata - The auth metadata Buffer.
  *
  * Returns:
- *   @returns {Promise<MemoryEntry[]>} — Array of topics with their rules.
- *
- * Dependencies:
- *   - sendCommand — sends the requestResponse.
- *
- * Dependants:
- *   - CommandHandler.handleMemory (show subcommand) — calls this to display memory.
+ *   @returns Array of topics with their rules.
  * </Summary>
  */
 export async function getMemory(
@@ -370,18 +327,12 @@ export async function getMemory(
  *   1. Sends a "memory.forget" command via sendCommand with the topic name.
  *
  * Parameters:
- *   @param {RSocket} rsocket — The live RSocket connection instance.
- *   @param {Buffer} metadata — The auth metadata Buffer.
- *   @param {string} topic — Topic name to forget e.g. "coding-style".
+ *   @param rsocket - The live RSocket connection instance.
+ *   @param metadata - The auth metadata Buffer.
+ *   @param topic - Topic name to forget e.g. "coding-style".
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - sendCommand — sends the requestResponse.
- *
- * Dependants:
- *   - CommandHandler.handleMemory (forget subcommand) — calls this after user confirms.
  * </Summary>
  */
 export async function forgetMemory(
@@ -404,17 +355,11 @@ export async function forgetMemory(
  *   1. Sends a "memory.clear" command via sendCommand with empty payload.
  *
  * Parameters:
- *   @param {RSocket} rsocket — The live RSocket connection instance.
- *   @param {Buffer} metadata — The auth metadata Buffer.
+ *   @param rsocket - The live RSocket connection instance.
+ *   @param metadata - The auth metadata Buffer.
  *
  * Returns:
  *   void — called for side effects only.
- *
- * Dependencies:
- *   - sendCommand — sends the requestResponse.
- *
- * Dependants:
- *   - CommandHandler.handleMemory (clear subcommand) — calls this after user confirms.
  * </Summary>
  */
 export async function clearMemory(
@@ -430,45 +375,6 @@ export async function clearMemory(
 /**
  * <Summary>
  * What it does:
- *   Responds to a pending confirmation request from the server, allowing the
- *   user to approve or reject an action requiring confirmation.
- *
- * How it does it (step by step):
- *   1. Sends a "confirm.respond" command via sendCommand with the confirmation ID.
- *   2. Includes the approved boolean flag to indicate user's decision.
- *   3. Server processes the response and proceeds or cancels the pending action.
- *
- * Parameters:
- *   @param {RSocket} rsocket — The live RSocket connection instance.
- *   @param {Buffer} metadata — The auth metadata Buffer.
- *   @param {string} id — The unique confirmation ID from the server's request.
- *   @param {boolean} approved — True to approve the action, false to reject it.
- *
- * Returns:
- *   @returns {Promise<void>} — Resolves when the server acknowledges the response.
- *
- * Dependencies:
- *   - sendCommand — sends the requestResponse.
- *
- * Dependants:
- *   - CommandHandler — calls this when user responds to a confirmation prompt.
- * </Summary>
- */
-export async function respondConfirmation(
-  rsocket: RSocket,
-  metadata: Buffer,
-  id: string,
-  approved: boolean,
-): Promise<void> {
-  // ===== STEP 1: Send Confirmation Response =====
-  // Step 1a: Send "confirm.respond" command with the confirmation ID and approval flag
-  // Step 1b: Server uses this to proceed or cancel pending user confirmations
-  await sendCommand(rsocket, "confirm.respond", { id, approved }, metadata);
-}
-
-/**
- * <Summary>
- * What it does:
  *   Responds to a pending plan request from the server, allowing the user to
  *   approve, skip, or edit the proposed execution plan.
  *
@@ -479,20 +385,14 @@ export async function respondConfirmation(
  *   4. Server processes the response and proceeds with the chosen action.
  *
  * Parameters:
- *   @param {RSocket} rsocket — The live RSocket connection instance.
- *   @param {Buffer} metadata — The auth metadata Buffer.
- *   @param {string} id — The unique plan ID from the server's request.
- *   @param {string} decision — One of "implement", "skip", or "edit".
+ *   @param rsocket - The live RSocket connection instance.
+ *   @param metadata - The auth metadata Buffer.
+ *   @param id - The unique plan ID from the server's request.
+ *   @param decision - One of "implement", "skip", or "edit".
  *   @param {unknown[]} [steps] — Optional array of modified plan steps (for "edit" decision).
  *
  * Returns:
- *   @returns {Promise<void>} — Resolves when the server acknowledges the response.
- *
- * Dependencies:
- *   - sendCommand — sends the requestResponse.
- *
- * Dependants:
- *   - CommandHandler — calls this when user responds to a plan prompt.
+ *   @returns Resolves when the server acknowledges the response.
  * </Summary>
  */
 export async function respondPlan(

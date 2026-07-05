@@ -35,6 +35,16 @@ export interface SessionInfo {
   requesterId: string
 }
 
+/** Per-task model settings from the CLI (overrides server config when set). */
+export type TaskModelOverrides = {
+  advisorModel?: string
+  agentModel?: string
+  advisorTemp?: number
+  agentTemp?: number
+  /** When true, agent logs raw turns and parsed tools to stderr. */
+  debug?: boolean
+}
+
 /**
  * <Summary>
  * What it does:
@@ -95,6 +105,12 @@ export interface PlannedSubtask {
 
   /** Prerequisite subtask ids; empty means this subtask can run in the first wave. */
   dependsOn: number[]
+
+  /** Agent group id for UI and status display. */
+  agentId: number
+
+  /** Human label for the agent group (setup, implementation, etc.). */
+  agentLabel: string
 }
 
 /**
@@ -109,9 +125,45 @@ export interface PlannedSubtask {
  *   - Advisor.plan — after JSON parse and validation.
  * </Summary>
  */
+/** Shell commands parsed from advisor-think COMMAND PLAN (used for run_command classification). */
+export interface CommandPlan {
+  setupCommands: string[];
+  verifyCommands: string[];
+  runProjectCommands: string[];
+}
+
+export const emptyCommandPlan = (): CommandPlan => ({
+  setupCommands: [],
+  verifyCommands: [],
+  runProjectCommands: [],
+});
+
 export interface AdvisorPlan {
   /** Ordered list of planned subtasks (order is not execution order; dependsOn is). */
   subtasks: PlannedSubtask[]
+
+  /** Risks parsed from advisor-think VERIFY section (may be empty). */
+  risks: string[]
+
+  /** Commands for setup / verify / run-project classification (from advisor-think). */
+  commandPlan: CommandPlan
+
+  /** How subtasks run relative to each other. */
+  execution: 'parallel' | 'sequential' | 'mixed'
+
+  /** Unique agent group count in this plan. */
+  agentCount: number
+}
+
+/** User choice after viewing the plan panel (not agent execution turns). */
+export type PlanDecision = "implement" | "skip" | "edit"
+
+/**
+ * Client answer for confirm-plan. `steps` = final plan line strings (subtask descriptions).
+ */
+export type PlanReviewResponse = {
+  decision: PlanDecision
+  steps?: string[]
 }
 
 /**

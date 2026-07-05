@@ -8,16 +8,6 @@
  *   Sits between the diff generation layer (which produces DiffChunk objects)
  *   and the terminal display layer (renderer). Centralises all diff rendering
  *   logic so changes to display format only require updates to this module.
- *
- * Dependencies:
- *   - @loopycode/shared — DiffChunk, DiffDisplayLine types and getDiffDisplayLines.
- *   - themeManager — getTheme for terminal color scheme.
- *   - langDetector — detectLang for syntax highlighting language detection.
- *   - shikiHighlighter — highlightLine for syntax highlighting.
- *
- * Dependants:
- *   - LocalFileProxy — uses renderDiff for file change previews.
- *   - Renderer — uses renderDiffFromChunks for displaying edit changes.
  * </Summary>
  */
 import type { DiffChunk, DiffDisplayLine } from "@loopycode/shared";
@@ -44,17 +34,10 @@ const PRINT_WRITE_INDENT = 4;
  *   3. Returns the cleaned string.
  *
  * Parameters:
- *   @param {string} inputString — The string that may contain ANSI codes.
+ *   @param inputString - The string that may contain ANSI codes.
  *
  * Returns:
- *   @returns {string} — The string with all ANSI escape codes removed.
- *
- * Dependencies:
- *   - ANSI_ESCAPE_CODE_REGEX — pattern to match ANSI escape codes.
- *
- * Dependants:
- *   - visibleLength — uses this to calculate visible string length.
- *   - renderDiff — uses this to clean diff text before parsing.
+ *   @returns The string with all ANSI escape codes removed.
  * </Summary>
  */
 export const stripAnsi = (inputString: string): string =>
@@ -71,16 +54,10 @@ export const stripAnsi = (inputString: string): string =>
  *   2. Returns the length of the cleaned string.
  *
  * Parameters:
- *   @param {string} inputString — The string that may contain ANSI codes.
+ *   @param inputString - The string that may contain ANSI codes.
  *
  * Returns:
- *   @returns {number} — The visible character count (without ANSI codes).
- *
- * Dependencies:
- *   - stripAnsi — removes ANSI escape codes from string.
- *
- * Dependants:
- *   - padToTerminal — uses this to calculate padding needed.
+ *   @returns The visible character count (without ANSI codes).
  * </Summary>
  */
 export const visibleLength = (inputString: string): number =>
@@ -100,17 +77,11 @@ export const visibleLength = (inputString: string): number =>
  *   5. Returns the modified string with background codes injected.
  *
  * Parameters:
- *   @param {string} highlighted — The syntax-highlighted string with ANSI codes.
- *   @param {string} backgroundColor — The ANSI background color code to inject.
+ *   @param highlighted - The syntax-highlighted string with ANSI codes.
+ *   @param backgroundColor - The ANSI background color code to inject.
  *
  * Returns:
- *   @returns {string} — The string with background color codes injected.
- *
- * Dependencies:
- *   - None.
- *
- * Dependants:
- *   - renderDisplayLine — uses this to add background color to highlighted lines.
+ *   @returns The string with background color codes injected.
  * </Summary>
  */
 export const injectBackground = (
@@ -160,19 +131,10 @@ const parseLineNum = (value: string): number => {
  *   7. If no regex matches, returns null (line is not a valid diff line).
  *
  * Parameters:
- *   @param {string} line — The raw diff line to parse.
+ *   @param line - The raw diff line to parse.
  *
  * Returns:
- *   @returns {DiffDisplayLine | null} — Parsed line data, or null if not a valid diff line.
- *
- * Dependencies:
- *   - ADDED_LINE_REGEX — pattern for added lines.
- *   - REMOVED_LINE_REGEX — pattern for removed lines.
- *   - CONTEXT_LINE_REGEX — pattern for context lines.
- *
- * Dependants:
- *   - renderDiff — uses this to parse each line of raw diff text.
- *   - renderDiffFromChunks — uses this indirectly via getDiffDisplayLines.
+ *   @returns Parsed line data, or null if not a valid diff line.
  * </Summary>
  */
 export const parseDisplayLine = (line: string): DiffDisplayLine | null => {
@@ -232,18 +194,11 @@ export const parseDisplayLine = (line: string): DiffDisplayLine | null => {
  *   6. Returns the padded line.
  *
  * Parameters:
- *   @param {string} line — The line to pad.
- *   @param {number} indentCols — The number of columns used for indentation.
+ *   @param line - The line to pad.
+ *   @param indentCols - The number of columns used for indentation.
  *
  * Returns:
- *   @returns {string} — The line padded with spaces to terminal width.
- *
- * Dependencies:
- *   - getTheme — retrieves terminal color theme for reset code.
- *   - visibleLength — calculates visible character count of line.
- *
- * Dependants:
- *   - renderDisplayLine — uses this to pad lines for background coloring.
+ *   @returns The line padded with spaces to terminal width.
  * </Summary>
  */
 const padToTerminal = (line: string, indentCols: number): string => {
@@ -289,23 +244,13 @@ const padToTerminal = (line: string, indentCols: number): string => {
  *   5. Returns the rendered line string.
  *
  * Parameters:
- *   @param {DiffDisplayLine} line — The parsed diff line to render.
- *   @param {string} language — The programming language for syntax highlighting.
- *   @param {string} shikiTheme — The Shiki theme name for syntax highlighting.
- *   @param {number} indentCols — The number of columns used for indentation.
+ *   @param line - The parsed diff line to render.
+ *   @param language - The programming language for syntax highlighting.
+ *   @param shikiTheme - The Shiki theme name for syntax highlighting.
+ *   @param indentCols - The number of columns used for indentation.
  *
  * Returns:
- *   @returns {Promise<string>} — The rendered line with colors and syntax highlighting.
- *
- * Dependencies:
- *   - getTheme — retrieves terminal color scheme.
- *   - highlightLine — syntax-highlights the line text.
- *   - injectBackground — adds background color to highlighted text.
- *   - padToTerminal — pads line to terminal width.
- *
- * Dependants:
- *   - renderDiff — calls this for each parsed line in raw diff text.
- *   - renderDiffFromChunks — calls this for each line in structured diff chunks.
+ *   @returns The rendered line with colors and syntax highlighting.
  * </Summary>
  */
 const renderDisplayLine = async (
@@ -373,16 +318,10 @@ const renderDisplayLine = async (
  *   9. Returns the colored line.
  *
  * Parameters:
- *   @param {string} line — The raw diff line that couldn't be parsed.
+ *   @param line - The raw diff line that couldn't be parsed.
  *
  * Returns:
- *   @returns {string} — The line with appropriate color applied.
- *
- * Dependencies:
- *   - getTheme — retrieves terminal color scheme.
- *
- * Dependants:
- *   - renderDiff — uses this for lines that don't match diff patterns.
+ *   @returns The line with appropriate color applied.
  * </Summary>
  */
 const fallbackPlainLine = (line: string): string => {
@@ -436,20 +375,11 @@ const fallbackPlainLine = (line: string): string => {
  *   7. Returns the complete rendered diff string.
  *
  * Parameters:
- *   @param {string} filePath — The file path for language detection.
- *   @param {DiffChunk[]} chunks — Array of diff chunks to render.
+ *   @param filePath - The file path for language detection.
+ *   @param chunks - Array of diff chunks to render.
  *
  * Returns:
- *   @returns {Promise<string>} — The fully rendered diff with colors and syntax highlighting.
- *
- * Dependencies:
- *   - getDiffDisplayLines — converts chunks to display lines.
- *   - detectLang — determines programming language from file path.
- *   - getTheme — retrieves Shiki theme name.
- *   - renderDisplayLine — renders each individual line.
- *
- * Dependants:
- *   - Renderer — uses this to display edit changes in the CLI.
+ *   @returns The fully rendered diff with colors and syntax highlighting.
  * </Summary>
  */
 export const renderDiffFromChunks = async (
@@ -510,22 +440,11 @@ export const renderDiffFromChunks = async (
  *   11. Returns the complete rendered diff string.
  *
  * Parameters:
- *   @param {string} filePath — The file path for language detection.
- *   @param {string} diffText — The raw diff text string to render.
+ *   @param filePath - The file path for language detection.
+ *   @param diffText - The raw diff text string to render.
  *
  * Returns:
- *   @returns {Promise<string>} — The fully rendered diff with colors and syntax highlighting.
- *
- * Dependencies:
- *   - detectLang — determines programming language from file path.
- *   - getTheme — retrieves Shiki theme name.
- *   - stripAnsi — removes ANSI codes from diff text.
- *   - parseDisplayLine — parses individual diff lines.
- *   - renderDisplayLine — renders parsed lines with syntax highlighting.
- *   - fallbackPlainLine — renders unparsable lines with simple coloring.
- *
- * Dependants:
- *   - LocalFileProxy — uses this for file change previews before user approval.
+ *   @returns The fully rendered diff with colors and syntax highlighting.
  * </Summary>
  */
 export const renderDiff = async (

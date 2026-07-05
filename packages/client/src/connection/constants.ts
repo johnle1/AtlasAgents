@@ -1,0 +1,7 @@
+export const CONNECT_RETRY_INTERVAL_MS = 200;
+
+export const RECONNECT_BASE_DELAY_MS = 500;
+
+export const RECONNECT_MAX_DELAY_MS = 30_000;
+
+export const RECONNECT_JITTER_MAX_MS = 250;

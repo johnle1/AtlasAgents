@@ -2,631 +2,262 @@
 
 /**
  * =============================================================================
- * LoopyCode server — RSocket TCP entry
+ * LoopyCode server — RSocket TCP entry point
+ * =============================================================================
+ * This is the main entry point for the LoopyCode server. It handles:
+ * - Interactive startup prompts (password and port)
+ * - Ollama connectivity verification
+ * - Application container initialization
+ * - RSocket server startup and client connection management
  * =============================================================================
  */
 
-import * as crypto from 'node:crypto'
-import * as readline from 'node:readline'
+import * as readline from "node:readline";
+import type { RSocket } from "@rsocket/core";
+import { AuthMiddleware } from "./auth/middleware.js";
+import { ConfigError } from "./config/configManager.js";
+import { createContainer } from "./container.js";
+import { installUserDataDefaults } from "./installUserDataDefaults.js";
+import { RSocketServer } from "./server/rsocket/rsocketServer.js";
+import { ensureOllamaRunning } from "./ollama/lifecycle.js";
+import { cleanupOldSnapshots } from "./workspace/cleanup/snapshotCleanup.js";
+import { logger } from "./logger.js";
 
-import {
-  RSocketServer as RSocketServerCore,
-  type Closeable,
-  type Cancellable,
-  type OnExtensionSubscriber,
-  type OnNextSubscriber,
-  type OnTerminalSubscriber,
-  type Payload,
-  type Requestable,
-  type RSocket,
-  type SetupPayload,
-} from '@rsocket/core'
-import { TcpServerTransport } from '@rsocket/tcp-server'
-
-import { AuthMiddleware } from './auth/middleware.js'
-import { installUserDataDefaults } from './installUserDataDefaults.js'
-import { Router, type TaskRequest } from './routing/router.js'
-
-const OLLAMA_TAGS_URL = 'http://localhost:11434/api/tags'
-
-type RequestResponseResponder = OnTerminalSubscriber &
-  OnNextSubscriber &
-  OnExtensionSubscriber
-
-type RequestStreamSink = OnTerminalSubscriber &
-  OnNextSubscriber &
-  OnExtensionSubscriber
-
-type SessionRecord = { abortControllers: Set<AbortController> }
+// ===== CONSTANTS =====
+/**
+ * Ollama API endpoint for listing available models.
+ * Used to verify Ollama connectivity and retrieve model information.
+ */
+const OLLAMA_TAGS_URL = "http://localhost:11434/api/tags";
 
 /**
- * <Summary>
- * What it does:
- *   Builds a JSON Buffer matching the client CommandResponseEnvelope contract.
- *
- * Parameters:
- *   @param {boolean} ok — Whether the command succeeded.
- *   @param {unknown} [data] — Optional success payload.
- *   @param {string} [error] — Optional error message when ok is false.
- *
- * Returns:
- *   @returns {Buffer} — UTF-8 JSON bytes for one PAYLOAD frame.
- *
- * Dependencies:
- *   - Buffer.from — serialises JSON.
- *
- * Dependants:
- *   - RSocketServer.handleRequestResponse — success and failure paths.
- * </Summary>
+ * Map of active client connections by requester ID.
+ * Stores RSocket connections for each connected client to enable
+ * bidirectional communication and connection lifecycle management.
  */
-const commandResponseBuffer = (
-  ok: boolean,
-  data?: unknown,
-  error?: string,
-): Buffer => {
-  if (ok) {
-    return Buffer.from(JSON.stringify({ ok: true, data }), 'utf-8')
-  }
-  return Buffer.from(
-    JSON.stringify({ ok: false, error: error ?? 'Command failed' }),
-    'utf-8',
-  )
-}
-
-/**
- * <Summary>
- * What it does:
- *   Reads the password from UTF-8 JSON metadata `{ "password": "..." }`.
- *
- * Parameters:
- *   @param {Buffer | null | undefined} metadata — RSocket frame metadata bytes.
- *
- * Returns:
- *   @returns {string} — Raw password string from metadata, possibly empty.
- *
- * Dependencies:
- *   - JSON.parse — decodes metadata JSON.
- *
- * Dependants:
- *   - RSocketServer.handleRequestResponse, handleRequestStream.
- * </Summary>
- */
-const parsePasswordFromMetadata = (
-  metadata: Buffer | null | undefined,
-): string => {
-  if (!metadata || metadata.length === 0) {
-    return ''
-  }
-  try {
-    const parsed = JSON.parse(metadata.toString('utf-8')) as {
-      password?: unknown
-    }
-    return typeof parsed.password === 'string' ? parsed.password : ''
-  } catch {
-    return ''
-  }
-}
+const clientPeers = new Map<string, RSocket>();
 
 /**
  * <Summary>
  * What it does:
  *   Prompts for the server password with masked echo when stdin is a TTY.
  *
+ * How it does it (step by step):
+ *   1. Check if stdin is a TTY (interactive terminal).
+ *   2. If not TTY: use readline for plain text input.
+ *   3. If TTY: enable raw mode for character-by-character input.
+ *   4. Handle special keys: Enter to submit, Backspace to delete.
+ *   5. Display bullet points (•) instead of actual characters.
+ *   6. Return the collected password string.
+ *
  * Parameters:
  *   None.
  *
  * Returns:
- *   @returns {Promise<string>} — Password (may be empty for dev mode).
- *
- * Dependencies:
- *   - process.stdin, process.stdout — TTY raw read or line fallback.
- *
- * Dependants:
- *   - runServerStartupPrompts — first startup question.
+ *   @returns Password (may be empty for dev mode).
  * </Summary>
  */
 const readPasswordAtStartup = (): Promise<string> => {
-  const stdout = process.stdout
-  const stdin = process.stdin
-  stdout.write('Enter server password: ')
+  // Step 1: Get references to standard input and output streams
+  const stdout = process.stdout;
+  const stdin = process.stdin;
+
+  // Step 2: Display password prompt
+  stdout.write("Enter server password: ");
+
+  // Step 3: Check if stdin is a TTY (interactive terminal)
   if (!stdin.isTTY) {
-    return new Promise((resolve) => {
-      const rl = readline.createInterface({ input: stdin, output: stdout })
-      rl.question('', (line) => {
-        rl.close()
-        resolve(line.trimEnd())
-      })
-    })
+    // Step 3a: Non-TTY environment (e.g., piped input)
+    // Use readline interface for simple line-by-line input
+    return new Promise((resolve, reject) => {
+      const readlineInterface = readline.createInterface({
+        input: stdin,
+        output: stdout,
+      });
+      readlineInterface.question("", (inputLine) => {
+        try {
+          readlineInterface.close();
+          resolve(inputLine.trimEnd());
+        } catch (error) {
+          readlineInterface.close();
+          reject(error);
+        }
+      });
+    });
   }
-  return new Promise((resolve) => {
-    stdin.setRawMode(true)
-    stdin.resume()
-    stdin.setEncoding('utf8')
-    let pwd = ''
-    const onData = (chunk: string | Buffer) => {
-      const s = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-      for (const ch of s) {
-        const code = ch.charCodeAt(0)
-        if (ch === '\n' || ch === '\r' || code === 4) {
-          stdin.removeListener('data', onData)
-          stdin.setRawMode(false)
-          stdin.pause()
-          stdout.write('\n')
-          resolve(pwd)
-          return
-        }
-        if (code === 127 || ch === '\b') {
-          if (pwd.length > 0) {
-            pwd = pwd.slice(0, -1)
-            stdout.write('\b \b')
-          }
-          continue
-        }
-        pwd += ch
-        stdout.write('•')
+
+  // Step 4: TTY environment - use raw mode for character-by-character input
+  return new Promise((resolve, reject) => {
+    // Step 4a: Enable raw mode for direct character input
+    stdin.setRawMode(true);
+
+    // Step 4b: Resume stdin if it was paused
+    stdin.resume();
+
+    // Step 4c: Set encoding to UTF-8 for proper character handling
+    stdin.setEncoding("utf8");
+
+    // Step 4d: Initialize password accumulator
+    let password = "";
+
+    // Step 4e: Define cleanup function to restore TTY state
+    const cleanup = () => {
+      try {
+        stdin.removeListener("data", onData);
+        stdin.setRawMode(false);
+        stdin.pause();
+      } catch (e) {
+        // Ignore cleanup errors to avoid masking original error
       }
+    };
+
+    // Step 4f: Define data handler for character input
+    const onData = (chunk: string | Buffer) => {
+      try {
+        // Step 4f-1: Convert chunk to string if it's a Buffer
+        const chunkString =
+          typeof chunk === "string" ? chunk : chunk.toString("utf8");
+
+        // Step 4f-2: Process each character in the chunk
+        for (const character of chunkString) {
+          const characterCode = character.charCodeAt(0);
+
+          // Step 4f-3: Check for enter key (newline, carriage return, or Ctrl-D)
+          if (character === "\n" || character === "\r" || characterCode === 4) {
+            cleanup();
+            stdout.write("\n");
+            resolve(password);
+            return;
+          }
+
+          // Step 4f-4: Check for backspace or delete key
+          if (characterCode === 127 || character === "\b") {
+            // Step 4f-4a: Only handle backspace if password has characters
+            if (password.length > 0) {
+              // Step 4f-4b: Remove last character from password
+              password = password.slice(0, -1);
+
+              // Step 4f-4c: Move cursor back, overwrite with space, move back again
+              stdout.write("\b \b");
+            }
+            continue;
+          }
+
+          // Step 4f-5: Regular character - add to password and show bullet point
+          password += character;
+          stdout.write("•");
+        }
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    };
+
+    // Step 4g: Attach data handler to stdin with error handling
+    try {
+      stdin.on("data", onData);
+    } catch (error) {
+      cleanup();
+      reject(error);
     }
-    stdin.on('data', onData)
-  })
-}
+  });
+};
 
 /**
  * <Summary>
  * What it does:
  *   Prompts for TCP listen port with default 7000 when input is empty or invalid.
  *
+ * How it does it (step by step):
+ *   1. Ask user for port number via readline interface.
+ *   2. Trim whitespace from user input.
+ *   3. If empty: return default port 7000.
+ *   4. Parse as integer base 10.
+ *   5. Validate port is in valid range (1-65535).
+ *   6. If invalid: return default port 7000.
+ *   7. If valid: return the parsed port number.
+ *
  * Parameters:
- *   @param {readline.Interface} rl — Readline for one line of input.
+ *   @param readlineInterface - Readline for one line of input.
  *
  * Returns:
- *   @returns {Promise<number>} — Listen port in valid range.
- *
- * Dependencies:
- *   - readline.Interface.question — user input.
- *
- * Dependants:
- *   - runServerStartupPrompts — second startup question.
+ *   @returns Listen port in valid range.
  * </Summary>
  */
-const promptListenPort = (rl: readline.Interface): Promise<number> => {
+const promptListenPort = (
+  readlineInterface: readline.Interface,
+): Promise<number> => {
   return new Promise((resolve) => {
-    rl.question('Enter port (default 7000): ', (answer) => {
-      const t = answer.trim()
-      if (t.length === 0) {
-        resolve(7000)
-        return
-      }
-      const n = parseInt(t, 10)
-      if (Number.isNaN(n) || n < 1 || n > 65_535) {
-        resolve(7000)
-        return
-      }
-      resolve(n)
-    })
-  })
-}
+    // Step 1: Prompt user for port number with default value shown
+    readlineInterface.question("Enter port (default 7000): ", (answer) => {
+      // Step 2: Trim whitespace from user input
+      const trimmedAnswer = answer.trim();
 
-/**
- * @async
- * <Summary>
- * What it does:
- *   Verifies the local Ollama HTTP API responds before accepting client traffic.
- *
- * Parameters:
- *   None.
- *
- * Returns:
- *   @returns {Promise<void>} — Resolves when Ollama returns 2xx.
- *
- * @throws {Error} — When fetch fails or status is not ok.
- *
- * Dependencies:
- *   - global fetch — Node 18+ HTTP client.
- *
- * Dependants:
- *   - main — gate before RSocket bind.
- * </Summary>
- */
-const assertOllamaReachable = async (): Promise<void> => {
-  const res = await fetch(OLLAMA_TAGS_URL, { method: 'GET' })
-  if (!res.ok) {
-    throw new Error(
-      `Cannot reach Ollama at ${OLLAMA_TAGS_URL} (HTTP ${res.status})`,
-    )
-  }
-}
+      // Step 3: If input is empty, use default port 7000
+      if (trimmedAnswer.length === 0) {
+        resolve(7000);
+        return;
+      }
+
+      // Step 4: Parse input as integer (base 10)
+      const parsedPort = parseInt(trimmedAnswer, 10);
+
+      // Step 5: Validate port is within valid range (1-65535)
+      if (Number.isNaN(parsedPort) || parsedPort < 1 || parsedPort > 65_535) {
+        // Step 5a: Invalid port - use default
+        resolve(7000);
+        return;
+      }
+
+      // Step 6: Valid port - return parsed value
+      resolve(parsedPort);
+    });
+  });
+};
 
 /**
  * <Summary>
  * What it does:
  *   Runs password prompt, port prompt, and returns both values for server boot.
  *
+ * How it does it (step by step):
+ *   1. Prompt for server password using masked input.
+ *   2. Create readline interface for port prompt.
+ *   3. Prompt for TCP port number.
+ *   4. Return both values as configuration object.
+ *   5. Ensure readline interface is closed in finally block.
+ *
  * Parameters:
  *   None.
  *
  * Returns:
- *   @returns {Promise<{ password: string; port: number }>} — Startup answers.
- *
- * Dependencies:
- *   - readPasswordAtStartup, readline.createInterface, promptListenPort.
- *
- * Dependants:
- *   - main — composes AuthMiddleware and RSocketServer.
+ *   @returns Startup answers.
  * </Summary>
  */
 const runServerStartupPrompts = async (): Promise<{
-  password: string
-  port: number
+  password: string;
+  port: number;
 }> => {
-  const password = await readPasswordAtStartup()
-  const rl = readline.createInterface({
+  // Step 1: Prompt for server password with masked input
+  const password = await readPasswordAtStartup();
+
+  // Step 2: Create readline interface for port prompt
+  const readlineInterface = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-  })
+  });
+
   try {
-    const port = await promptListenPort(rl)
-    return { password, port }
+    // Step 3: Prompt for TCP port number
+    const port = await promptListenPort(readlineInterface);
+
+    // Step 4: Return both configuration values
+    return { password, port };
   } finally {
-    rl.close()
+    // Step 5: Ensure readline interface is properly closed
+    readlineInterface.close();
   }
-}
-
-/**
- * <Summary>
- * What it does:
- *   Listens on a chosen TCP port, authenticates per-frame metadata password,
- *   routes commands and tasks through Router, and aborts work on disconnect.
- *
- * How it fits in the system:
- *   Server entry for all LoopyCode CLI traffic over RSocket.
- *
- * Dependencies:
- *   - RSocketServerCore, TcpServerTransport — protocol stack.
- *   - AuthMiddleware — password validation.
- *   - Router — command and task dispatch.
- *
- * Dependants:
- *   - main — constructs and starts one instance by default.
- * </Summary>
- */
-class RSocketServer {
-  private closeable: Closeable | null = null
-
-  private readonly activeSessions = new Map<string, SessionRecord>()
-
-  /**
-   * @param {number} port — TCP listen port.
-   * @param {AuthMiddleware} auth — Validates metadata password.
-   * @param {Router} router — Stateless command/task router.
-   */
-  constructor(
-    private readonly port: number,
-    private readonly auth: AuthMiddleware,
-    private readonly router: Router,
-  ) {}
-
-  /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Binds TcpServerTransport and RSocketServerCore until stop() is called.
-   *
- * Parameters:
- *   None.
- *
- * Returns:
- *   @returns {Promise<void>} — Resolves when the socket is listening.
- *
- * Dependencies:
- *   - TcpServerTransport, RSocketServerCore.bind — network stack.
- *
- * Dependants:
- *   - main — awaits on server startup.
- * </Summary>
-   */
-  start = async (): Promise<void> => {
-    const transport = new TcpServerTransport({
-      listenOptions: { host: '0.0.0.0', port: this.port },
-    })
-    const core = new RSocketServerCore({
-      transport,
-      acceptor: { accept: this.onAccept },
-    })
-    this.closeable = await core.bind()
-  }
-
-  /**
-   * <Summary>
-   * What it does:
-   *   Closes the bound TCP server handle if present.
-   *
- * Parameters:
- *   None.
- *
- * Returns:
- *   void — called for side effects only.
- *
- * Dependencies:
- *   - Closeable.close — shuts down the listener.
- *
- * Dependants:
- *   - None (available for graceful shutdown hooks).
- * </Summary>
-   */
-  stop = (): void => {
-    this.closeable?.close()
-    this.closeable = null
-  }
-
-  /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Registers a new logical session after SETUP and returns server-side
-   *   requestResponse/requestStream handlers for that TCP connection.
-   *
- * How it does it (step by step):
- *   1. Allocates a random requesterId and an abort-controller set.
- *   2. Stores the session in activeSessions.
- *   3. Subscribes remotePeer.onClose to abort all controllers and delete the session.
- *   4. Returns Partial<RSocket> with requestResponse and requestStream methods.
- *
- * Parameters:
- *   @param {SetupPayload} _setup — RSocket SETUP payload (unused; auth is per-frame).
- *   @param {RSocket} remotePeer — Client-side socket abstraction for lifecycle hooks.
- *
- * Returns:
- *   @returns {Promise<Partial<RSocket>>} — Responder implementation for this peer.
- *
- * Dependencies:
- *   - crypto.randomUUID — session id entropy.
- *   - RSocket.onClose — disconnect detection.
- *
- * Dependants:
- *   - RSocketServerCore — invokes from acceptor during SETUP.
- * </Summary>
-   */
-  private onAccept = async (
-    _setup: SetupPayload,
-    remotePeer: RSocket,
-  ): Promise<Partial<RSocket>> => {
-    const requesterId = crypto.randomUUID()
-    const record: SessionRecord = { abortControllers: new Set() }
-    this.activeSessions.set(requesterId, record)
-
-    remotePeer.onClose(() => {
-      for (const ac of record.abortControllers) {
-        ac.abort()
-      }
-      this.activeSessions.delete(requesterId)
-    })
-
-    return {
-      requestResponse: (payload, responderStream) =>
-        this.handleRequestResponse(requesterId, payload, responderStream),
-      requestStream: (payload, initialN, responderStream) =>
-        this.handleRequestStream(
-          requesterId,
-          record,
-          payload,
-          initialN,
-          responderStream,
-        ),
-    }
-  }
-
-  /**
-   * <Summary>
-   * What it does:
-   *   Handles one requestResponse command frame: auth, parse envelope, route.
-   *
- * Parameters:
- *   @param {string} requesterId — Session key for this connection.
- *   @param {Payload} payload — Incoming RSocket payload + metadata.
- *   @param {RequestResponseResponder} responderStream — server→client sink.
- *
- * Returns:
- *   @returns {Cancellable & OnExtensionSubscriber} — RSocket cancellable handle.
- *
- * Dependencies:
- *   - parsePasswordFromMetadata, AuthMiddleware.validate — auth gate.
- *   - Router.routeCommand — domain dispatch.
- *   - commandResponseBuffer — JSON envelope encoding.
- *
- * Dependants:
- *   - Partial<RSocket>.requestResponse — wired from onAccept.
- * </Summary>
-   */
-  private handleRequestResponse = (
-    requesterId: string,
-    payload: Payload,
-    responderStream: RequestResponseResponder,
-  ): Cancellable & OnExtensionSubscriber => {
-    void this.runRequestResponse(requesterId, payload, responderStream)
-    return {
-      cancel: () => {},
-      onExtension: () => {},
-    }
-  }
-
-  /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Async body for handleRequestResponse: validates, routes, sends one PAYLOAD.
-   *
- * Parameters:
- *   @param {string} requesterId — Session id passed into Router.Session.
- *   @param {Payload} payload — Incoming frame.
- *   @param {RequestResponseResponder} stream — sink for one JSON response.
- *
- * Returns:
- *   @returns {Promise<void>} — Completes after onNext(..., true) or error path.
- *
- * Dependencies:
- *   - Router.routeCommand — throws on unknown or unwired routes.
- *
- * Dependants:
- *   - handleRequestResponse — schedules this as a microtask.
- * </Summary>
-   */
-  private runRequestResponse = async (
-    requesterId: string,
-    payload: Payload,
-    stream: RequestResponseResponder,
-  ): Promise<void> => {
-    const incoming = parsePasswordFromMetadata(payload.metadata)
-    const userId = this.auth.validate(incoming)
-    if (userId === null) {
-      stream.onNext(
-        { data: commandResponseBuffer(false, undefined, 'Unauthorized') },
-        true,
-      )
-      return
-    }
-    try {
-      const raw = payload.data?.toString('utf-8') ?? '{}'
-      const body = JSON.parse(raw) as {
-        kind?: string
-        type?: string
-        payload?: unknown
-      }
-      if (body.kind !== 'command') {
-        stream.onNext(
-          {
-            data: commandResponseBuffer(
-              false,
-              undefined,
-              'Expected kind "command"',
-            ),
-          },
-          true,
-        )
-        return
-      }
-      const session = { userId, requesterId }
-      const data = await this.router.routeCommand(
-        session,
-        String(body.type),
-        body.payload,
-      )
-      stream.onNext({ data: commandResponseBuffer(true, data) }, true)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      stream.onNext({ data: commandResponseBuffer(false, undefined, message) }, true)
-    }
-  }
-
-  /**
-   * <Summary>
-   * What it does:
-   *   Handles one requestStream task: auth, parse task JSON, Router.routeTask.
-   *
- * Parameters:
- *   @param {string} requesterId — Session id for Router.Session.
- *   @param {SessionRecord} record — Mutable set of in-flight AbortControllers.
- *   @param {Payload} payload — Initial request payload + metadata.
- *   @param {number} _initialN — Initial request-n (handled by core for credit).
- *   @param {RequestStreamSink} responderStream — token stream sink.
- *
- * Returns:
- *   @returns {Requestable & Cancellable & OnExtensionSubscriber} — RSocket stream handle.
- *
- * Dependencies:
- *   - AbortController — propagates disconnect/cancel to routeTask.
- *   - Router.routeTask — streams advisor/agent tokens.
- *
- * Dependants:
- *   - Partial<RSocket>.requestStream — wired from onAccept.
- * </Summary>
-   */
-  private handleRequestStream = (
-    requesterId: string,
-    record: SessionRecord,
-    payload: Payload,
-    _initialN: number,
-    responderStream: RequestStreamSink,
-  ): Requestable & Cancellable & OnExtensionSubscriber => {
-    const incoming = parsePasswordFromMetadata(payload.metadata)
-    const userId = this.auth.validate(incoming)
-    if (userId === null) {
-      responderStream.onError(new Error('Unauthorized'))
-      return {
-        request: () => {},
-        cancel: () => {},
-        onExtension: () => {},
-      }
-    }
-
-    let parsed: {
-      kind?: string
-      text?: string
-      advisorModel?: string
-      agentModel?: string
-      advisorTemp?: number
-      agentTemp?: number
-    }
-    try {
-      parsed = JSON.parse(payload.data?.toString('utf-8') ?? '{}') as typeof parsed
-    } catch {
-      responderStream.onError(new Error('Invalid task JSON'))
-      return {
-        request: () => {},
-        cancel: () => {},
-        onExtension: () => {},
-      }
-    }
-
-    if (parsed.kind !== 'task') {
-      responderStream.onError(new Error('Expected kind "task"'))
-      return {
-        request: () => {},
-        cancel: () => {},
-        onExtension: () => {},
-      }
-    }
-
-    const ac = new AbortController()
-    record.abortControllers.add(ac)
-
-    const session = { userId, requesterId }
-    const req: TaskRequest = {
-      text: String(parsed.text ?? ''),
-      advisorModel: String(parsed.advisorModel ?? ''),
-      agentModel: String(parsed.agentModel ?? ''),
-      advisorTemp: Number(parsed.advisorTemp ?? 0),
-      agentTemp: Number(parsed.agentTemp ?? 0),
-    }
-
-    void (async () => {
-      try {
-        await this.router.routeTask(
-          session,
-          req,
-          (chunk) => {
-            responderStream.onNext({ data: Buffer.from(chunk, 'utf-8') }, false)
-          },
-          ac.signal,
-        )
-        responderStream.onComplete()
-      } catch (err) {
-        responderStream.onError(
-          err instanceof Error ? err : new Error(String(err)),
-        )
-      } finally {
-        record.abortControllers.delete(ac)
-      }
-    })()
-
-    return {
-      request: () => {},
-      cancel: () => {
-        ac.abort()
-      },
-      onExtension: () => {},
-    }
-  }
-}
+};
 
 /**
  * @async
@@ -635,56 +266,205 @@ class RSocketServer {
  *   Entry point: optional help, else interactive startup prompts, Ollama check,
  *   then RSocket server bind.
  *
+ * How it does it (step by step):
+ *   1. Parse command line arguments for help flag or unknown commands.
+ *   2. Run interactive prompts for password and port.
+ *   3. Install default user data and configuration.
+ *   4. Verify Ollama service is running and accessible.
+ *   5. Initialize authentication middleware with password.
+ *   6. Create application container with all services.
+ *   7. Clean up old workspace snapshots.
+ *   8. Schedule periodic memory consolidation.
+ *   9. Verify Ollama has models installed.
+ *   10. Check advisor and agent model configuration.
+ *   11. Build request router with all handlers.
+ *   12. Create and start RSocket server.
+ *   13. Log successful startup and wait for connections.
+ *
  * Parameters:
  *   None.
  *
  * Returns:
- *   @returns {Promise<void>} — Runs until SIGINT or process exit.
- *
- * Dependencies:
- *   - runServerStartupPrompts, assertOllamaReachable, AuthMiddleware, Router, RSocketServer.
- *
- * Dependants:
- *   - Node bootstrap — invoked at process startup.
+ *   @returns Runs until SIGINT or process exit.
  * </Summary>
  */
 const main = async (): Promise<void> => {
-  const argv = process.argv.slice(2)
+  // ===== COMMAND LINE ARGUMENT PARSING =====
+  // Step 1: Get command line arguments (excluding node executable and script path)
+  const commandLineArgs = process.argv.slice(2);
 
-  if (argv[0] === 'help' || argv[0] === '--help' || argv[0] === '-h') {
-    console.log(`Usage:
-  loopy-server [start]     Interactive startup, then listen for RSocket clients`)
-    return
+  // Step 2: Check for help flag
+  if (
+    commandLineArgs[0] === "help" ||
+    commandLineArgs[0] === "--help" ||
+    commandLineArgs[0] === "-h"
+  ) {
+    logger.info(`Usage:
+  loopy-server [start]     Interactive startup, then listen for RSocket clients`);
+    return;
   }
 
-  if (argv[0] !== undefined && argv[0] !== '' && argv[0] !== 'start') {
-    console.error(`Unknown command: ${argv[0]}. Try: loopy-server help`)
-    process.exit(1)
+  // Step 3: Validate command is either empty, "start", or undefined
+  if (
+    commandLineArgs[0] !== undefined &&
+    commandLineArgs[0] !== "" &&
+    commandLineArgs[0] !== "start"
+  ) {
+    logger.error(
+      `Unknown command: ${commandLineArgs[0]}. Try: loopy-server help`,
+    );
+    process.exit(1);
   }
 
-  const { password, port } = await runServerStartupPrompts()
+  // ===== INTERACTIVE STARTUP PROMPTS =====
+  // Step 4: Prompt user for server password and port
+  const { password, port } = await runServerStartupPrompts();
 
-  await installUserDataDefaults(process.cwd())
+  // ===== DATA INITIALIZATION =====
+  // Step 5: Install default user data and configuration files
+  await installUserDataDefaults(process.cwd());
 
-  process.stdout.write(`Connecting to Ollama at ${OLLAMA_TAGS_URL}...`)
+  // ===== OLLAMA CONNECTIVITY CHECK =====
+  // Step 6: Extract Ollama base URL from tags endpoint
+  const ollamaBaseUrl = OLLAMA_TAGS_URL.replace(/\/api\/tags$/, "");
+
+  // Step 7: Display connection message
+  process.stdout.write(`Connecting to Ollama at ${ollamaBaseUrl}...`);
+
   try {
-    await assertOllamaReachable()
-  } catch (err) {
-    process.stdout.write('\n')
-    console.error(err instanceof Error ? err.message : err)
-    process.exit(1)
+    // Step 8: Ensure Ollama service is running
+    const ollamaLifecycle = await ensureOllamaRunning(OLLAMA_TAGS_URL);
+
+    // Step 9: Check if server started Ollama (vs. already running)
+    if (ollamaLifecycle.startedByServer) {
+      process.stdout.write(" started");
+    }
+  } catch (error) {
+    // Step 10: Handle Ollama connection failure
+    process.stdout.write("\n");
+    logger.error(error instanceof Error ? error.message : error);
+    process.exit(1);
   }
-  console.log(' ✓')
 
-  const auth = new AuthMiddleware(password)
-  const router = new Router({})
-  const server = new RSocketServer(port, auth, router)
-  await server.start()
-  console.log(`Server started on port ${port}`)
-  console.log('Waiting for connections...')
-}
+  // Step 11: Confirm successful Ollama connection
+  process.stdout.write(" ✓\n");
 
-void main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+  // ===== AUTHENTICATION SETUP =====
+  // Step 12: Initialize authentication middleware with user-provided password
+  const auth = new AuthMiddleware(password);
+
+  // ===== APPLICATION CONTAINER CREATION =====
+  // Step 13: Create application container with all required services
+  const app = createContainer({
+    dataRoot: process.cwd(),
+    workspaceRoot: process.cwd(),
+    ollamaBaseUrl: OLLAMA_TAGS_URL.replace(/\/api\/tags$/, ""),
+    getClientPeer: (requesterId) => clientPeers.get(requesterId),
+  });
+
+  // Step 14: Configure Ollama client timeout from configuration
+  app.ollama.setTimeoutMs(await app.config.getTimeout());
+
+  // ===== WORKSPACE CLEANUP =====
+  // Step 15: Remove old workspace snapshots (older than 24 hours)
+  const removedSnapshotsCount = await cleanupOldSnapshots(process.cwd());
+  if (removedSnapshotsCount > 0) {
+    logger.info(
+      `Cleaned up ${removedSnapshotsCount} snapshot(s) older than 24h`,
+    );
+  }
+
+  // ===== MEMORY CONSOLIDATION SCHEDULING =====
+  // Step 16: Schedule periodic memory consolidation tasks
+  app.scheduleConsolidation();
+
+  // ===== OLLAMA MODEL VERIFICATION =====
+  // Step 17: List installed Ollama models
+  const installedModels = await app.ollama.listModels();
+
+  // Step 18: Ensure at least one model is installed
+  if (installedModels.length === 0) {
+    logger.error("No models installed. Run: ollama pull <modelname>");
+    process.exit(1);
+  }
+
+  // ===== ADVISOR MODEL CONFIGURATION CHECK =====
+  // Step 19: Verify advisor model is configured
+  try {
+    await app.config.getAdvisorModel();
+  } catch (error) {
+    // Step 20: Handle missing advisor model configuration
+    if (error instanceof ConfigError) {
+      logger.warn(
+        "No advisor model configured. Connect a client and run /set advisor",
+      );
+    } else {
+      throw error;
+    }
+  }
+
+  // ===== AGENT MODEL CONFIGURATION CHECK =====
+  // Step 21: Verify agent model is configured
+  try {
+    await app.config.getAgentModel();
+  } catch (error) {
+    // Step 22: Handle missing agent model configuration
+    if (error instanceof ConfigError) {
+      logger.warn(
+        "No agent model configured. Connect a client and run /set agent",
+      );
+    } else {
+      throw error;
+    }
+  }
+
+  // ===== ROUTER CREATION =====
+  // Step 23: Build request router with all command and stream handlers
+  const router = app.buildRouter();
+
+  // ===== RSOCKET SERVER CREATION =====
+  // Step 24: Create RSocket server with connection cleanup callback
+  const server = new RSocketServer(
+    port,
+    auth,
+    router,
+    // Connection cleanup callback
+    (requesterId) => {
+      // Step 24a: Get per-connection resources for this requester
+      const perConnection = app.brokerByRequester.get(requesterId);
+
+      // Step 24b: If connection exists, clean up resources
+      if (perConnection) {
+        // Step 24b-1: Dispose plan broker resources
+        perConnection.planBroker.dispose();
+
+        // Step 24b-2: Dispose workspace manager resources
+        perConnection.workspace.dispose();
+
+        // Step 24b-3: Dispose terminal executor resources
+        perConnection.terminal.dispose();
+
+        // Step 24b-4: Remove connection from active connections map
+        app.brokerByRequester.delete(requesterId);
+      }
+    },
+    clientPeers,
+  );
+
+  // ===== SERVER STARTUP =====
+  // Step 25: Start the RSocket server
+  await server.start();
+
+  // Step 26: Log successful startup
+  logger.info(`Server started on port ${port}`);
+  logger.info("Waiting for connections...");
+};
+
+// ===== ERROR HANDLING =====
+// Global error handler for the main function
+// Catches any unhandled errors during server startup or operation
+// Logs the error and exits with failure code
+void main().catch((error) => {
+  logger.error(error);
+  process.exit(1);
+});

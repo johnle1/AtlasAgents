@@ -6,13 +6,7 @@
  *
  * How it fits in the system:
  *   Used by ExperienceRecorder (writes) and PatternExtractor (reads).
- *
- * Dependencies:
- *   None.
- *
- * Dependants:
- *   - experienceRecorder.ts, patternExtractor.ts — record lifecycle.
- *   - orchestration/interfaces.ts — re-exports for IExperienceRecorder.
+ 
  * </Summary>
  */
 
@@ -133,13 +127,28 @@ export interface UserEditEntry {
 /**
  * <Summary>
  * What it does:
- *   Opaque session summary blob appended to session storage on task finish.
+ *   Session summary passed to SessionManager.append on task finish.
+ *   ExperienceRecorder builds this from the ExperienceRecord when not supplied.
  *
  * Used by:
- *   - ExperienceRecorder.finish — optional argument.
+ *   - ExperienceRecorder.finish — built from record or caller override.
+ *   - SessionManager.append — formats markdown block.
  * </Summary>
  */
 export interface SessionSummary {
+  /** User task description for the session block header. */
+  task?: string;
+
+  /** Paths of files written during the task. */
+  filesWritten?: string[];
+
+  /** Command strings executed during the task. */
+  commandsRun?: string[];
+
+  /** Task outcome label (success | partial | failure). */
+  outcome?: TaskOutcome | string;
+
+  /** Additional fields for forward compatibility. */
   [key: string]: unknown;
 }
 

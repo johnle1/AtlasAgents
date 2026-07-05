@@ -7,14 +7,6 @@
  * How it fits in the system:
  *   Single import path (`connection/index.js`) for all server transport types
  *   and the Connection facade. Keeps internal split files private.
- *
- * Dependencies:
- *   - connection/connection.ts — Connection class.
- *   - connection/types.ts — MemoryEntry, SkillPayload, ConnectionStatus, etc.
- *   - frames.ts — TaskFrame, PullProgress re-exports.
- *
- * Dependants:
- *   - index.ts, commands/*, ui/*, skills.ts, renderer.ts — import from here.
  * </Summary>
  */
 

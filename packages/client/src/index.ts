@@ -61,18 +61,6 @@ import { runInkApp } from "./ui/bootstrap/index.js";
  *
  * Throws:
  *   @throws {Error} — Uncaught errors are caught by the top-level catch block.
- *
- * Dependencies:
- *   - cliArgs.parseCliArgs — parses command-line arguments.
- *   - cliArgs.printCliHelp — displays help text.
- *   - theme/themeManager.loadTheme — loads terminal colors.
- *   - diff/shikiHighlighter.initShiki — initializes syntax highlighting.
- *   - config.ensureDirs — creates config directory.
- *   - config.hasConfigFile — checks if config exists.
- *   - ui/bootstrap/index.js.runInkApp — launches the application.
- *
- * Dependants:
- *   None (entry point).
  * </Summary>
  */
 const main = async (): Promise<void> => {
@@ -101,7 +89,12 @@ const main = async (): Promise<void> => {
 
   // Step 3b: Initialize Shiki syntax highlighter for code diffs
   // Step 3c: Don't block startup if Shiki fails (fallback to plain text)
-  initShiki().catch(() => {});
+  initShiki().catch((err) => {
+    console.warn(
+      "Warning: Failed to initialize syntax highlighting. Code diffs will display in plain text.",
+    );
+    console.warn("Error:", err instanceof Error ? err.message : String(err));
+  });
 
   // ===== STEP 4: Ensure Config Directory Exists =====
   // Step 4a: Create config directory if it doesn't exist
