@@ -22,6 +22,14 @@
  *   - Skill synchronization
  *   - Ink TUI launch
  *
+ * Dependencies:
+ *   - config.js — config directory and file existence checks
+ *   - diff/shikiHighlighter — syntax highlighting initialization
+ *   - theme/themeManager — terminal color theme loading
+ *   - cliArgs — CLI argument parsing
+ *   - ui/bootstrap/index.js — main application bootstrap logic
+ *
+ * Dependants:
  *   None (entry point).
  * </Summary>
  */
@@ -49,7 +57,7 @@ import { runInkApp } from "./ui/bootstrap/index.js";
  *   7. Delegates to bootstrap module with CLI overrides and setup flag.
  *
  * Returns:
- *   @returns Resolves when the application exits.
+ *   @returns {Promise<void>} — Resolves when the application exits.
  *
  * Throws:
  *   @throws {Error} — Uncaught errors are caught by the top-level catch block.
@@ -116,6 +124,10 @@ const main = async (): Promise<void> => {
  *   3. Logs the error to stderr.
  *   4. Exits the process with error code 1.
  *
+ * Dependencies:
+ *   - main — the main application entry point.
+ *
+ * Dependants:
  *   None (top-level error handler).
  * </Summary>
  */

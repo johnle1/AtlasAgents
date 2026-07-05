@@ -1,231 +1,159 @@
 /**
- * <Summary>
- * What it represents:
- *   One directory entry that can be expanded, tracking its path and nesting depth.
+ * Tracks directories shown in file listings so the user can expand them with Ctrl+O.
  *
- * Used by:
- *   - pushListDir() — creates entries and adds to stack.
- *   - peekUnexpanded() — returns unexpanded entries.
- *   - File list rendering — uses indent to determine visual nesting level.
+ * @remarks
+ * When the client prints a directory tree (via `list` / `listStructure`), each
+ * listed directory is registered with {@link pushListDir}. The user can press
+ * **Ctrl+O** to expand the most recently listed directory that has not yet
+ * been expanded; {@link peekUnexpanded} returns that candidate.
  *
- * Properties explain:
- *   - absolutePath: Full path to the directory (e.g., "/Users/john/project/src").
- *   - indent: How many levels deep this directory is (0 = root, 1 = child, etc).
- * </Summary>
+ * State is module-scoped and in-memory — call {@link clearExpandState} when
+ * starting a fresh listing so stale paths are not offered for expansion.
+ *
+ * @example
+ * ```ts
+ * clearExpandState();
+ * pushListDir("/workspace/src", 0);
+ * pushListDir("/workspace/src/utils", 4);
+ *
+ * const next = peekUnexpanded();
+ * if (next.found && next.entry) {
+ *   await expandDirectory(next.entry.absolutePath, next.entry.indent);
+ *   markExpanded(next.entry.absolutePath);
+ * }
+ * ```
+ */
+
+/**
+ * One directory entry eligible for interactive expansion.
+ *
+ * @remarks
+ * `indent` matches the column offset used when rendering the listing so
+ * expanded children align with their parent row.
  */
 export type ListExpandEntry = {
+  /** Absolute path to the directory on disk. */
   absolutePath: string;
+
+  /**
+   * Visual nesting depth in the rendered listing (`0` = root of the listing).
+   *
+   * @remarks
+   * Indent is measured in spaces, not directory depth — nested rows use
+   * larger values (e.g. `4`, `8`) to match renderer padding.
+   */
   indent: number;
 };
 
-// ===== MODULE STATE =====
-// Step A: Create stack to track directories in order they were listed
-// LIFO structure: most recent directory at top of stack (highest index)
-// Example: ["/root", "/root/src", "/root/src/utils"]
+/** Directories in listing order; the last push is the newest candidate. */
 const stack: ListExpandEntry[] = [];
 
-// Step B: Create set to track which directories have been expanded
-// Fast O(1) lookup to check if a directory is already expanded
-// Example: {"/root", "/root/src"}
+/** Paths the user has already expanded via Ctrl+O. */
 const expanded = new Set<string>();
 
 /**
- * <Summary>
- * What it does:
- *   Adds a directory to the stack of expandable directories so it can later
- *   be expanded by the user with Ctrl+O.
+ * Registers a directory from a file listing for possible Ctrl+O expansion.
  *
- * How it does it (step by step):
- *   1. Create a new ListExpandEntry with the provided path and indent level.
- *   2. Add this entry to the end of the stack array (LIFO order).
- *   3. Stack now remembers this directory for potential expansion.
+ * @remarks
+ * Each call appends to an internal stack. {@link peekUnexpanded} scans from
+ * newest to oldest and skips paths in {@link markExpanded}.
  *
- * Parameters:
- *   @param absolutePath - Full path to the directory (e.g., "/home/user/project").
- *   @param indent - Optional nesting depth (default 0 for root level).
+ * @param absolutePath - Full path to the directory that was printed.
+ * @param indent - Column offset for nested rendering. Defaults to `0`.
  *
- * Returns:
- *   void — called for side effects only (modifies internal stack).
- * </Summary>
+ * @example
+ * ```ts
+ * pushListDir("/home/user/project/src", 0);
+ * pushListDir("/home/user/project/src/lib", 4);
+ * ```
  */
 export const pushListDir = (absolutePath: string, indent = 0): void => {
-  // ===== STEP 1: Create Entry =====
-  // Step 1a: Build new ListExpandEntry with path and indent
-  const entry: ListExpandEntry = { absolutePath, indent };
-
-  // ===== STEP 2: Add to Stack =====
-  // Step 2a: Push entry to end of stack array
-  // This preserves order: newest directory is at highest index
-  stack.push(entry);
-
-  // ===== STEP 3: Complete =====
-  // Step 3a: Entry is now available for expansion
-  // User can press Ctrl+O to expand the most recent unexpanded directory
+  stack.push({ absolutePath, indent });
 };
 
 /**
- * <Summary>
- * What it does:
- *   Marks a directory as expanded so it won't be selected again by Ctrl+O.
+ * Marks a directory as expanded so Ctrl+O will not select it again.
  *
- * How it does it (step by step):
- *   1. Add the directory path to the expanded set.
- *   2. Expanded set now remembers this directory is no longer eligible for expansion.
- *   3. Future Ctrl+O commands will skip over expanded directories.
+ * @param absolutePath - Path previously returned by {@link peekUnexpanded}.
  *
- * Parameters:
- *   @param absolutePath - Full path to the directory to mark as expanded.
- *
- * Returns:
- *   void — called for side effects only (modifies expanded set).
- * </Summary>
+ * @example
+ * ```ts
+ * markExpanded("/home/user/project/src");
+ * ```
  */
 export const markExpanded = (absolutePath: string): void => {
-  // ===== STEP 1: Add to Expanded Set =====
-  // Step 1a: Add path to the expanded Set
-  // Set automatically handles duplicates (no error if already added)
   expanded.add(absolutePath);
-
-  // ===== STEP 2: Mark as No Longer Expandable =====
-  // Step 2a: This directory is now in the expanded set
-  // Future calls to peekUnexpanded() will skip it
 };
 
 /**
- * <Summary>
- * What it does:
- *   Checks if a directory has already been expanded by the user.
+ * Returns whether a directory has already been expanded.
  *
- * How it does it (step by step):
- *   1. Check if the directory path exists in the expanded set.
- *   2. Return true if found, false if not found.
- *
- * Parameters:
- *   @param absolutePath - Full path to the directory to check.
- *
- * Returns:
- *   @returns true if expanded, false if not yet expanded.
- *
- * Performance:
- *   - O(1) lookup using Set (constant time, very fast).
- * </Summary>
+ * @param absolutePath - Path to check.
+ * @returns `true` if {@link markExpanded} was called for this path.
  */
 export const isExpanded = (absolutePath: string): boolean =>
-  // ===== STEP 1: Check Set Membership =====
-  // Step 1a: Use Set.has() for O(1) fast lookup
-  // Returns true if path is in expanded set, false otherwise
   expanded.has(absolutePath);
 
 /**
- * <Summary>
- * What it does:
- *   Returns the most recent directory from the stack that hasn't been
- *   expanded yet, wrapped in a result object for safe, explicit handling.
+ * Returns the newest listed directory that has not yet been expanded.
  *
- * How it does it (step by step):
- *   1. Start at the end of the stack (most recently added directory).
- *   2. Loop backwards through the stack towards the beginning.
- *   3. For each directory, check if it's in the expanded set.
- *   4. If NOT expanded, return result object with found=true and the entry.
- *   5. If ALL directories are expanded, return result with found=false.
+ * @remarks
+ * Scans the internal stack from end to start (LIFO) and returns the first
+ * entry whose path is absent from the expanded set. The `found` discriminant
+ * lets callers narrow `entry` without optional chaining on `undefined`.
  *
- * Parameters:
- *   None.
+ * @returns A result object. When `found` is `true`, `entry` is defined.
+ *   When `found` is `false`, every stacked directory is expanded or the
+ *   stack is empty.
  *
- * Returns:
- *   @returns Result object
- *     where found=true means entry contains the unexpanded directory,
- *     and found=false means no more directories to expand (entry omitted).
+ * @example
+ * ```ts
+ * const result = peekUnexpanded();
+ * if (result.found && result.entry) {
+ *   await fileProxy.expandDirectory(
+ *     result.entry.absolutePath,
+ *     result.entry.indent,
+ *   );
+ * }
+ * ```
  *
- * Result Object Behavior:
- *   - { found: true, entry: {...} } — Most recent unexpanded directory found.
- *   - { found: false } — All directories already expanded or stack is empty.
- *   - Caller MUST check .found before accessing .entry (TypeScript enforces this).
- *
- * LIFO Behavior:
- *   - Scans from newest (end) to oldest (start) of stack.
- *   - Returns first unexpanded found (guarantees most recent).
- *   - Example: stack=[A, B, C], expanded={A, B} → { found: true, entry: C }.
- *   - Example: stack=[A, B, C], expanded={A, B, C} → { found: false }.
- *
- * Use Case:
- *   - Called when user presses Ctrl+O to find next directory to expand.
- *   - Caller checks .found property to decide if expansion is possible.
- *   - If found=false, Ctrl+O can show message or do nothing safely.
- *
- * Safety Benefits:
- *   - No forgotten null checks (TypeScript requires checking .found).
- *   - Explicit success/failure semantic (found boolean is clear).
- *   - Optional .entry prevents accidental undefined access.
- * </Summary>
+ * @example <caption>No directories left to expand</caption>
+ * ```ts
+ * const result = peekUnexpanded();
+ * if (!result.found) {
+ *    All listed directories are expanded or none were pushed.
+ * }
+ * ```
  */
 export const peekUnexpanded = (): {
   found: boolean;
   entry?: ListExpandEntry;
 } => {
-  // ===== STEP 1: Scan Stack from End to Start =====
-  // Step 1a: Loop from highest index down to 0 (newest to oldest)
-  // Decrement by 1 each iteration (backwards scan)
+  // Newest listings are at the end — walk backwards for the latest candidate.
   for (let i = stack.length - 1; i >= 0; i -= 1) {
-    // ===== STEP 2: Get Entry at Current Position =====
-    // Step 2a: Retrieve entry from stack at index i
     const entry = stack[i];
-
-    // Step 2b: Defensive check: skip if entry is undefined (shouldn't happen)
-    // (TypeScript might warn, but being explicit is safe)
     if (entry && !expanded.has(entry.absolutePath)) {
-      // ===== STEP 3: Found Unexpanded Directory =====
-      // Step 3a: This directory is in stack but NOT in expanded set
-      // Return result object with found=true and the entry
-      // Step 3b: Caller MUST check .found before accessing .entry
       return { found: true, entry };
     }
-    // Step 3c: If this entry is expanded or undefined, continue to next iteration
   }
-
-  // ===== STEP 4: No Unexpanded Directories Found =====
-  // Step 4a: Loop completed without finding any unexpanded directories
-  // All directories in stack are already expanded or stack is empty
-  // Return result object with found=false (entry property omitted)
-  // This forces caller to check .found before trying to use .entry
   return { found: false };
 };
 
 /**
- * <Summary>
- * What it does:
- *   Clears all tracking state (stack and expanded set), resetting the module
- *   for a fresh new list of directories.
+ * Resets all expansion tracking for a new file listing session.
  *
- * How it does it (step by step):
- *   1. Empty the stack array by setting length to 0.
- *   2. Clear all entries from the expanded set.
- *   3. State is now ready for a new sequence of directories.
+ * @remarks
+ * Clears both the directory stack and the expanded-path set. Call this
+ * before rendering a new tree so Ctrl+O does not target directories from
+ * a previous command.
  *
- * Parameters:
- *   None.
- *
- * Returns:
- *   void — called for side effects only (clears state).
- *
- * Use Case:
- *   - Called when starting a fresh file list (new command, new search results).
- *   - Prevents old directory state from carrying over to new list.
- *   - Ensures Ctrl+O starts fresh with all directories unexpanded.
- * </Summary>
+ * @example
+ * ```ts
+ * clearExpandState();
+ * await listStructure(context, 2);
+ * ```
  */
 export const clearExpandState = (): void => {
-  // ===== STEP 1: Clear Stack =====
-  // Step 1a: Set stack.length to 0 to remove all entries
-  // This empties the array while keeping the same reference
   stack.length = 0;
-
-  // ===== STEP 2: Clear Expanded Set =====
-  // Step 2b: Call clear() to remove all entries from the set
-  // After this, no directories are marked as expanded
   expanded.clear();
-
-  // ===== STEP 3: State Reset Complete =====
-  // Step 3a: Module is now in initial empty state
-  // Ready for a new list of directories to be pushed
 };

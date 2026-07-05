@@ -1,343 +1,564 @@
 ---
-name: commenting
-description: Write doc comments for the loopycode codebase following TSDoc (TypeScript files) and JSDoc (plain JavaScript files), the real industry-standard formats read by TypeDoc, API Extractor, and editor IntelliSense. Use this whenever writing or reviewing comments on a class, method, function, or interface, when asked to "document this," "add comments," "write JSDoc," or before committing new public API surface. Comments are added selectively — non-trivial public methods, complex logic, and non-obvious behavior get documented; trivial getters, setters, and self-explanatory one-liners do not. Never hand-maintain a list of callers in a comment; that's what "Find References" is for.
+name: commenting-oss
+description: "Write doc comments for open-source TypeScript and JavaScript projects — the kind that let a stranger who just cloned the repo understand how to use, extend, and contribute to the code without reading the entire implementation. Use this when adding or reviewing comments on any public API (exported class, function, method, interface, type), when asked to 'document this for open source,' 'make this contributor-friendly,' 'add JSDoc/TSDoc,' 'write API docs,' or before tagging a release. Follows TSDoc for .ts/.tsx files and JSDoc for .js/.jsx files. Prioritizes the reader who has never seen this codebase before — lead with why, not just what; show runnable examples for non-obvious usage; document every thrown error and edge case; never assume internal knowledge."
 ---
 
-# Commenting (TSDoc / JSDoc)
+# Commenting for Open-Source Projects (TSDoc / JSDoc)
+
+## The core difference from internal comments
+
+Internal comments can say "Advisor calls this for planning." That means nothing to someone who found your repo on GitHub. Open-source comments must be **self-contained**: they explain the _what_, the _why_, the _gotchas_, and how to actually use the thing — without assuming the reader knows your architecture, your team's vocabulary, or even what the project does.
+
+Write every comment as if the reader:
+
+- Just ran `npm install your-package` ten minutes ago
+- Has never heard of your internal class names
+- Will not read your source code unless something breaks
+- Is trying to decide in 30 seconds whether your API does what they need
+
+---
 
 ## Which standard applies
 
-- **`.ts` / `.tsx` files → TSDoc.** This is Microsoft's spec, and it's what TypeDoc, API Extractor, and VS Code's hover tooltips actually parse. TSDoc's rule that trips people up: **don't repeat the type in `@param`.** The compiler already owns that information — write `@param model - Ollama model name` not `@param {string} model - ...`. Repeating the type just gives you two places that can disagree.
-- **`.js` / `.jsx` files → JSDoc.** No compiler is enforcing types here, so `@param {string} model - ...` is correct and necessary — it's the only type information that exists.
+| File type      | Standard  | Key rule                                                                                                                          |
+| -------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `.ts` / `.tsx` | **TSDoc** | No `{type}` in `@param` — the compiler owns types. Write `@param model - description`, not `@param {string} model - description`. |
+| `.js` / `.jsx` | **JSDoc** | Include `{type}` in `@param` and `@returns` — they're the only type information that exists.                                      |
 
-If you're not sure which applies, check the file extension. Most of loopycode is TypeScript, so TSDoc is the default.
+When in doubt, check the file extension. Default to TSDoc for TypeScript projects.
 
-## Decide whether to comment at all
+---
 
-Document:
+## What to document
 
-- Every exported class, function, method, and interface — anything another file imports.
-- Anything with non-obvious behavior: retries, timeouts, race conditions, side effects, or a deliberate tradeoff that isn't visible from the signature.
-- Anything that throws, has surprising edge cases, or behaves differently than its name suggests.
+**Always document:**
 
-Skip the ceremony:
+- Every exported / public class, function, method, type, and interface — anything a consumer can import.
+- Any non-obvious behavior: retries, caching, side effects, async generators, rate limits, pagination.
+- Anything that throws — every reachable error path a caller can encounter.
+- Edge cases that surprised you while writing the code (they'll surprise callers too).
+- Design decisions and tradeoffs that aren't obvious from the signature.
 
-- Trivial getters/setters, one-line private helpers, and anything where the name + signature already say everything a comment would.
-- Don't force a full block onto a two-line passthrough just to satisfy a template. A comment that restates `return this.x` in prose isn't documentation, it's noise — and it's one more thing to keep in sync every time the code changes.
+**Skip the ceremony for:**
 
-## Method template
+- Private implementation details that no consumer ever touches.
+- Trivial one-liners where the name + types already say everything (`getId(): string`).
+- Internal helper functions that aren't exported.
 
-````ts
+The test: _would a first-time contributor understand this method's contract from its comment alone, without reading the body?_ If yes, the comment is earning its place.
+
+---
+
+## Method / function template
+
+```ts
 /**
- * One-sentence summary, imperative mood, ends with a period.
+ * One-sentence summary: what this does for the caller, imperative mood,
+ * ends with a period. Focus on the outcome, not the mechanism.
  *
  * @remarks
- * Only include this if there's something non-obvious worth explaining —
- * a retry/backoff strategy, why this exists instead of an obvious
- * alternative, a side effect the caller needs to know about. If the
- * summary line already covers it, omit @remarks entirely.
+ * Use this block for:
+ * - WHY this exists (what problem it solves and why it was designed this way)
+ * - Non-obvious behavior (retries, rate limits, caching, ordering requirements)
+ * - Tradeoffs and known limitations a caller should know about
+ * - Links to relevant issues, specs, or external docs
  *
- * @param paramName - what it represents and where it comes from. No type
- *   in brackets for .ts files; TypeScript already declares it.
- * @returns what the return value contains and when it changes.
- * @throws {@link ErrorType} when this happens.
+ * Omit @remarks if the summary line already covers everything.
+ *
+ * @param paramName - What this value represents, valid range/format, and
+ *   what happens at the boundary (null, empty string, negative number, etc.).
+ *   For .ts files: no {type} in brackets — TypeScript declares it.
+ *   For .js files: include {type} in brackets — it's the only type info that exists.
+ * @returns What the resolved value contains, including shape for objects and
+ *   what changes between calls (e.g. "sorted by insertion order").
+ * @throws {@link ErrorClassName} When and why this throws, and what the
+ *   caller should do about it.
  *
  * @example
- * Only add this when usage isn't obvious from the signature alone —
- * e.g. consuming an async generator, or a non-default options shape.
- * ```ts
- * const text = await client.chat("gemma3:27b", messages, { temperature: 0.7 });
- * ```
+ * // Show a real, copy-pasteable usage that a newcomer can run immediately.
+ * // Include enough context that it makes sense without reading the source.
+ * const result = await client.fetchUser("user_123");
+ * console.log(result.displayName); // "Ada Lovelace"
+ *
+ * @example <caption>Error case</caption>
+ * // Show common error cases too if they're non-obvious.
+ * try {
+ *   await client.fetchUser("nonexistent");
+ * } catch (err) {
+ *   if (err instanceof NotFoundError) {
+ *     // handle gracefully
+ *   }
+ * }
+ *
+ * @see {@link RelatedClass} for the broader context this belongs to.
+ * @see {@link https://example.com/docs relevant external doc}
  */
-````
+```
 
-`@example` is optional and should be rare. Most methods don't need one.
+**`@example` is not optional for open source.** If your method takes an async generator, a callback, a non-obvious options shape, or has a tricky error pattern — show it. Code examples are the single highest-leverage thing in a public API comment. Use `<caption>` to label multiple examples.
+
+---
 
 ## Class template
 
 ```ts
 /**
- * One-sentence summary of this class's single responsibility.
+ * One-sentence summary of what this class does for a consumer who has
+ * never seen your codebase.
  *
  * @remarks
- * Where it sits in the system, and why it's its own class rather than
- * folded into another — only if that context isn't obvious. Skip this
- * block if the one-line summary already says enough.
+ * Explain:
+ * - The problem this class solves and when to reach for it
+ * - How it fits into a typical usage flow (instantiation → usage → cleanup)
+ * - Any stateful behavior, thread-safety notes, or lifecycle requirements
+ * - Links to getting-started guides, related classes, or relevant issues
+ *
+ * @example
+ * // Minimal working example — enough to go from zero to running.
+ * const client = new OllamaClient({ baseUrl: "http://localhost:11434" });
+ * const response = await client.chat("gemma3:27b", messages, { temperature: 0.7 });
+ * console.log(response);
+ *
+ * @see {@link https://github.com/your-org/your-repo/blob/main/README.md Getting started}
  */
 ```
+
+---
 
 ## Interface / type template
 
 ```ts
 /**
- * What this shape represents and where it's used.
+ * One-sentence description of what this shape represents.
+ *
+ * @remarks
+ * Include this block when: the interface has a non-obvious purpose,
+ * represents a protocol/wire format, or has interdependencies between
+ * fields (e.g. "field B is only present when field A is 'active'").
+ *
+ * @example
+ * const message: Message = { role: "user", content: "Hello" };
  */
 interface Message {
-  /** Who sent this turn. */
+  /**
+   * The role this message represents in the conversation.
+   *
+   * @remarks
+   * Ollama requires exactly one "system" role message at index 0.
+   * Subsequent messages must alternate "user" / "assistant".
+   */
   role: "system" | "user" | "assistant";
 
-  /** The text content of this turn. */
+  /** The text content of this message turn. */
   content: string;
 }
 ```
 
-Document the interface itself and every property inline. Properties whose
-name already says everything (`id: string`) can get a one-liner; don't
-stretch for three sentences on something self-evident.
+Document every property with an inline `/** */`. For simple properties where
+the name says everything, one sentence is enough. For properties with
+constraints, valid ranges, or interdependencies — say so.
 
-## What not to do
-
-- **Don't hand-maintain a "used by" / "called by" list.** It's stale the moment someone adds a new call site, and every editor already gives you this for free, correctly, via Find References / Find Usages. If a relationship is genuinely important context — not just "who happens to call this" — point to it once with `@see {@link ClassName}` rather than enumerating every caller.
-- **Don't narrate the implementation.** "Reads config from disk" beats a line-by-line walkthrough of the `fs.readFileSync` call. If you're writing "Step 1: ... Step 2: ..." for routine control flow, that's the code's job, not the comment's — and it doubles your maintenance surface, since now the prose and the code both need updating every time the logic changes.
-- **Don't comment every method regardless of triviality.** A blanket "every function gets a block" rule is exactly what style guides like Google's and Robert Martin's _Clean Code_ argue against: comments should explain things the code can't say for itself, not restate what's already obvious from the signature.
-- **Don't repeat types in TSDoc `@param` tags.** That's a JSDoc-for-plain-JS habit; in a typed file it's redundant with the signature.
+---
 
 ## Inline implementation comments
 
-Reserve `//` comments inside a method body for things the code genuinely
-can't express on its own: why a workaround exists, why a value is
-hardcoded, a non-obvious ordering requirement, a link to the ticket or
-spec behind an edge case. Don't put a comment above every line restating
-what that line does — if `// loop through models` sits above
-`for (const model of models)`, delete the comment.
+Inside method bodies, `//` comments are for things the code can't express:
+
+- **Why** something non-obvious was done (not what — the code shows what)
+- A workaround with a link to the upstream issue
+- A hardcoded value that looks wrong but isn't
+- An ordering constraint that breaks silently if violated
+
+```ts
+// Ollama sends 503 while the model is loading into VRAM — retry rather
+// than surfacing this as an error to the caller. See: github.com/ollama/ollama/issues/1234
+if (response.status === 503) { ... }
+
+// Backoff starts at 1 s on the second attempt, not the first, so the
+// common single-retry case stays fast.
+const delayMs = attempt > 0 ? Math.pow(2, attempt - 1) * 1000 : 0;
+```
+
+Delete comments that just restate the code in English:
+
+```ts
+// BAD — the code already says this
+// Loop through models
+for (const model of models) { ... }
+
+// GOOD — explains something the code can't
+// Process in insertion order so the UI renders models in the
+// sequence the user pulled them, not alphabetically.
+for (const model of models) { ... }
+```
 
 ---
 
 ## Worked example — OllamaClient
 
-```ts
+````ts
 /**
- * Handles all HTTP communication with the local Ollama server so no
- * other class talks to the Ollama API directly.
+ * Lightweight HTTP client for the Ollama REST API.
  *
  * @remarks
- * Sits between the orchestration layer (Advisor, Agent) and Ollama.
- * Centralizing this here means swapping model servers only requires
- * changing this one file.
+ * This class handles all communication with a locally-running Ollama
+ * server. It provides both blocking (`chat`) and streaming (`chatStream`)
+ * variants for inference, plus model management operations (list, pull,
+ * delete, inspect).
+ *
+ * **Retry behavior:** `chat` retries up to 3 times with exponential
+ * backoff on 503 responses (returned by Ollama while a model loads
+ * into memory). Streaming methods do not retry — a dropped stream
+ * throws immediately so callers can decide how to recover.
+ *
+ * @example
+ * ```ts
+ * const client = new OllamaClient();
+ *
+ * // Blocking inference
+ * const reply = await client.chat(
+ *   "gemma3:27b",
+ *   [{ role: "user", content: "Hello!" }],
+ *   { temperature: 0.7 }
+ * );
+ * console.log(reply); // "Hi! How can I help you today?"
+ *
+ * // Streaming inference
+ * for await (const token of client.chatStream("gemma3:27b", messages, opts)) {
+ *   process.stdout.write(token);
+ * }
+ * ```
+ *
+ * @see {@link https://github.com/ollama/ollama/blob/main/docs/api.md Ollama API reference}
  */
 class OllamaClient {
+
   /**
-   * Sends a single blocking chat request to Ollama and returns the
-   * complete response text.
+   * Sends a blocking chat request to Ollama and returns the complete
+   * response as a string.
    *
    * @remarks
-   * Retries up to 3 times with exponential backoff on a 503 (model
-   * still loading) before giving up.
+   * Retries up to 3 times with exponential backoff (1 s, 2 s) when
+   * Ollama returns 503, which it does while a model is loading into
+   * VRAM. Any other non-2xx status throws immediately.
    *
-   * @param model - Ollama model name, e.g. "gemma3:27b".
-   * @param messages - Ordered conversation history, including the
-   *   system prompt and the latest user turn.
-   * @param options - Sampling settings such as temperature.
-   * @returns The model's full response text.
-   * @throws {@link OllamaError} if Ollama is unreachable after all retries.
+   * Use `chatStream` instead when you want to display tokens as they
+   * arrive rather than waiting for the full response.
+   *
+   * @param model - Ollama model name, e.g. `"gemma3:27b"`. Must match
+   *   an installed model exactly — use `listModels` to enumerate them.
+   * @param messages - Ordered conversation history. The first entry
+   *   should be a system prompt (`role: "system"`), followed by
+   *   alternating user and assistant turns.
+   * @param options - Sampling configuration. Pass `{ temperature: 0 }`
+   *   for deterministic output, `{ temperature: 1 }` for maximum
+   *   creativity.
+   * @returns The model's complete response text.
+   * @throws {@link OllamaError} if Ollama is unreachable after 3 retries,
+   *   or if the server returns a non-503 HTTP error.
+   *
+   * @example
+   * ```ts
+   * const client = new OllamaClient();
+   * const messages = [
+   *   { role: "system", content: "You are a helpful assistant." },
+   *   { role: "user", content: "What is 2 + 2?" }
+   * ];
+   * const answer = await client.chat("gemma3:4b", messages, { temperature: 0 });
+   * console.log(answer); // "4"
+   * ```
    */
   async chat(
     model: string,
     messages: Message[],
     options: ChatOptions,
-  ): Promise<string> {
-    const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-    const requestBody = { model, messages, stream: false, options };
-
-    let lastError: Error | null = null;
-    const maxRetries = 3;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        // Skip the delay on the first attempt; back off exponentially after that.
-        const delayMs = attempt > 0 ? Math.pow(2, attempt - 1) * 1000 : 0;
-        if (delayMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-        }
-
-        const response = await fetch(`${baseUrl}/api/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
-        });
-
-        // 503 means the model is still loading into memory — retry rather than fail.
-        if (response.status === 503) {
-          lastError = new Error(
-            `Ollama returned 503 on attempt ${attempt + 1}`,
-          );
-          continue;
-        }
-
-        if (!response.ok) {
-          throw new Error(
-            `Ollama returned ${response.status}: ${response.statusText}`,
-          );
-        }
-
-        const data = await response.json();
-        return data.message.content;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        if (attempt === maxRetries - 1) {
-          throw new Error(
-            `Ollama unreachable after ${maxRetries} attempts: ${lastError.message}`,
-          );
-        }
-      }
-    }
-
-    throw new Error("Unexpected state in chat() retry loop");
-  }
+  ): Promise<string> { ... }
 
   /**
-   * Streams a chat response from Ollama token by token.
+   * Streams a chat response from Ollama, yielding one token at a time.
    *
    * @remarks
-   * Throws if the underlying HTTP stream drops before Ollama sends its
-   * `done: true` marker — a dropped connection mid-response should be
-   * loud, not silently truncated.
+   * Yields each token as it arrives so you can render progressive output
+   * without waiting for the full response. If the HTTP stream drops
+   * before Ollama sends `done: true`, this throws — a truncated response
+   * is surfaced as an error rather than silently returned as partial text.
    *
    * @param model - Ollama model name.
-   * @param messages - Conversation history.
-   * @param options - Sampling settings.
-   * @returns An async generator yielding one token string at a time.
-   * @throws {@link OllamaError} if the stream drops mid-response.
+   * @param messages - Ordered conversation history.
+   * @param options - Sampling configuration.
+   * @returns An async generator — each yielded value is a raw token string.
+   *   Tokens may be single characters, subwords, or whole words depending
+   *   on the model's tokenizer.
+   * @throws {@link OllamaError} if the response stream drops mid-generation.
+   *
+   * @example
+   * ```ts
+   * const client = new OllamaClient();
+   * const messages = [{ role: "user", content: "Tell me a joke." }];
+   *
+   * process.stdout.write("Assistant: ");
+   * for await (const token of client.chatStream("gemma3:4b", messages, { temperature: 0.8 })) {
+   *   process.stdout.write(token); // prints each token as it arrives
+   * }
+   * console.log(); // newline after stream ends
+   * ```
    */
   async *chatStream(
     model: string,
     messages: Message[],
     options: ChatOptions,
-  ): AsyncGenerator<string> {
-    // ... implementation
-  }
+  ): AsyncGenerator<string> { ... }
 
   /**
-   * Returns the names of all models currently installed on the Ollama
-   * server.
+   * Returns the names of all models installed on the Ollama server.
    *
-   * @returns Array of installed model names, e.g. `["gemma3:4b", "gemma3:27b"]`.
+   * @returns Array of installed model name strings,
+   *   e.g. `["gemma3:4b", "gemma3:27b", "llama3:8b"]`.
+   *   Returns an empty array if no models are installed.
    * @throws {@link OllamaError} if the Ollama server is unreachable.
+   *
+   * @example
+   * ```ts
+   * const models = await client.listModels();
+   * if (!models.includes("gemma3:27b")) {
+   *   console.log("Model not installed — run: ollama pull gemma3:27b");
+   * }
+   * ```
    */
-  async listModels(): Promise<string[]> {
-    // ... implementation
-  }
+  async listModels(): Promise<string[]> { ... }
 
   /**
    * Downloads a model from the Ollama registry, yielding progress
    * updates as the download proceeds.
    *
-   * @param name - Model name to download, e.g. "gemma3:27b".
-   * @returns An async generator yielding progress objects until the
-   *   download completes.
-   * @throws {@link OllamaError} if the model name isn't found in the registry.
+   * @remarks
+   * Large models can be several gigabytes. Each yielded `PullProgress`
+   * object carries `completed` and `total` byte counts while downloading,
+   * and a final `{ status: "success" }` when the download finishes.
+   *
+   * @param name - Model name to download, e.g. `"gemma3:27b"`. Uses
+   *   Ollama's registry naming — see the
+   *   [Ollama model library](https://ollama.com/library) for available names.
+   * @returns An async generator yielding progress updates until complete.
+   * @throws {@link OllamaError} if the model name isn't found in the
+   *   registry or the download fails part-way through.
+   *
+   * @example
+   * ```ts
+   * for await (const progress of client.pullModel("gemma3:27b")) {
+   *   if (progress.completed && progress.total) {
+   *     const pct = Math.round((progress.completed / progress.total) * 100);
+   *     process.stdout.write(`\rDownloading... ${pct}%`);
+   *   } else {
+   *     console.log(progress.status); // "pulling manifest", "verifying sha256", etc.
+   *   }
+   * }
+   * console.log("Done!");
+   * ```
    */
-  async *pullModel(name: string): AsyncGenerator<PullProgress> {
-    // ... implementation
-  }
+  async *pullModel(name: string): AsyncGenerator<PullProgress> { ... }
 
   /**
    * Permanently removes a model from the Ollama server's disk storage.
    *
-   * @param name - Exact model name to delete, e.g. "gemma3:4b".
-   * @returns Nothing — called for its side effect.
-   * @throws {@link OllamaError} if the model doesn't exist or deletion fails.
+   * @remarks
+   * This is irreversible. The model must be re-downloaded via `pullModel`
+   * to use it again. Pass the exact name returned by `listModels` —
+   * including the tag (e.g. `"gemma3:4b"`, not `"gemma3"`).
+   *
+   * @param name - Exact model name to delete, including tag.
+   * @throws {@link OllamaError} if the model doesn't exist or if the
+   *   server returns an error during deletion.
+   *
+   * @example
+   * ```ts
+   * const models = await client.listModels();
+   * if (models.includes("gemma3:4b")) {
+   *   await client.deleteModel("gemma3:4b");
+   *   console.log("Deleted.");
+   * }
+   * ```
    */
-  async deleteModel(name: string): Promise<void> {
-    // ... implementation
-  }
+  async deleteModel(name: string): Promise<void> { ... }
 
   /**
-   * Returns metadata about one installed model: size on disk, parameter
-   * count, family, and quantization level.
+   * Returns metadata for one installed model: disk size, parameter
+   * count, architecture family, and quantization level.
    *
-   * @param name - Model name to inspect.
+   * @param name - Model name to inspect. Must be installed locally —
+   *   use `listModels` to confirm before calling.
+   * @returns A `ModelInfo` object with size, parameters, family, and
+   *   quantization fields populated.
    * @throws {@link OllamaError} if the model isn't installed.
+   *
+   * @example
+   * ```ts
+   * const info = await client.showModel("gemma3:27b");
+   * console.log(`${info.name}: ${info.quantization}, ${info.parameters / 1e9}B params`);
+   * // "gemma3:27b: Q4_K_M, 27B params"
+   * ```
    */
-  async showModel(name: string): Promise<ModelInfo> {
-    // ... implementation
-  }
+  async showModel(name: string): Promise<ModelInfo> { ... }
 
   /**
-   * Returns all models currently loaded into memory on the Ollama
-   * server, so callers can see what's consuming RAM/VRAM right now.
+   * Returns all models currently loaded in RAM or VRAM on the Ollama
+   * server, along with their memory usage and idle-unload time.
    *
-   * @throws {@link OllamaError} if the Ollama server is unreachable.
+   * @remarks
+   * Ollama keeps models in memory for a configurable TTL after the last
+   * request (default 5 minutes). `expiresAt` tells you when Ollama will
+   * unload the model if no requests arrive — useful for surfacing current
+   * memory pressure to users.
+   *
+   * @returns Array of loaded models. Empty if no models are in memory.
+   * @throws {@link OllamaError} if the server is unreachable.
+   *
+   * @example
+   * ```ts
+   * const running = await client.listRunning();
+   * for (const model of running) {
+   *   const mb = (model.size / 1024 / 1024).toFixed(0);
+   *   const expiresIn = Math.round((model.expiresAt - Date.now()) / 1000);
+   *   console.log(`${model.name}: ${mb} MB, unloads in ${expiresIn}s`);
+   * }
+   * ```
    */
-  async listRunning(): Promise<RunningModel[]> {
-    // ... implementation
-  }
+  async listRunning(): Promise<RunningModel[]> { ... }
 }
-```
+````
 
 ### Supporting interfaces
 
-```ts
-/** A single message turn in a conversation sent to Ollama. */
+````ts
+/**
+ * A single message turn in a conversation sent to the Ollama API.
+ *
+ * @remarks
+ * Conversations must start with a `"system"` role message, followed by
+ * alternating `"user"` and `"assistant"` turns. Ollama will return an
+ * error if this ordering is violated.
+ *
+ * @example
+ * ```ts
+ * const messages: Message[] = [
+ *   { role: "system", content: "You are a helpful assistant." },
+ *   { role: "user",   content: "Explain async generators in one sentence." },
+ * ];
+ * ```
+ */
 interface Message {
-  /** Either "system", "user", or "assistant". */
+  /** Who authored this turn. */
   role: "system" | "user" | "assistant";
 
   /** The text content of this message turn. */
   content: string;
 }
 
-/** Sampling settings passed to Ollama to control generation. */
+/**
+ * Sampling settings passed to Ollama to control how the model generates text.
+ *
+ * @see {@link https://github.com/ollama/ollama/blob/main/docs/modelfile.md#valid-parameters-and-values Ollama parameter reference}
+ */
 interface ChatOptions {
   /**
-   * Controls randomness. 0.0 is deterministic, 1.0 is very creative.
-   * Advisor uses 0.1; agents default to 0.7.
+   * Controls output randomness. `0.0` is fully deterministic (same prompt
+   * always produces the same output); `1.0` is highly creative but less
+   * consistent. Values above `1.0` are valid but rarely useful.
+   *
+   * @defaultValue `0.7`
    */
   temperature: number;
 }
 
-/** One progress update yielded during a model download. */
+/**
+ * One progress update yielded during a model download via `pullModel`.
+ *
+ * @remarks
+ * `completed` and `total` are only populated while `status` is
+ * `"downloading"`. During other phases (manifest pull, digest
+ * verification) they will be `undefined`.
+ */
 interface PullProgress {
-  /** Status string from Ollama, e.g. "pulling manifest", "downloading", "success". */
+  /** Human-readable status from Ollama, e.g. `"pulling manifest"`, `"downloading"`, `"success"`. */
   status: string;
 
-  /** Bytes downloaded so far. Only set while status is "downloading". */
+  /** Bytes downloaded so far. Only present when `status` is `"downloading"`. */
   completed?: number;
 
-  /** Total bytes to download. Only set while status is "downloading". */
+  /** Total bytes to download. Only present when `status` is `"downloading"`. */
   total?: number;
 }
 
-/** Metadata about one installed Ollama model. */
+/**
+ * Metadata about one installed Ollama model, as returned by `showModel`.
+ */
 interface ModelInfo {
-  /** Model name including tag, e.g. "gemma3:27b". */
+  /** Full model name including tag, e.g. `"gemma3:27b"`. */
   name: string;
 
   /** Disk size in bytes. */
   size: number;
 
-  /** Parameter count, e.g. 27000000000. */
+  /** Total parameter count, e.g. `27_000_000_000` for a 27B model. */
   parameters: number;
 
-  /** Model architecture family, e.g. "gemma". */
+  /** Model architecture family, e.g. `"gemma"` or `"llama"`. */
   family: string;
 
-  /** Quantization level, e.g. "Q4_K_M". */
+  /** Quantization level, e.g. `"Q4_K_M"`. Lower = smaller but less accurate. */
   quantization: string;
 }
 
-/** A model currently loaded in memory on the Ollama server. */
+/**
+ * A model currently loaded in memory on the Ollama server.
+ *
+ * @remarks
+ * Ollama unloads models after an idle TTL (default 5 minutes).
+ * `expiresAt` is the Unix timestamp (ms) at which that unload will
+ * happen if no requests arrive — you can use `Date.now() < expiresAt`
+ * to check whether a model is still warm.
+ */
 interface RunningModel {
-  /** Model name currently loaded. */
+  /** Model name currently loaded, e.g. `"gemma3:27b"`. */
   name: string;
 
   /** Memory consumed, in bytes. */
   size: number;
 
-  /** Unix timestamp (ms) when Ollama will unload this model if idle. */
+  /**
+   * Unix timestamp (ms) when Ollama will unload this model if no
+   * requests arrive.
+   *
+   * @example
+   * ```ts
+   * const isWarm = model.expiresAt > Date.now();
+   * ```
+   */
   expiresAt: number;
 }
-```
+````
+
+---
+
+## Anti-patterns to avoid
+
+**Don't omit `@example` on complex methods.** In internal code an example is optional. In open-source it's often the only thing a new contributor reads. Async generators, streaming, pagination, and error recovery patterns all need working examples.
+
+**Don't reference internal architecture.** Comments like "called by Advisor for planning" mean nothing to someone who doesn't know what Advisor is. If a relationship matters, link to the relevant class with `@see {@link Advisor}`, and let the reader follow the link.
+
+**Don't assume the reader knows your error types.** Name every thrown error concretely: `@throws {@link OllamaError}` — not just `@throws if something goes wrong`.
+
+**Don't describe what the code does, describe what the caller gets.** The difference: "Iterates the models array and maps each entry to its name field" vs. "Returns the names of all installed models." The second is what belongs in a doc comment.
+
+**Don't leave `@defaultValue` undocumented for optional parameters.** If a caller can omit something, they need to know what they're getting when they do.
 
 ---
 
 ## Quick reference
 
-| Symbol                 | Required                                           | Optional, use only when non-obvious |
-| ---------------------- | -------------------------------------------------- | ----------------------------------- |
-| Exported class         | One-sentence summary                               | `@remarks` for context/rationale    |
-| Exported method/fn     | One-sentence summary, `@param`, `@returns`         | `@remarks`, `@throws`, `@example`   |
-| Interface              | One-sentence summary, inline `/** */` per property | `@remarks`                          |
-| Private/trivial helper | Nothing, unless behavior is genuinely surprising   | —                                   |
-
-If you're tempted to add a "Dependencies" / "Dependants" section: don't — use your editor's Find References instead, and reach for a single `@see {@link X}` only when the relationship is something a reader truly needs flagged, not a full accounting of every caller.
+| Symbol               | Must include                                                      | Include when non-obvious                                                                |
+| -------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Exported class       | One-sentence summary, `@example` showing construction + basic use | `@remarks` for lifecycle, stateful behavior, or design rationale                        |
+| Exported method/fn   | Summary, `@param` (all), `@returns`, `@throws` (all)              | `@remarks` for retry/caching/ordering, `@example` for non-obvious usage (nearly always) |
+| Interface / type     | Summary, inline `/** */` per property                             | `@remarks` for field constraints or interdependencies, `@example` for complex shapes    |
+| Private / unexported | Nothing unless behavior is genuinely surprising                   | —                                                                                       |

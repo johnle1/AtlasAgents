@@ -531,42 +531,30 @@ export class ConfigManager implements IConfigManager {
    * @async
    * <Summary>
    * What it does:
-   *   Reads user-data/config.json, parses JSON, merges with SERVER_DEFAULTS.
-   *
-   * How it does it (step by step):
-   *   1. Acquire mutex lock to prevent concurrent operations.
-   *   2. Attempt to read config file from disk.
-   *   3. Parse file content as JSON with error handling.
-   *   4. Merge parsed content with server defaults.
-   *   5. If file doesn't exist, use defaults only.
-   *   6. For other errors, re-throw to caller.
-   *   7. Release mutex lock.
-   *
-   * Returns:
-   *   @returns Complete configuration with defaults applied.
+   *   Reads config from disk WITHOUT acquiring the mutex.
+   *   Must only be called from within an already-held mutex.run() block
+   *   (i.e. from set() or setModel()) to avoid a re-entrant deadlock.
    * </Summary>
    */
-  load = async (): Promise<ServerConfig> => {
-    return this.mutex.run(async () => {
-      try {
-        // Step 1: Read config file content from disk
-        const rawContent = await fs.readFile(this.configPath, "utf-8");
+  private _loadRaw = async (): Promise<ServerConfig> => {
+    try {
+      // Step 1: Read config file content from disk
+      const rawContent = await fs.readFile(this.configPath, "utf-8");
 
-        // Step 2: Parse JSON and merge with defaults
-        return mergeConfig(parseStoredConfig(rawContent));
-      } catch (error) {
-        // Step 3: Handle file system errors
-        const errorCode = (error as NodeJS.ErrnoException).code;
+      // Step 2: Parse JSON and merge with defaults
+      return mergeConfig(parseStoredConfig(rawContent));
+    } catch (error) {
+      // Step 3: Handle file system errors
+      const errorCode = (error as NodeJS.ErrnoException).code;
 
-        // Step 4: If file doesn't exist, return config with defaults only
-        if (errorCode === "ENOENT") {
-          return mergeConfig({});
-        }
-
-        // Step 5: For other errors (permissions, corruption), re-throw
-        throw error;
+      // Step 4: If file doesn't exist, return config with defaults only
+      if (errorCode === "ENOENT") {
+        return mergeConfig({});
       }
-    });
+
+      // Step 5: For other errors (permissions, corruption), re-throw
+      throw error;
+    }
   };
 
   /**
@@ -592,27 +580,38 @@ export class ConfigManager implements IConfigManager {
    * </Summary>
    */
   private save = async (config: ServerConfig): Promise<void> => {
-    return this.mutex.run(async () => {
-      // Step 1: Extract directory path from config file path
-      const directory = path.dirname(this.configPath);
+    // Public callers use this; internal callers within an existing mutex
+    // block should call _saveRaw() directly.
+    return this.mutex.run(() => this._saveRaw(config));
+  };
 
-      // Step 2: Ensure directory exists (create if needed)
-      await ensureDir(directory);
+  /**
+   * @async
+   * <Summary>
+   * What it does:
+   *   Atomically writes config to disk WITHOUT acquiring the mutex.
+   *   Must only be called from within an already-held mutex.run() block
+   *   (i.e. from set() or setModel()) to avoid a re-entrant deadlock.
+   * </Summary>
+   */
+  private _saveRaw = async (config: ServerConfig): Promise<void> => {
+    // Step 1: Extract directory path from config file path
+    const directory = path.dirname(this.configPath);
 
-      // Step 3: Generate unique temporary file path using random UUID
-      // Using temp file ensures atomic write operation
-      const tempPath = path.join(directory, `.config-${randomUUID()}.tmp`);
+    // Step 2: Ensure directory exists (create if needed)
+    await ensureDir(directory);
 
-      // Step 4: Serialize config to JSON with 2-space indentation and trailing newline
-      const jsonPayload = `${JSON.stringify(config, null, 2)}\n`;
+    // Step 3: Generate unique temporary file path using random UUID
+    const tempPath = path.join(directory, `.config-${randomUUID()}.tmp`);
 
-      // Step 5: Write config to temporary file
-      await fs.writeFile(tempPath, jsonPayload, "utf-8");
+    // Step 4: Serialize config to JSON with 2-space indentation and trailing newline
+    const jsonPayload = `${JSON.stringify(config, null, 2)}\n`;
 
-      // Step 6: Atomically rename temp file to actual config path
-      // Atomic operation prevents corruption if process crashes during write
-      await fs.rename(tempPath, this.configPath);
-    });
+    // Step 5: Write config to temporary file
+    await fs.writeFile(tempPath, jsonPayload, "utf-8");
+
+    // Step 6: Atomically rename temp file to actual config path
+    await fs.rename(tempPath, this.configPath);
   };
 
   /**
@@ -635,7 +634,7 @@ export class ConfigManager implements IConfigManager {
    */
   getAdvisorModel = async (): Promise<string> => {
     // Step 1: Load current configuration from disk
-    const config = await this.load();
+    const config = await this._loadRaw();
 
     // Step 2: Extract advisor model name and trim whitespace
     const modelName = config.advisorModel.trim();
@@ -671,7 +670,7 @@ export class ConfigManager implements IConfigManager {
    */
   getAgentModel = async (): Promise<string> => {
     // Step 1: Load current configuration from disk
-    const config = await this.load();
+    const config = await this._loadRaw();
 
     // Step 2: Extract agent model name and trim whitespace
     const modelName = config.agentModel.trim();
@@ -702,7 +701,7 @@ export class ConfigManager implements IConfigManager {
    */
   getAdvisorTemperature = async (): Promise<number> => {
     // Step 1: Load current configuration from disk
-    const config = await this.load();
+    const config = await this._loadRaw();
 
     // Step 2: Return advisor temperature value
     return config.advisorTemp;
@@ -723,7 +722,7 @@ export class ConfigManager implements IConfigManager {
    */
   getAgentTemperature = async (): Promise<number> => {
     // Step 1: Load current configuration from disk
-    const config = await this.load();
+    const config = await this._loadRaw();
 
     // Step 2: Return agent temperature value
     return config.agentTemp;
@@ -744,7 +743,7 @@ export class ConfigManager implements IConfigManager {
    */
   getMaxRetries = async (): Promise<number> => {
     // Step 1: Load current configuration from disk
-    const config = await this.load();
+    const config = await this._loadRaw();
 
     // Step 2: Return retries value
     return config.retries;
@@ -769,7 +768,7 @@ export class ConfigManager implements IConfigManager {
    */
   getTemperature = async (role: ConfigRole): Promise<number> => {
     // Step 1: Load current configuration from disk
-    const config = await this.load();
+    const config = await this._loadRaw();
 
     // Step 2: Return temperature based on role
     return role === "advisor" ? config.advisorTemp : config.agentTemp;
@@ -790,7 +789,7 @@ export class ConfigManager implements IConfigManager {
    */
   getRetries = async (): Promise<number> => {
     // Step 1: Load current configuration from disk
-    const config = await this.load();
+    const config = await this._loadRaw();
 
     // Step 2: Return retries value
     return config.retries;
@@ -811,7 +810,7 @@ export class ConfigManager implements IConfigManager {
    */
   getTimeout = async (): Promise<number> => {
     // Step 1: Load current configuration from disk
-    const config = await this.load();
+    const config = await this._loadRaw();
 
     // Step 2: Return timeout value
     return config.timeout;
@@ -832,7 +831,7 @@ export class ConfigManager implements IConfigManager {
    */
   getMaxContextBudget = async (): Promise<number> => {
     // Step 1: Load current configuration from disk
-    const config = await this.load();
+    const config = await this._loadRaw();
 
     // Step 2: Return max context budget value
     return config.maxContextBudget;
@@ -853,7 +852,7 @@ export class ConfigManager implements IConfigManager {
    */
   getAll = async (): Promise<ServerConfig> => {
     // Step 1: Load and return complete configuration
-    return this.load();
+    return this._loadRaw();
   };
 
   /**
@@ -928,15 +927,18 @@ export class ConfigManager implements IConfigManager {
         }
       }
 
-      // Step 3: Load current configuration from disk
-      const config = await this.load();
+      // Step 3: Load current configuration from disk.
+      // Use _loadRaw because we already hold the mutex and load() would
+      // try to acquire it again.
+      const config = await this._loadRaw();
 
       // Step 4: Create new config object with updated key value
       // Spread operator copies all existing properties, then overwrites the specified key
       const nextConfig = { ...config, [key]: value } as ServerConfig;
 
-      // Step 5: Save updated configuration atomically
-      await this.save(nextConfig);
+      // Step 5: Save updated configuration atomically.
+      // Use _saveRaw for the same reason as _loadRaw above.
+      await this._saveRaw(nextConfig);
     });
   };
 
@@ -981,8 +983,10 @@ export class ConfigManager implements IConfigManager {
         );
       }
 
-      // Step 3: Load current configuration from disk
-      const config = await this.load();
+      // Step 3: Load current configuration from disk.
+      // Use _loadRaw because we already hold the mutex and load() would
+      // try to acquire it again.
+      const config = await this._loadRaw();
 
       // Step 4: Extract previous model name for the specified role
       const previousModel =
@@ -994,8 +998,9 @@ export class ConfigManager implements IConfigManager {
           ? { ...config, advisorModel: trimmedModelName }
           : { ...config, agentModel: trimmedModelName };
 
-      // Step 6: Save updated configuration atomically
-      await this.save(nextConfig);
+      // Step 6: Save updated configuration atomically.
+      // Use _saveRaw for the same reason as _loadRaw above.
+      await this._saveRaw(nextConfig);
 
       // Step 7: If model actually changed, invoke cache invalidation callback
       if (previousModel !== trimmedModelName) {

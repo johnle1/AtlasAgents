@@ -31,6 +31,9 @@ export {
 
 export {
   setBusy,
+  setTaskActive,
+  getTaskActive,
+  isTaskActive,
   setCwdLabel,
   refreshInkBanner,
   enterAlternateScreen,
@@ -41,10 +44,12 @@ export {
   getPendingApproval,
   requestApproval,
   resolveApproval,
+  cancelPendingApprovals,
 } from "./bridge/approval.js";
 
 export {
   getPendingPrompt,
   requestPrompt,
   resolvePrompt,
+  cancelPendingPrompts,
 } from "./bridge/prompt.js";
