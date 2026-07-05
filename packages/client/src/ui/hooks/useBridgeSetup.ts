@@ -24,7 +24,10 @@ import {
   exitAlternateScreen,
   registerBridgeHooks,
   registerStreamingHandler,
+  setBusy as resetBridgeBusy,
   setInkActive,
+  setSpinner as resetBridgeSpinner,
+  setTaskActive as resetBridgeTaskActive,
 } from "../uiBridge.js";
 
 /**
@@ -45,6 +48,7 @@ type BridgeSetupContext = Pick<
   | "setStreamingText"
   | "setSpinner"
   | "setBusy"
+  | "setTaskActive"
   | "setPrompt"
   | "setApproval"
   | "setPromptReq"
@@ -81,6 +85,7 @@ export const useBridgeSetup = ({
   setStreamingText,
   setSpinner,
   setBusy,
+  setTaskActive,
   setPrompt,
   setApproval,
   setPromptReq,
@@ -126,6 +131,7 @@ export const useBridgeSetup = ({
       onSpinner: (spinnerState) => setSpinner(spinnerState),
       // Busy state handler
       onBusy: (isBusy) => setBusy(isBusy),
+      onTaskActive: (isTaskActive) => setTaskActive(isTaskActive),
       // Working directory change handler
       onCwd: (currentWorkingDirectory) =>
         setPrompt(buildPromptLabel(currentWorkingDirectory)),
@@ -164,13 +170,18 @@ export const useBridgeSetup = ({
       // Step 3a-i: Deactivate Ink UI
       setInkActive(false);
 
-      // Step 3a-ii: Clear bridge hooks to prevent memory leaks
+      // Step 3a-ii: Reset bridge-backed state while hooks are still registered
+      resetBridgeTaskActive(false);
+      resetBridgeBusy(false);
+      resetBridgeSpinner(null);
+
+      // Step 3a-iii: Clear bridge hooks to prevent memory leaks
       registerBridgeHooks({});
 
-      // Step 3a-iii: Clear streaming handler
+      // Step 3a-iv: Clear streaming handler
       registerStreamingHandler(null);
 
-      // Step 3a-iv: Exit alternate screen mode if it was used
+      // Step 3a-v: Exit alternate screen mode if it was used
       // Step 3a-iv-1: This restores normal terminal display
       if (useAlternateScreenRef.current) {
         exitAlternateScreen();
@@ -181,6 +192,7 @@ export const useBridgeSetup = ({
     setStreamingText,
     setSpinner,
     setBusy,
+    setTaskActive,
     setPrompt,
     setApproval,
     setPromptReq,

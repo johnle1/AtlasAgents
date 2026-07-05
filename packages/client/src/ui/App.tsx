@@ -87,7 +87,14 @@ const AppContent: React.FC = () => {
   } = useAppContext();
 
   const connectionStatus = useConnectionStatus(connection);
-  useConnectionDisconnectCleanup(connection);
+  useConnectionDisconnectCleanup(connection, {
+    setTaskActive,
+    setBusy,
+    setSpinner,
+    setStreamingText,
+    setAgentStatuses,
+    setAgentBoards,
+  });
 
   const { exit } = useApp();
 
