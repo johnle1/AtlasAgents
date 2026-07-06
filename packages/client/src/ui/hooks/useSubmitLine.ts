@@ -1,15 +1,9 @@
 /**
- * <Summary>
- * What it does:
- *   React hook that handles submission of command lines from the input box,
- *   including command history management, command execution, and task streaming.
+ * Command line submission handler hook for the CLI input box.
  *
- * How it fits in the system:
- *   This hook is called when the user presses Enter in the input box to submit
- *   a command. It manages the command history, executes commands through the
- *   command handler, or streams tasks to the server if the input is not a command.
- *   It also handles error display and manages the busy state during execution.
- * </Summary>
+ * @remarks
+ * Handles executing special `/` commands via the CommandHandler, validates configuration
+ * inputs, and runs task stream execution workflows when raw tasks are entered.
  */
 
 import { useCallback, useRef } from "react";
@@ -21,18 +15,6 @@ import { sanitizeHistoryLine } from "../historySanitize.js";
 import { MAX_INPUT_HISTORY } from "../constants.js";
 import { runTaskStream } from "../taskStream.js";
 
-/**
- * <Summary>
- * What it does:
- *   Defines the subset of AppContextValue needed for line submission handling.
- *
- * Used by:
- *   - useSubmitLine hook — receives these dependencies.
- *
- * Produced by:
- *   - AppContext — provides these state values and setter functions.
- * </Summary>
- */
 type SubmitLineContext = Pick<
   AppContextValue,
   | "busy"
@@ -51,28 +33,10 @@ type SubmitLineContext = Pick<
 >;
 
 /**
- * <Summary>
- * What it does:
- *   Creates a line submission handler that processes command input and manages
- *   the execution workflow.
+ * Hook returning a submission callback that processes text input on Enter press.
  *
- * How it does it (step by step):
- *   1. Checks submit lock to prevent duplicate submissions.
- *   2. Validates input and checks blocking states (busy, approval, prompt).
- *   3. Sanitizes and adds input to command history.
- *   4. Sets busy state and resets input.
- *   5. Attempts to execute as a command through command handler.
- *   6. If not a command, validates model configuration.
- *   7. If models are configured, streams task to server.
- *   8. Handles errors by displaying them in history.
- *   9. Releases submit lock and resets busy state in finally block.
- *
- * Parameters:
- *   @param submitLineDependencies - State and setters from context.
- *
- * Returns:
- *   @returns The submit handler and lock ref.
- * </Summary>
+ * @param context - Selected app state values and setters.
+ * @returns An object containing the `submit` callback and `submitLockRef`.
  */
 export const useSubmitLine = ({
   busy,
@@ -89,78 +53,46 @@ export const useSubmitLine = ({
   connection,
   commandHandler,
 }: SubmitLineContext) => {
-  // ===== STEP 1: Create Submit Lock Ref =====
-  // Step 1a: Create a ref to track if a submission is in progress
-  // Step 1b: This prevents duplicate submissions (e.g., rapid Enter presses)
+  // Lock to avoid double execution on duplicate quick clicks/Enters
   const submitLockRef = useRef(false);
 
-  // ===== STEP 2: Create Submit Handler =====
   const submitHandler = useCallback(
     async (inputLine: string) => {
-      // ===== STEP 2a: Trim Input Line =====
-      // Step 2a-i: Remove leading/trailing whitespace from input
       const trimmedInputLine = inputLine.trim();
 
-      // ===== STEP 2b: Check Submit Lock =====
-      // Step 2b-i: If submission is already in progress, return immediately
-      // Step 2b-ii: This prevents duplicate submissions
       if (submitLockRef.current) return;
-
-      // Step 2b-iii: Set submit lock to true
       submitLockRef.current = true;
 
-      // ===== STEP 2c: Validate Input and Check Blocking States =====
-      // Step 2c-i: Check if input is empty or blocking states are active
-      // Step 2c-ii: If so, release lock and return without submitting
+      // Don't execute anything if input is empty or if blocking interaction dialogs are open
       if (!trimmedInputLine.length || busy || approval || promptReq) {
         submitLockRef.current = false;
         return;
       }
 
-      // ===== STEP 2d: Add to Command History =====
-      // Step 2d-i: Sanitize the input line before adding to history
       const sanitizedHistoryLine = sanitizeHistoryLine(trimmedInputLine);
-
-      // Step 2d-ii: Create new history array with the new entry
-      // Step 2d-iii: Keep only the last MAX_INPUT_HISTORY entries
       const updatedInputHistory = [...inputHistory, sanitizedHistoryLine].slice(
         -MAX_INPUT_HISTORY,
       );
 
-      // Step 2d-iv: Update input history state
       setInputHistory(updatedInputHistory);
-
-      // Step 2d-v: Update the ref for history persistence
       onInputHistoryRef.current = updatedInputHistory;
-
-      // Step 2d-vi: Reset history index to -1 (newest)
       setHistIdx(-1);
-
-      // Step 2d-vii: Clear the input box
       setInput("");
-
-      // Step 2d-viii: Set busy state to indicate operation is in progress
       setBusy(true);
 
-      // ===== STEP 2e: Execute Command or Stream Task =====
       try {
-        // ===== STEP 2e-i: Try to Execute as Command =====
-        // Step 2e-i-1: Attempt to handle the input as a command
+        // Attempt to run as a local command first (e.g., /help, /exit, /set)
         const wasCommandExecuted =
           await commandHandler.handle(trimmedInputLine);
 
-        // ===== STEP 2e-ii: Handle Non-Command Input =====
         if (!wasCommandExecuted) {
-          // Step 2e-ii-1: Load task configuration
           const taskConfiguration = loadConfig();
 
-          // Step 2e-ii-2: Validate model configuration
-          // Step 2e-ii-2-a: Check if advisor and agent models are set
+          // Validate LLM model configuration setup before launching a remote agent task
           if (
             !(taskConfiguration.advisorModel ?? "").trim() ||
             !(taskConfiguration.agentModel ?? "").trim()
           ) {
-            // Step 2e-ii-2-a-1: Display error if models not configured
             setHistory((previousHistory) => [
               ...previousHistory,
               {
@@ -170,14 +102,10 @@ export const useSubmitLine = ({
               },
             ]);
           } else {
-            // Step 2e-ii-2-b: Stream task to server
-            // Step 2e-ii-2-b-1: Input is not a command, so stream as a task
             await runTaskStream(connection, trimmedInputLine);
           }
         }
       } catch (executionError) {
-        // ===== STEP 2e-iii: Handle Execution Errors =====
-        // Step 2e-iii-1: Display error message in history
         setHistory((previousHistory) => [
           ...previousHistory,
           {
@@ -187,14 +115,8 @@ export const useSubmitLine = ({
           },
         ]);
       } finally {
-        // ===== STEP 2f: Cleanup After Execution =====
-        // Step 2f-i: Release submit lock to allow new submissions
         submitLockRef.current = false;
-
-        // Step 2f-ii: Clear busy state to indicate operation is complete
         setBusy(false);
-
-        // Step 2f-iii: Reset SIGINT counter
         setSigintBusy(0);
       }
     },
@@ -215,6 +137,6 @@ export const useSubmitLine = ({
     ],
   );
 
-  // ===== STEP 3: Return Handler and Lock Ref =====
   return { submit: submitHandler, submitLockRef };
 };
+

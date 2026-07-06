@@ -1,17 +1,16 @@
+/**
+ * Spinner state synchronizer for CLI progress reporting.
+ *
+ * @remarks
+ * Decides whether the status spinner should be in "thinking" or "working" mode,
+ * or cleared entirely, based on task status frames incoming from the advisor/agents.
+ */
+
 import type { AdvisorStage, TaskFrame } from "../frames.js";
 import type { SpinnerState } from "./types.js";
 
 /**
- * <Summary>
- * What it does:
- *   Defines the set of advisor stages that should show a thinking spinner.
- *
- * Used by:
- *   - spinnerForStatusFrame — checks if an advisor stage is in this set.
- *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * Set of advisor workflow stages that represent active thinking.
  */
 const ADVISOR_THINKING_STAGES = new Set<AdvisorStage>([
   "understanding",
@@ -23,21 +22,9 @@ const ADVISOR_THINKING_STAGES = new Set<AdvisorStage>([
 ]);
 
 /**
- * <Summary>
- * What it does:
- *   Creates a spinner state for thinking operations.
+ * Helper to construct a spinner state object configured for "thinking" (braille indicator).
  *
- * How it does it (step by step):
- *   1. Create a spinner state with active flag set to true.
- *   2. Set the label to the provided text.
- *   3. Set the mode to "thinking" for braille indicator display.
- *
- * Parameters:
- * @param label - The label text to display next to the spinner.
- *
- * Returns:
- * @returns A spinner state object configured for thinking mode.
- * </Summary>
+ * @param label - The label text to show beside the spinner.
  */
 const thinkingSpinner = (label: string): SpinnerState => ({
   active: true,
@@ -46,92 +33,65 @@ const thinkingSpinner = (label: string): SpinnerState => ({
 });
 
 /**
- * <Summary>
- * What it does:
- *   Maps a status frame to the appropriate bottom-line spinner state.
+ * Helper to construct a spinner state object configured for "working" (command/file execution).
  *
- * How it does it (step by step):
- *   1. Check if the frame is a status frame (return undefined if not).
- *   2. Check if the source is the advisor.
- *   3. If advisor is in a thinking stage with the right icon, show "Advisor" thinking spinner.
- *   4. If advisor is ready, clear the spinner (return null).
- *   5. If advisor is in other stages, leave spinner unchanged (return undefined).
- *   6. Check if agent activity is in thinking stage, show "Agent" thinking spinner.
- *   7. Check if agent stage is thinking, show "Agent" thinking spinner.
- *   8. Check if agent has activity, leave spinner unchanged (return undefined).
- *   9. Otherwise, clear the spinner (return null).
- *
- * Parameters:
- * @param frame - The task frame to evaluate for spinner state.
- *
- * Returns:
- * @returns The spinner state (show spinner), null (clear spinner), or undefined (no change).
- * </Summary>
+ * @param label - The label text to show beside the spinner.
  */
+const workingSpinner = (label: string): SpinnerState => ({
+  active: true,
+  label,
+  mode: "working",
+});
+
 /**
- * Maps a status frame to bottom-line spinner state.
- * - SpinnerState: show braille thinking indicator
- * - null: clear spinner
- * - undefined: leave current spinner unchanged
+ * Maps an incoming server task status frame to the corresponding bottom-line CLI spinner state.
+ *
+ * @remarks
+ * - Returns a `SpinnerState` object if a spinner should be visible.
+ * - Returns `null` if the spinner should be cleared/hidden.
+ * - Returns `undefined` if the current spinner state should be left unchanged.
+ *
+ * @param frame - The task status frame to evaluate.
+ * @returns The target spinner configuration, or `null`/`undefined`.
  */
 export const spinnerForStatusFrame = (
   frame: TaskFrame,
 ): SpinnerState | null | undefined => {
-  // ===== STEP 1: Validate frame type =====
-  // Step 1a: Check if the frame is a status frame
-  // Step 1b: If not a status frame, return undefined to leave spinner unchanged
   if (frame.kind !== "status") {
     return undefined;
   }
 
-  // ===== STEP 2: Handle advisor source =====
-  // Step 2a: Check if the frame source is the advisor
   if (frame.source === "advisor") {
-    // ===== STEP 2a-1: Check for thinking stages =====
-    // Step 2a-1a: Check if the advisor is in a thinking stage
-    // Step 2a-1b: Check if the advisor has the "◌" icon (thinking indicator)
+    // If advisor is actively generating suggestions and thinking icon is set
     if (
       ADVISOR_THINKING_STAGES.has(frame.stage as AdvisorStage) &&
       frame.icon === "◌"
     ) {
-      // Step 2a-1c: Return a thinking spinner labeled "Advisor"
       return thinkingSpinner("Advisor");
     }
 
-    // ===== STEP 2a-2: Check for ready stage =====
-    // Step 2a-2a: Check if the advisor is in the ready stage
+    // Once advisor has completed draft and is ready for interaction
     if (frame.stage === "ready") {
-      // Step 2a-2b: Return null to clear the spinner (advisor is done thinking)
       return null;
     }
 
-    // ===== STEP 2a-3: Other advisor stages =====
-    // Step 2a-3a: For other advisor stages, return undefined to leave spinner unchanged
     return undefined;
   }
 
-  // ===== STEP 3: Handle agent activity thinking =====
-  // Step 3a: Check if the agent activity is in thinking stage
+  // Handle agent-level progress states
   if (frame.activity?.stage === "thinking") {
-    // Step 3b: Return a thinking spinner labeled "Agent"
     return thinkingSpinner("Agent");
   }
 
-  // ===== STEP 4: Handle agent stage thinking =====
-  // Step 4a: Check if the agent stage is thinking
   if (frame.stage === "thinking") {
-    // Step 4b: Return a thinking spinner labeled "Agent"
     return thinkingSpinner("Agent");
   }
 
-  // ===== STEP 5: Handle agent with activity =====
-  // Step 5a: Check if the agent has any activity
   if (frame.activity) {
-    // Step 5b: Return undefined to leave spinner unchanged (agent is doing something)
-    return undefined;
+    return workingSpinner(frame.activity.message);
   }
 
-  // ===== STEP 6: Default: clear spinner =====
-  // Step 6a: Return null to clear the spinner (agent is idle or done)
+  // Clear spinner when agent has finished all steps
   return null;
-}
+};
+

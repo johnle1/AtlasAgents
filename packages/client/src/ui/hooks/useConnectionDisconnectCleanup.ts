@@ -25,6 +25,9 @@ export type ConnectionDisconnectCleanupSetters = Pick<
   | "setAgentBoards"
 >;
 
+/**
+ * Resets task-related UI states to their default/idle values.
+ */
 const resetTaskUiState = (setters: ConnectionDisconnectCleanupSetters): void => {
   setBridgeTaskActive(false);
   setters.setTaskActive(false);
@@ -44,7 +47,17 @@ const resetTaskUiState = (setters: ConnectionDisconnectCleanupSetters): void => 
   setters.setAgentBoards([]);
 };
 
-/** Resets task UI and cancels pending dialogs when the server connection drops. */
+/**
+ * React hook to perform cleanup operations when the server connection is lost.
+ *
+ * @remarks
+ * Subscribes to connection status transitions. If the connection drops, it cancels any
+ * pending user prompts/approvals, stops task spinners/animations, resets internal bridge states,
+ * and appends an error notice to the history logs.
+ *
+ * @param connection - The active connection client.
+ * @param setters - State setters from the app context to reset the UI.
+ */
 export const useConnectionDisconnectCleanup = (
   connection: Connection,
   setters: ConnectionDisconnectCleanupSetters,
@@ -72,3 +85,4 @@ export const useConnectionDisconnectCleanup = (
     });
   }, [connection]);
 };
+
