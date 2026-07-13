@@ -1,11 +1,14 @@
+/**
+ * {@link LocalFileProxy} — sandboxed FS / shell / MCP facade for the client.
+ *
+ * @remarks
+ * Wired into the RSocket file responder so the server can ask the client to
+ * read/write files and run commands entirely under `workspaceRoot`.
+ */
+
 import * as path from "node:path";
 import type { ClientOpResponse, ClientRoute } from "@loopycode/shared";
-import {
-  isTaskActive,
-  startThinking,
-  startWorking,
-  stopAnimated,
-} from "../agentStatus.js";
+import { isTaskActive, startThinking, startWorking, stopAnimated } from "../agentStatus.js";
 import type { BashClass } from "../renderer.js";
 import { classifyCommand } from "./commandClassifier.js";
 import { QUIET_PROXY_ROUTES } from "./constants.js";
@@ -18,246 +21,213 @@ import {
 import { loadConfig } from "../config.js";
 import { assertInsideRoot, resolveAbsolutePath } from "./pathUtils.js";
 import { runShell } from "./shellRunner.js";
+import { tokenSaveWorkingLabel } from "../mcp/tokenSaveLabels.js";
 import type { DispatchContext } from "./types.js";
 
 /**
- * <Summary>
- * What it does:
- *   Provides a secure interface for file system operations and command execution within a workspace.
+ * Builds a short working-spinner label for long-running proxy routes.
  *
- * How it fits in the system:
- *   Acts as the central coordination point between the agent/client and local file system operations.
- *   Manages workspace state, validates paths, routes requests to handlers, and provides UI feedback.
- *   Ensures all operations stay within workspace boundaries and handles errors consistently.
- * </Summary>
+ * @param route - Client route id.
+ * @param payload - Request body (may include `path`, `command`, MCP fields).
+ * @returns Label string, or `null` when the route should use the generic `"Agent"`.
+ */
+const workingLabelForRoute = (
+  route: string,
+  payload: unknown,
+): string | null => {
+  const body = payload as Record<string, unknown>;
+  const path = String(body.path ?? "").trim();
+  switch (route) {
+    case "file.read":
+      return path ? `Reading ${path}` : "Reading file";
+    case "file.write":
+      return path ? `Writing ${path}` : "Writing file";
+    case "file.create_dir":
+      return path ? `Creating ${path}` : "Creating directory";
+    case "file.delete_file":
+      return path ? `Deleting ${path}` : "Deleting file";
+    case "command.run": {
+      const command = String(body.command ?? "").trim();
+      if (!command) return "Running command";
+      // Truncate so the status line stays readable for long command strings.
+      return command.length > 56
+        ? `Running ${command.slice(0, 56)}…`
+        : `Running ${command}`;
+    }
+    case "mcp.call": {
+      const tool = String(body.tool ?? "").trim();
+      const args = (body.arguments ?? {}) as Record<string, unknown>;
+      return tokenSaveWorkingLabel(tool, args);
+    }
+    default:
+      return null;
+  }
+};
+
+/**
+ * Secure local workspace proxy for file, shell, and allow-listed MCP routes.
+ *
+ * @remarks
+ * Holds the workspace root + current directory, validates every path against
+ * the root, and exposes {@link handle} as the single entry used by the RSocket
+ * responder. Mutating handlers perform their own approval UI; this class wraps
+ * dispatch in a {@link ClientOpResponse} envelope and manages working/thinking
+ * spinners (skipped for {@link QUIET_PROXY_ROUTES}).
+ *
+ * Call {@link setSessionAbortSignal} after connect so long shell runs abort when
+ * the RSocket session drops.
+ *
+ * @example
+ * ```ts
+ * const proxy = new LocalFileProxy("/home/user/project", (cwd) => {
+ *   console.log("cwd →", cwd);
+ * });
+ * proxy.setSessionAbortSignal(() => connection.getSessionAbortSignal());
+ *
+ * const result = await proxy.handle("file.read", { path: "README.md" });
+ * if (result.ok) console.log(result.data);
+ * ```
  */
 export class LocalFileProxy {
-  /**
-   * <Summary>
-   * What it does:
-   *   The root directory of the workspace that serves as the security boundary.
-   *
-   * Used by:
-   *   - All file operations — ensures paths stay within this boundary.
-   *   - Path validation functions — validates paths against this root.
-   *
-   * Produced by:
-   *   - constructor — initializes from provided workspace path.
-   *   - setWorkspaceRoot — updates when workspace is changed.
-   * </Summary>
-   */
+  /** Absolute sandbox root — ceiling for all path operations. */
   private workspaceRoot: string;
 
-  /**
-   * <Summary>
-   * What it does:
-   *   The current working directory within the workspace.
-   *
-   * Used by:
-   *   - Path resolution — used as base for relative paths.
-   *   - Directory operations — determines where operations are performed.
-   *   - Shell execution — sets the working directory for commands.
-   *
-   * Produced by:
-   *   - constructor — initializes to workspace root.
-   *   - setCurrentDir — updated by handlers when changing directories.
-   * </Summary>
-   */
+  /** Absolute cwd for relative paths and shell `cwd` (starts at the root). */
   private currentDir: string;
 
   /**
-   * <Summary>
-   * What it does:
-   *   Initializes the LocalFileProxy with a workspace root and optional directory change callback.
+   * Lazy getter for the live RSocket session abort signal.
+   * Re-read on each shell run so reload/reconnect picks up a new controller.
+   */
+  private sessionAbortSignal?: () => AbortSignal | undefined;
+
+  /**
+   * Creates a proxy bound to `workspaceRoot` (resolved absolute).
    *
-   * How it does it (step by step):
-   *   1. Resolve the provided workspace path to an absolute path.
-   *   2. Store the resolved path as the workspace root.
-   *   3. Set the current directory to the workspace root initially.
-   *   4. Store the optional callback for directory change notifications.
-   *
-   * Parameters:
-   *   @param workspaceRoot - The root directory of the workspace (can be relative or absolute).
-   *   @param onCwdChanged - Optional callback called when current directory changes.
-   * </Summary>
+   * @param workspaceRoot - Workspace path (relative or absolute).
+   * @param onCwdChanged - Optional UI callback when cwd changes.
    */
   constructor(
     workspaceRoot: string,
     private readonly onCwdChanged?: (cwd: string) => void,
   ) {
-    // ===== STEP 1: Resolve workspace root to absolute path =====
-    // Step 1a: Convert the provided workspace path to an absolute path
-    // Step 1b: This ensures consistent path handling regardless of input format
     this.workspaceRoot = path.resolve(workspaceRoot);
-
-    // ===== STEP 2: Initialize current directory =====
-    // Step 2a: Set the current directory to the workspace root initially
-    // Step 2b: User can navigate within the workspace starting from root
     this.currentDir = this.workspaceRoot;
   }
 
   /**
-   * <Summary>
-   * What it does:
-   *   Returns the current working directory.
+   * Returns the current working directory inside the workspace.
    *
-   * How it does it (step by step):
-   *   1. Return the currentDir field value.
-   *
-   * Returns:
-   *   @returns The current working directory path.
-   * </Summary>
+   * @returns Absolute cwd path.
    */
   getCwd = (): string => this.currentDir;
 
   /**
-   * <Summary>
-   * What it does:
-   *   Changes the workspace root and resets the current directory to the new root.
+   * Returns the absolute workspace root (sandbox ceiling).
    *
-   * How it does it (step by step):
-   *   1. Resolve the provided workspace path to an absolute path.
-   *   2. Update the workspace root field with the resolved path.
-   *   3. Reset the current directory to the new workspace root.
-   *   4. Call the onCwdChanged callback if provided to notify listeners.
+   * @returns Absolute root path.
+   */
+  getWorkspaceRoot = (): string => this.workspaceRoot;
+
+  /**
+   * Replaces the workspace root and resets cwd to that root.
    *
-   * Parameters:
-   *   @param workspacePath - The new workspace root directory (can be relative or absolute).
+   * @remarks
+   * Notifies {@link onCwdChanged} so prompts update. Does not migrate open
+   * relative state beyond resetting cwd to the new root.
    *
-   * Returns:
-   *   @returns Returns after updating state and notifying listeners.
-   * </Summary>
+   * @param workspacePath - New workspace path (resolved absolute).
    */
   setWorkspaceRoot = (workspacePath: string): void => {
-    // ===== STEP 1: Resolve workspace path to absolute =====
-    // Step 1a: Convert the provided workspace path to an absolute path
     const resolvedWorkspacePath = path.resolve(workspacePath);
-
-    // ===== STEP 2: Update workspace root =====
-    // Step 2a: Set the workspace root to the resolved path
     this.workspaceRoot = resolvedWorkspacePath;
-
-    // ===== STEP 3: Reset current directory =====
-    // Step 3a: Reset current directory to the new workspace root
-    // Step 3b: This ensures we start at the root of the new workspace
+    // Drop any prior subdirectory cwd — it may not exist under the new root.
     this.currentDir = resolvedWorkspacePath;
-
-    // ===== STEP 4: Notify listeners =====
-    // Step 4a: Call the callback if provided to notify of directory change
     this.onCwdChanged?.(this.currentDir);
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Resolves a relative path to an absolute path within the workspace.
+   * Wires the RSocket session abort getter used by shell execution.
    *
-   * How it does it (step by step):
-   *   1. Call the resolveAbsolutePath utility with workspace root, current directory, and the relative path.
-   *   2. The utility validates the path stays within workspace boundaries.
-   *   3. Return the validated absolute path.
+   * @param signalGetter - Returns the current session `AbortSignal`, if any.
+   */
+  setSessionAbortSignal = (
+    signalGetter: () => AbortSignal | undefined,
+  ): void => {
+    this.sessionAbortSignal = signalGetter;
+  };
+
+  /**
+   * Resolves a relative path against cwd and asserts it stays in the root.
    *
-   * Parameters:
-   *   @param relativePath - The path to resolve (can be relative or absolute).
-   *
-   * Returns:
-   *   @returns The validated absolute path guaranteed to be inside the workspace.
-   * </Summary>
+   * @param relativePath - Path relative to {@link getCwd} (absolute rejected).
+   * @returns Absolute path under the workspace.
+   * @throws {@link Error} When absolute or outside the root.
    */
   resolveAbsolute = (relativePath: string): string =>
     resolveAbsolutePath(this.workspaceRoot, this.currentDir, relativePath);
 
   /**
-   * <Summary>
-   * What it does:
-   *   Classifies a shell command's safety level (safe, dangerous, or cautious).
+   * Classifies a shell command for approval UI (`safe` / `dangerous` / `cautious`).
    *
-   * How it does it (step by step):
-   *   1. Call the classifyCommand utility with the provided command string.
-   *   2. The utility analyzes the command for dangerous patterns and safe operations.
-   *   3. Return the classification result.
-   *
-   * Parameters:
-   *   @param command - The shell command to classify (e.g., "rm -rf file.txt").
-   *
-   * Returns:
-   *   @returns One of "safe", "dangerous", or "cautious" indicating the command's risk level.
-   * </Summary>
+   * @param command - Full command line.
+   * @returns Heuristic {@link BashClass}.
    */
   classifyCommand = (command: string): BashClass => classifyCommand(command);
 
   /**
-   * <Summary>
-   * What it does:
-   *   Handles incoming proxy requests by routing them to appropriate handlers with UI feedback.
+   * Dispatches one client route and returns a {@link ClientOpResponse} envelope.
    *
-   * How it does it (step by step):
-   *   1. Check if the route is a quiet route that doesn't need a working spinner.
-   *   2. If not quiet, start the working spinner to show activity.
-   *   3. Build the dispatch context with current state and utilities.
-   *   4. Dispatch the request to the appropriate handler via the dispatch system.
-   *   5. Return success response with the handler's data.
-   *   6. If an error occurs, return error response with the error message.
-   *   7. In the finally block, restore UI state based on task activity.
+   * @remarks
+   * - If the session abort signal is already aborted → `{ ok: false, error: "Connection lost" }`
+   *   without running the handler.
+   * - Quiet routes skip the working spinner.
+   * - Handler throws become `{ ok: false, error: message }` (never thrown to the responder).
+   * - `finally` restores thinking spinner if a task is still active, else stops animation.
    *
-   * Parameters:
-   *   @param route - The route identifier that determines which handler to call.
-   *   @param payload - The request payload containing parameters for the handler.
+   * @param route - Wire route string (cast to {@link ClientRoute} for dispatch).
+   * @param payload - JSON body for the handler.
+   * @returns Success `{ ok: true, data }` or failure `{ ok: false, error }`.
    *
-   * Returns:
-   *   @returns Standardized response with ok status and either data or error.
-   * </Summary>
+   * @example
+   * ```ts
+   * const res = await proxy.handle("command.run", { command: "ls" });
+   * if (!res.ok) console.error(res.error);
+   * ```
    */
   handle = async (
     route: string,
     payload: unknown,
   ): Promise<ClientOpResponse> => {
-    // ===== STEP 1: Determine if UI feedback is needed =====
-    // Step 1a: Check if this route is a quiet route (instant metadata operations)
-    // Step 1b: Quiet routes don't need spinners because they complete instantly
+    const abortSignal = this.sessionAbortSignal?.();
+    if (abortSignal?.aborted) {
+      return { ok: false, error: "Connection lost" };
+    }
+
     const shouldShowWorkingSpinner = !QUIET_PROXY_ROUTES.has(route);
 
-    // ===== STEP 2: Start working indicator =====
-    // Step 2a: If this route needs UI feedback, start the working spinner
     if (shouldShowWorkingSpinner) {
-      startWorking("Agent");
+      startWorking(workingLabelForRoute(route, payload) ?? "Agent");
     }
 
     try {
-      // ===== STEP 3: Build dispatch context =====
-      // Step 3a: Create the dispatch context with current workspace state
-      // Step 3b: This context is passed to all handlers for state access
       const context = this.buildContext();
-
-      // ===== STEP 4: Dispatch request to handler =====
-      // Step 4a: Call the dispatch system to route the request to the appropriate handler
-      // Step 4b: The handler performs the actual operation and returns data
       const responseData = await dispatch(
         context,
         route as ClientRoute,
         payload,
       );
-
-      // ===== STEP 5: Return success response =====
-      // Step 5a: Return standardized success response with the handler's data
       return { ok: true, data: responseData };
     } catch (error) {
-      // ===== STEP 6: Handle errors =====
-      // Step 6a: Extract error message from Error object or convert to string
-      // Step 6b: Return standardized error response with the error message
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       return { ok: false, error: errorMessage };
     } finally {
-      // ===== STEP 7: Restore UI state =====
-      // Step 7a: If we showed a working spinner, restore the appropriate UI state
       if (shouldShowWorkingSpinner) {
-        // Step 7b: Check if there's still an active task running
+        // Prefer thinking over a dead spinner if the overall task is still running.
         if (isTaskActive()) {
-          // Step 7c: If task is active, switch to thinking indicator
           startThinking("Agent");
         } else {
-          // Step 7d: If no active task, stop all animated indicators
           stopAnimated();
         }
       }
@@ -265,21 +235,10 @@ export class LocalFileProxy {
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Generates a hierarchical string representation of the directory structure up to a specified depth.
+   * Builds an indented tree string for the current directory.
    *
-   * How it does it (step by step):
-   *   1. Build a context object with workspace root and current directory.
-   *   2. Call the listStructure implementation with the context and depth parameter.
-   *   3. Return the generated directory structure string.
-   *
-   * Parameters:
-   *   @param depth - Maximum depth to traverse (0 = current directory only, 1 = one level deep, etc.).
-   *
-   * Returns:
-   *   @returns String representation of the directory structure with indentation.
-   * </Summary>
+   * @param depth - Max nesting depth for {@link listStructure}.
+   * @returns Tree text.
    */
   listStructure = async (depth: number): Promise<string> =>
     listStructureImpl(
@@ -291,21 +250,10 @@ export class LocalFileProxy {
     );
 
   /**
-   * <Summary>
-   * What it does:
-   *   Lists the entries in a directory, returning their names and directory status.
+   * Lists one directory’s entries (skipping {@link SKIP_DIR_NAMES}).
    *
-   * How it does it (step by step):
-   *   1. Call the listDirectoryEntries implementation with workspace root and directory path.
-   *   2. The implementation validates the path and reads the directory contents.
-   *   3. Return the array of entry objects with name and isDirectory properties.
-   *
-   * Parameters:
-   *   @param dirPath - The directory path to list (can be relative or absolute).
-   *
-   * Returns:
-   *   @returns Array of entry objects.
-   * </Summary>
+   * @param dirPath - Absolute or resolvable directory path.
+   * @returns Name + isDirectory pairs.
    */
   listDirectoryEntries = async (
     dirPath: string,
@@ -313,23 +261,10 @@ export class LocalFileProxy {
     listDirectoryEntriesImpl(this.workspaceRoot, dirPath);
 
   /**
-   * <Summary>
-   * What it does:
-   *   Expands a directory in the UI by listing its contents and marking it as expanded.
+   * Expands a directory in the interactive list UI.
    *
-   * How it does it (step by step):
-   *   1. Build a context object with workspace root and a bound listDirectoryEntries function.
-   *   2. Call the expandDirectory implementation with the context, directory path, and indent level.
-   *   3. The implementation lists the entries and displays them with proper indentation.
-   *   4. Return when the directory has been expanded and entries displayed.
-   *
-   * Parameters:
-   *   @param dirPath - The directory path to expand.
-   *   @param indent - The indentation level to use for displaying the entries.
-   *
-   * Returns:
-   *   @returns Resolves when the directory has been expanded.
-   * </Summary>
+   * @param dirPath - Directory to expand.
+   * @param indent - Parent row indent for nested display.
    */
   expandDirectory = async (dirPath: string, indent: number): Promise<void> =>
     expandDirectoryImpl(
@@ -343,60 +278,32 @@ export class LocalFileProxy {
     );
 
   /**
-   * <Summary>
-   * What it does:
-   *   Builds the dispatch context object containing workspace state and utility functions.
+   * Snapshot of workspace state + helpers passed into {@link dispatch}.
    *
-   * How it does it (step by step):
-   *   1. Create an object with workspace root and current directory.
-   *   2. Add the resolveAbsolute utility function for path resolution.
-   *   3. Add the setCurrentDir function that validates and updates the current directory.
-   *   4. Add the classifyCommand function for command safety assessment.
-   *   5. Add the runShell function bound to the current directory.
-   *   6. Add the listStructure function for directory structure generation.
-   *   7. Add the onCwdChanged callback for directory change notifications.
-   *   8. Return the complete context object.
+   * @remarks
+   * `runShell` always uses the **current** `currentDir`, config timeout, and
+   * latest session abort signal at call time.
    *
-   * Returns:
-   *   @returns The complete dispatch context with all required state and utilities.
-   * </Summary>
+   * @returns Fresh {@link DispatchContext} for one `handle` invocation.
    */
   private buildContext = (): DispatchContext => ({
-    // ===== STEP 1: Add workspace state =====
-    // Step 1a: Include workspace root for security boundary validation
     workspaceRoot: this.workspaceRoot,
-    // Step 1b: Include current directory for path resolution and operations
     currentDir: this.currentDir,
-
-    // ===== STEP 2: Add path utilities =====
-    // Step 2a: Include path resolution function for safe path handling
     resolveAbsolute: this.resolveAbsolute,
-
-    // ===== STEP 3: Add directory change handler =====
-    // Step 3a: Include function to change current directory with validation
     setCurrentDir: (absolutePath: string) => {
-      // Step 3b: Validate the new path is inside workspace root
       assertInsideRoot(this.workspaceRoot, absolutePath);
-      // Step 3c: Update the current directory field
       this.currentDir = absolutePath;
       this.onCwdChanged?.(absolutePath);
     },
-
-    // ===== STEP 4: Add command utilities =====
-    // Step 4a: Include command classification function for safety assessment
     classifyCommand: this.classifyCommand,
-
-    // ===== STEP 5: Add shell execution =====
-    // Step 5a: Include shell execution function bound to current directory
     runShell: (command: string) =>
-      runShell(command, this.currentDir, loadConfig().shellTimeoutMs),
-
-    // ===== STEP 6: Add directory structure utility =====
-    // Step 6a: Include directory structure generation function
+      runShell(
+        command,
+        this.currentDir,
+        loadConfig().shellTimeoutMs,
+        this.sessionAbortSignal?.(),
+      ),
     listStructure: this.listStructure,
-
-    // ===== STEP 7: Add callback =====
-    // Step 7a: Include directory change callback for notifications
     onCwdChanged: this.onCwdChanged,
   });
 }

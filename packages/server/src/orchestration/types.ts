@@ -41,6 +41,8 @@ export type TaskModelOverrides = {
   agentModel?: string
   advisorTemp?: number
   agentTemp?: number
+  /** When true, use native Ollama tool_calls for the agent model. */
+  agentModelSupportsTools?: boolean
   /** When true, agent logs raw turns and parsed tools to stderr. */
   debug?: boolean
 }
@@ -60,10 +62,18 @@ export type TaskModelOverrides = {
  */
 export interface Message {
   /** Message role for the chat API. */
-  role: 'system' | 'user' | 'assistant'
+  role: 'system' | 'user' | 'assistant' | 'tool'
 
   /** Plain text body for this turn. */
   content: string
+
+  /** Native tool calls on assistant turns (Ollama /api/chat). */
+  tool_calls?: {
+    function: { name: string; arguments: Record<string, unknown> }
+  }[]
+
+  /** Tool name when role is tool (Ollama tool result shape). */
+  tool_name?: string
 }
 
 /**
@@ -80,7 +90,9 @@ export interface Message {
  */
 export interface ChatOptions {
   /** Sampling temperature (0 = deterministic, higher = more random). */
-  temperature: number
+  temperature: number;
+  /** When aborted, in-flight Ollama streaming requests are cancelled. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -179,6 +191,18 @@ export type PlanReviewResponse = {
  *   - AdvisorOrchestrator — after each Agent.run wave completes.
  * </Summary>
  */
+/** Structured result from an agent subtask finish tool call. */
+export interface ToolResultSummary {
+  /** One-sentence accomplishment summary. */
+  summary: string
+
+  /** Short bullets for dependent subtasks. */
+  keyFindings: string[]
+
+  /** Paths written during this subtask (auto-tracked, not model-provided). */
+  filesTouched: string[]
+}
+
 export interface SubtaskResult {
   /** Matches PlannedSubtask.id. */
   id: number

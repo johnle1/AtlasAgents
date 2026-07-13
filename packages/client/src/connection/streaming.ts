@@ -1,56 +1,64 @@
+/**
+ * RSocket `requestStream` helpers for tasks and long-running server operations.
+ *
+ * @remarks
+ * Implements credit-based backpressure (`STREAM_WINDOW`), sequential frame
+ * handling (so async `onFrame` callbacks never race), and thin wrappers that
+ * build JSON bodies for task execution, model pulls, and explore streams.
+ * {@link Connection.sendTask} / {@link Connection.sendStream} call these after
+ * waiting for a live socket.
+ */
+
 import type { Payload, RSocket } from "@rsocket/core";
 import type { TaskFrame } from "../frames.js";
 import { decodeFrame } from "../frames.js";
 import type { Config } from "../config.js";
-import type { TaskStreamPayload } from "./types.js";
 
 /**
- * <Summary>
- * What it does:
- *   Number of stream items requested at a time for RSocket backpressure control.
+ * Initial / refill credit window for RSocket stream backpressure.
  *
- * Used by:
- *   - streamRequest — initial budget and refill threshold for requestStream.
+ * @remarks
+ * The client starts by requesting this many items. When remaining credit drops
+ * below half the window, it requests another full window so the pipeline stays
+ * fed without buffering unbounded frames in memory. `64` is a conventional
+ * balance of throughput vs. peak buffered payloads for CLI UIs.
  *
- * Produced by:
- *   - Module constant — fixed at 64 per RSocket best practice.
- * </Summary>
+ * @defaultValue `64`
  */
 export const STREAM_WINDOW = 64;
 
 /**
- * <Summary>
- * What it does:
- *   Sends a streaming request to the server via RSocket requestStream and
- *   dispatches TaskFrames to callbacks with backpressure control.
+ * Low-level `requestStream` with decode, callbacks, and credit refill.
  *
- * How it does it (step by step):
- *   1. Serialises the request body to a UTF-8 JSON Buffer.
- *   2. Builds the RSocket Payload with data and password metadata.
- *   3. Creates a Promise wrapper for async control.
- *   4. Initializes settlement guard to prevent double-resolution.
- *   5. Initializes backpressure budget to STREAM_WINDOW (64).
- *   6. Defines completion handler to safely finalize the promise.
- *   7. Initializes frame processing chain for sequential async callbacks.
- *   8. Calls rsocket.requestStream with initial budget of STREAM_WINDOW.
- *   9. In onError: finishes the promise with the error.
- *   10. In onNext: decodes frame, calls onToken if token frame, calls onFrame.
- *   11. Decrements budget; requests more when below half (backpressure).
- *   12. If isComplete on onNext: waits for frame chain, then completes.
- *   13. In onComplete: waits for frame chain to finish, then completes.
+ * @remarks
+ * - Decodes each payload via {@link decodeFrame}; unknown / empty payloads are skipped.
+ * - Token frames optionally fan out to `onToken` **before** `onFrame` so the UI
+ *   can paint streaming text without waiting on heavier frame handlers.
+ * - Frames are serialized on a Promise chain: even if `onFrame` is async, later
+ *   frames wait — preserving server order for task state machines.
+ * - Stream end is signaled by `onNext(..., isComplete)` and/or `onComplete`;
+ *   both wait for the frame chain to drain before resolving.
  *
- * Parameters:
- *   @param rsocket - The live RSocket connection instance.
- *   @param body - The request body to send as JSON.
- *   @param metadata - The auth metadata Buffer.
- *   @param onFrame - Callback
- *     invoked with each TaskFrame from the server.
- *   @param {(token: string) => void} [onToken] — Optional callback invoked
- *     with token text for incremental display.
+ * @param rsocket - Live RSocket connection.
+ * @param body - JSON-serializable request body (task / pull / explore).
+ * @param metadata - Auth metadata Buffer.
+ * @param onFrame - Invoked for every successfully decoded {@link TaskFrame}.
+ * @param onToken - Optional incremental token text for streaming display.
+ * @returns Resolves when the server completes the stream after handlers finish.
+ * @throws {@link Error} When RSocket reports `onError`, or an `onFrame` /
+ *   decode path rejects.
  *
- * Returns:
- *   @returns Resolves when the server finishes streaming.
- * </Summary>
+ * @example
+ * ```ts
+ * await streamRequest(
+ *   rsocket,
+ *   { kind: "explore" },
+ *   authMetadata(config),
+ *   async (frame) => {
+ *     console.log(frame.kind);
+ *   },
+ * );
+ * ```
  */
 export async function streamRequest(
   rsocket: RSocket,
@@ -59,73 +67,39 @@ export async function streamRequest(
   onFrame: (frame: TaskFrame) => void | Promise<void>,
   onToken?: (token: string) => void,
 ): Promise<void> {
-  // ===== STEP 1: Serialize Request Body =====
-  // Step 1a: Convert request body to JSON string
-  // Step 1b: Encode as UTF-8 bytes for RSocket transmission
   const dataBuf = Buffer.from(JSON.stringify(body), "utf-8");
-
-  // ===== STEP 2: Build Payload with Metadata =====
-  // Step 2a: Create RSocket Payload with data and password metadata
   const payload: Payload = {
     data: dataBuf,
     metadata,
   };
 
-  // ===== STEP 3: Wrap in Promise for Async Control =====
-  // Step 3a: Return promise that resolves when stream completes or rejects on error
   await new Promise<void>((resolve, reject) => {
-    // ===== STEP 3b: Initialize Settlement Guard =====
-    // Prevent double-resolution from multiple callback firings
     let settled = false;
-
-    // ===== STEP 3c: Initialize Backpressure Budget =====
-    // Start with STREAM_WINDOW (64) items requested from server
+    // Local credit accounting mirrors what we last requested from the peer.
     let pendingBudget = STREAM_WINDOW;
 
-    // ===== STEP 3d: Define Completion Handler =====
-    // Helper function to safely finalize the promise
     const finish = (err?: Error) => {
-      // Skip if already settled
       if (settled) return;
-      // Mark as settled to prevent double-resolution
       settled = true;
-      // Reject if error provided, else resolve successfully
       if (err) reject(err);
       else resolve();
     };
 
-    // ===== STEP 3e: Initialize Frame Processing Chain =====
-    // Queue frames sequentially even if callbacks are async
+    // Serialize frame handling so async onFrame work cannot reorder task events.
     let frameChain = Promise.resolve();
 
-    // ===== STEP 4: Call requestStream with Callbacks =====
-    // Start the streaming request with initial budget of STREAM_WINDOW
     const requester = rsocket.requestStream(payload, STREAM_WINDOW, {
-      // ===== STEP 4a: onError Handler =====
-      // If server returns error, finish the promise with that error
       onError: (e: Error) => finish(e),
 
-      // ===== STEP 4b: onNext Handler =====
-      // Called for each streamed item
       onNext: (p: Payload, isComplete: boolean) => {
-        // ===== STEP 4b-i: Queue Frame Processing =====
-        // Chain callbacks sequentially to maintain order
         frameChain = frameChain
           .then(async () => {
-            // ===== STEP 4b-ii: Decode Frame =====
-            // Parse payload data buffer into TaskFrame object
             const frame = decodeFrame(p.data ?? undefined);
-
-            // ===== STEP 4b-iii: Process Frame =====
-            // If frame decoded successfully, process it
             if (frame) {
-              // ===== STEP 4b-iv: Handle Token Callbacks =====
-              // If this is a token frame and callback provided, call it
+              // Tokens first: UI can stream glyphs while heavier handlers run.
               if (frame.kind === "token" && onToken) {
                 onToken(frame.text);
               }
-              // ===== STEP 4b-v: Invoke Frame Callback =====
-              // Call the main frame callback (may be async)
               await onFrame(frame);
             }
           })
@@ -133,66 +107,59 @@ export async function streamRequest(
             finish(err instanceof Error ? err : new Error(String(err))),
           );
 
-        // ===== STEP 4b-vi: Decrement Budget =====
-        // We consumed one item from the budget
         pendingBudget--;
 
-        // ===== STEP 4b-vii: Manage Backpressure =====
-        // If budget falls below half, request more items
-        // This prevents the server from overwhelming us with data
+        // Refill when half consumed so the sender rarely stalls on credit=0.
         if (pendingBudget < STREAM_WINDOW / 2) {
-          // Request another STREAM_WINDOW items
           requester.request(STREAM_WINDOW);
-          // Update budget accounting
           pendingBudget += STREAM_WINDOW;
         }
 
-        // ===== STEP 4b-viii: Handle Stream Completion =====
-        // RSocket may signal end-of-stream via isComplete on the final onNext
         if (isComplete) {
+          // Drain in-flight handlers before resolving the outer Promise.
           void frameChain.then(() => finish());
         }
       },
 
-      // ===== STEP 4c: onComplete Handler =====
-      // Called when stream ends successfully (with or without items)
-      // Wait for any pending frame callbacks to finish, then complete
       onComplete: () => {
         void frameChain.then(() => finish());
       },
 
-      // ===== STEP 4d: onExtension Handler =====
-      // RSocket extension protocol; not used here
       onExtension: () => {},
     });
   });
 }
 
 /**
- * <Summary>
- * What it does:
- *   Streams a task to the server via RSocket requestStream and invokes a
- *   callback for each token received, creating the ChatGPT-style streaming
- *   effect in the CLI.
+ * Streams a user task using config models, temperatures, and agent cap.
  *
- * How it does it (step by step):
- *   1. Builds a TaskStreamPayload with the task text, model names, and temps.
- *   2. Calls streamRequest with the constructed body.
+ * @remarks
+ * Builds the task request body (`kind: "task"`) from `config`, overriding
+ * `maxAgents` when the caller passes an explicit value (otherwise
+ * `config.agentCap`). Delegates protocol work to {@link streamRequest}.
  *
- * Parameters:
- *   @param task - The user's task description to execute.
- *   @param config - The configuration object with model settings.
- *   @param metadata - The auth metadata Buffer.
- *   @param rsocket - The live RSocket connection instance.
- *   @param onFrame - Callback
- *     invoked with each TaskFrame from the server.
- *   @param {(token: string) => void} [onToken] — Optional callback invoked
- *     with token text for incremental display.
- *   @param {number} [maxAgents] — Optional max agents setting.
+ * @param task - User-facing task description.
+ * @param config - Provides models, temps, and default `agentCap`.
+ * @param metadata - Auth metadata Buffer.
+ * @param rsocket - Live RSocket connection.
+ * @param onFrame - Receives each decoded task frame.
+ * @param onToken - Optional streaming token sink for the CLI.
+ * @param maxAgents - Optional concurrency hint (`1`, `2`, `"max"`, or a number).
+ * @returns Resolves when the task stream completes.
+ * @throws {@link Error} Propagates stream / handler failures from {@link streamRequest}.
  *
- * Returns:
- *   @returns Resolves when the server finishes streaming.
- * </Summary>
+ * @example
+ * ```ts
+ * await sendTask(
+ *   "Fix the flaky reconnect test",
+ *   config,
+ *   authMetadata(config),
+ *   rsocket,
+ *   (frame) => console.log(frame.kind),
+ *   (token) => process.stdout.write(token),
+ *   2,
+ * );
+ * ```
  */
 export async function sendTask(
   task: string,
@@ -203,10 +170,6 @@ export async function sendTask(
   onToken?: (token: string) => void,
   maxAgents?: 1 | 2 | "max" | number,
 ): Promise<void> {
-  // ===== STEP 1: Build Task Payload =====
-  // Step 1a: Create TaskStreamPayload with task text and model config
-  // Step 1b: Include advisor and agent model names and temperature settings
-  // Step 1c: Temperatures control output creativity (0.0=deterministic, 1.0=random)
   await streamRequest(
     rsocket,
     {
@@ -225,30 +188,31 @@ export async function sendTask(
 }
 
 /**
- * <Summary>
- * What it does:
- *   Streams long-running server operations (like model pulls) and dispatches
- *   JSON TaskFrames to a callback for real-time progress display.
+ * Streams a long-running server operation (model pull or explore).
  *
- * How it does it (step by step):
- *   1. Checks the kind field to determine the operation type.
- *   2. For "models.pull": builds body with kind and model name from payload.
- *   3. For "explore": builds body with kind only (no payload needed).
- *   4. Calls streamRequest with the constructed body and onFrame callback.
- *   5. streamRequest handles the RSocket streaming and backpressure.
+ * @remarks
+ * Discriminated `opts.kind` selects the JSON body shape. Model pulls send
+ * `{ kind: "models.pull", name }`; explore sends `{ kind: "explore" }`. Progress
+ * and results arrive as {@link TaskFrame}s on `opts.onFrame`.
  *
- * Parameters:
- *   @param opts - Operation-specific options.
- *     @param opts - .kind — Either "models.pull" or "explore".
- *     @param opts - .payload — Operation-specific data (e.g., { name: string }).
- *     @param opts - .onFrame — Callback
- *       invoked with each TaskFrame from the server.
- *   @param metadata - The auth metadata Buffer.
- *   @param rsocket - The live RSocket connection instance.
+ * @param opts - Operation kind, payload, and frame callback.
+ * @param metadata - Auth metadata Buffer.
+ * @param rsocket - Live RSocket connection.
+ * @returns Resolves when the operation stream completes.
+ * @throws {@link Error} Propagates stream / handler failures from {@link streamRequest}.
  *
- * Returns:
- *   @returns Resolves when the server finishes streaming.
- * </Summary>
+ * @example
+ * ```ts
+ * await sendStream(
+ *   {
+ *     kind: "models.pull",
+ *     payload: { name: "gemma3:27b" },
+ *     onFrame: (frame) => console.log(frame),
+ *   },
+ *   authMetadata(config),
+ *   rsocket,
+ * );
+ * ```
  */
 export async function sendStream(
   opts:
@@ -265,17 +229,11 @@ export async function sendStream(
   metadata: Buffer,
   rsocket: RSocket,
 ): Promise<void> {
-  // ===== STEP 1: Build Request Body =====
-  // Step 1a: Check operation kind and build appropriate request body
-  // Step 1b: For "models.pull", include the model name from payload
-  // Step 1c: For "explore", just include the kind (no payload needed)
+  // Flatten pull payload so the server sees `name` at the top level of the body.
   const body =
     opts.kind === "models.pull"
       ? { kind: opts.kind, name: opts.payload.name }
       : { kind: "explore" };
 
-  // ===== STEP 2: Delegate to Stream Request =====
-  // Step 2a: Call streamRequest to handle the RSocket streaming logic
-  // Step 2b: Pass the constructed body and the frame callback
   await streamRequest(rsocket, body, metadata, opts.onFrame);
 }

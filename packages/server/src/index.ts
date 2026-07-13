@@ -20,6 +20,7 @@ import { createContainer } from "./container.js";
 import { installUserDataDefaults } from "./installUserDataDefaults.js";
 import { RSocketServer } from "./server/rsocket/rsocketServer.js";
 import { ensureOllamaRunning } from "./ollama/lifecycle.js";
+import { syncAdvisorToolSupport, syncAgentToolSupport } from "./ollama/syncAgentToolSupport.js";
 import { cleanupOldSnapshots } from "./workspace/cleanup/snapshotCleanup.js";
 import { logger } from "./logger.js";
 
@@ -391,7 +392,8 @@ const main = async (): Promise<void> => {
   // ===== ADVISOR MODEL CONFIGURATION CHECK =====
   // Step 19: Verify advisor model is configured
   try {
-    await app.config.getAdvisorModel();
+    const advisorModel = await app.config.getAdvisorModel();
+    await syncAdvisorToolSupport(app.ollama, app.config, advisorModel);
   } catch (error) {
     // Step 20: Handle missing advisor model configuration
     if (error instanceof ConfigError) {
@@ -406,7 +408,8 @@ const main = async (): Promise<void> => {
   // ===== AGENT MODEL CONFIGURATION CHECK =====
   // Step 21: Verify agent model is configured
   try {
-    await app.config.getAgentModel();
+    const agentModel = await app.config.getAgentModel();
+    await syncAgentToolSupport(app.ollama, app.config, agentModel);
   } catch (error) {
     // Step 22: Handle missing agent model configuration
     if (error instanceof ConfigError) {

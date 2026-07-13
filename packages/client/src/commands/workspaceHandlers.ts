@@ -1,9 +1,9 @@
 /**
- * Workspace-related command handlers.
+ * Workspace root and cwd slash commands: `/workspace` and `/cwd`.
  *
- * This module handles commands for managing workspace and current directory:
- * - /workspace set
- * - /cwd
+ * @remarks
+ * `/workspace set` updates persisted config and the live {@link LocalFileProxy}
+ * root together so the sandbox and prompt stay aligned.
  */
 
 import { updateConfig } from "../config.js";
@@ -14,27 +14,22 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 
 /**
- * <Summary>
- * What it does:
- *   Handles "/workspace set" to change the workspace directory.
+ * Handles `/workspace set <path>` — changes the client workspace root.
  *
- * How it does it (step by step):
- *   1. Validates that subcommand is "set".
- *   2. Expands tilde (~) to home directory if present.
- *   3. Resolves the path to an absolute path.
- *   4. Validates that the path exists and is a directory.
- *   5. Updates config with the new workspace path.
- *   6. Updates file proxy and prompts if available.
+ * @remarks
+ * Expands a leading `~` to the home directory, resolves to absolute, and
+ * requires an existing directory. Then updates config, calls
+ * `fileProxy.setWorkspaceRoot` when available, and fires `onPromptUpdate`.
  *
- * Parameters:
- *   @param sub - Subcommand: must be "set".
- *   @param arg - Path to the workspace directory.
- *   @param fileProxy - Optional file proxy instance.
- *   @param onPromptUpdate - Optional callback for prompt updates.
+ * @param sub - Must be `"set"`; anything else prints usage.
+ * @param arg - Path to the new workspace directory.
+ * @param fileProxy - Optional live proxy to update in-process.
+ * @param onPromptUpdate - Optional UI callback after a successful change.
  *
- * Returns:
- *   @returns called for side effects only.
- * </Summary>
+ * @example
+ * ```ts
+ * await handleWorkspace("set", "~/code/my-app", fileProxy, refreshPrompt);
+ * ```
  */
 export const handleWorkspace = async (
   sub: string,
@@ -42,24 +37,24 @@ export const handleWorkspace = async (
   fileProxy: LocalFileProxy | undefined,
   onPromptUpdate: (() => void) | undefined,
 ): Promise<void> => {
-  // Validate that subcommand is "set"
   if (sub !== "set") {
     printError("Usage: /workspace set <path>");
     return;
   }
+
   const rawPath = arg.trim();
   if (!rawPath) {
     printError("Usage: /workspace set <path>");
     return;
   }
-  // Expand tilde (~) to home directory if present
+
+  // Shell-style ~ expansion so "/workspace set ~/proj" works without the shell.
   const expandedPath = rawPath.startsWith("~")
     ? path.join(os.homedir(), rawPath.slice(1))
     : rawPath;
-  // Resolve to absolute path
   const resolvedPath = path.resolve(expandedPath);
+
   try {
-    // Validate that the path exists and is a directory
     const stats = fs.statSync(resolvedPath);
     if (!stats.isDirectory()) {
       printError("Path is not a directory.");
@@ -69,7 +64,7 @@ export const handleWorkspace = async (
     printError(`Directory not found: ${resolvedPath}`);
     return;
   }
-  // Update config with new workspace path
+
   updateConfig({ workspace: resolvedPath });
   fileProxy?.setWorkspaceRoot(resolvedPath);
   printSuccessOp(`Workspace set to ${resolvedPath}`);
@@ -77,25 +72,20 @@ export const handleWorkspace = async (
 };
 
 /**
- * <Summary>
- * What it does:
- *   Handles "/cwd" to display the current working directory.
+ * Handles `/cwd` — prints the active working directory inside the workspace.
  *
- * How it does it (step by step):
- *   1. Gets the current working directory from file proxy or process.
- *   2. Prints the directory path to the console.
+ * @remarks
+ * Prefers {@link LocalFileProxy.getCwd} when the proxy exists (tracks `cd` via
+ * the file proxy). Falls back to `process.cwd()` before a proxy is attached.
  *
- * Parameters:
- *   @param fileProxy - Optional file proxy instance.
+ * @param fileProxy - Optional file proxy instance.
  *
- * Returns:
- *   @returns called for side effects only.
- * </Summary>
+ * @example
+ * ```ts
+ * handleCwd(fileProxy); // "  /Users/…/project/src"
+ * ```
  */
-export const handleCwd = (
-  fileProxy: LocalFileProxy | undefined,
-): void => {
-  // Get current working directory from file proxy or process
+export const handleCwd = (fileProxy: LocalFileProxy | undefined): void => {
   const currentWorkingDirectory = fileProxy?.getCwd() ?? process.cwd();
   printLine(`  ${currentWorkingDirectory}`);
 };

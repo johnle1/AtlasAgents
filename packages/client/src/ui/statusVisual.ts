@@ -49,6 +49,7 @@ export const isWorkingStage = (stage?: AgentStage | AdvisorStage): boolean =>
   stage === "running" ||
   stage === "reading" ||
   stage === "writing" ||
+  stage === "searching" ||
   stage === "thinking";
 
 /**
@@ -185,6 +186,9 @@ export const resolveTaskLifecycleVisual = (
 
     case "blocked":
       return { glyph: "□", dim: true };
+
+    case "failed":
+      return { glyph: "✗", color: "red" };
   }
 };
 

@@ -6,71 +6,9 @@
  * pending user interactions (prompts and approvals), and streaming token handlers.
  */
 
-import type { Config } from "../../config.js";
-import type {
-  AgentBoardState,
-  AgentStatusState,
-  ApprovalRequest,
-  ApprovalResult,
-  HistoryItem,
-  PromptRequest,
-  PromptResult,
-  SpinnerState,
-} from "../types.js";
+import type { BridgeHooks, PendingApproval, PendingPrompt } from "./types.js";
 
-/**
- * Event hook callbacks registered by the React root context to receive updates from backend actions.
- */
-export type BridgeHooks = {
-  /** Callback invoked when a history item is appended. */
-  onHistoryAppend?: (historyItem: HistoryItem) => void;
-  /** Callback invoked when streaming text is set or cleared. */
-  onStreamingSet?: (streamingText: string | null) => void;
-  /** Callback invoked when spinner state changes. */
-  onSpinner?: (spinnerState: SpinnerState | null) => void;
-  /** Callback invoked to update agent statuses map. */
-  onAgentStatuses?: (
-    statusUpdater: (
-      previousStatusMap: Map<number | "advisor", AgentStatusState>,
-    ) => Map<number | "advisor", AgentStatusState>,
-  ) => void;
-  /** Callback invoked to update agent boards array. */
-  onAgentBoards?: (
-    boardUpdater: (previousBoards: AgentBoardState[]) => AgentBoardState[],
-  ) => void;
-  /** Callback invoked when an approval request changes. */
-  onApprovalChange?: (approvalRequest: ApprovalRequest | null) => void;
-  /** Callback invoked when a prompt request changes. */
-  onPromptChange?: (promptRequest: PromptRequest | null) => void;
-  /** Callback invoked when busy state changes. */
-  onBusy?: (isBusy: boolean) => void;
-  /** Callback invoked when agent-task active state changes. */
-  onTaskActive?: (isTaskActive: boolean) => void;
-  /** Callback invoked when current working directory changes. */
-  onCwd?: (currentWorkingDirectory: string) => void;
-  /** Callback invoked when banner should be refreshed. */
-  onBannerRefresh?: (configuration: Config) => void;
-};
-
-/**
- * Tracks an active pending user approval promise-resolver pair.
- */
-export type PendingApproval = {
-  /** The approval request metadata. */
-  req: ApprovalRequest;
-  /** The promise resolver callback triggered when the user responds. */
-  resolve: (approvalResult: ApprovalResult) => void;
-};
-
-/**
- * Tracks an active pending user text/choice prompt promise-resolver pair.
- */
-export type PendingPrompt = {
-  /** The prompt request metadata. */
-  req: PromptRequest;
-  /** The promise resolver callback triggered when the user submits input. */
-  resolve: (promptResult: PromptResult) => void;
-};
+export type { BridgeHooks, PendingApproval, PendingPrompt } from "./types.js";
 
 /**
  * The internal structure of the global bridge state.
@@ -197,4 +135,3 @@ export const setStreamingTokenHandler = (
 ): void => {
   bridgeGlobalState.streamingTokenHandler = tokenHandler;
 };
-

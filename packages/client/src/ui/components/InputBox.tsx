@@ -4,32 +4,36 @@ import TextInput from "ink-text-input";
 import { useAppContext } from "../../DataContext.js";
 
 /**
- * <Summary>
- * What it does:
- *   Renders the user input box with prompt label and text input field.
+ * Renders the primary user input terminal field.
  *
- * How it fits in the system:
- *   Provides the main input interface for user commands and responses.
- *   Shows a prompt label and either an active input field or disabled
- *   indicator when input is not available (e.g., during processing).
- * </Summary>
+ * @remarks
+ * Uses `ink-text-input` to capture keystrokes and update the prompt text state.
+ * When the input is blocked (e.g. while a task is processing), it prints a dim placeholder
+ * ellipsis and ignores keypress events to prevent typing buffer overflow.
+ *
+ * @example
+ * ```tsx
+ * import React from "react";
+ * import { render } from "ink";
+ * import { InputBox } from "./InputBox.js";
+ * 
+ * // Note: Requires parent wrapper with active DataContext.
+ * ```
  */
 export const InputBox: React.FC = () => {
-  // ===== STATE ACCESS =====
+  // Select active input parameters and submit callbacks from context.
   const { prompt, input, setInput, handleSubmit, inputDisabled } =
     useAppContext();
 
   return (
     <Box flexDirection="row" marginTop={1}>
-      {/* ===== PROMPT LABEL ===== */}
+      {/* Renders the prompt prefix label (e.g. "> "), dimming it when editing is locked */}
       <Text dimColor={inputDisabled}>{prompt}</Text>
 
-      {/* ===== INPUT FIELD OR DISABLED INDICATOR ===== */}
+      {/* Shows a static loader when input is disabled, otherwise mounts the interactive text input */}
       {inputDisabled ? (
-        // Show ellipsis when input is disabled (e.g., during processing)
         <Text dimColor>…</Text>
       ) : (
-        // Show active text input field when enabled
         <TextInput value={input} onChange={setInput} onSubmit={handleSubmit} />
       )}
     </Box>

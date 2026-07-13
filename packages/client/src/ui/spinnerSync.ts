@@ -88,7 +88,14 @@ export const spinnerForStatusFrame = (
   }
 
   if (frame.activity) {
+    if (frame.activity.stage === "escalating" || frame.stage === "escalating") {
+      return null;
+    }
     return workingSpinner(frame.activity.message);
+  }
+
+  if (frame.stage === "escalating") {
+    return null;
   }
 
   // Clear spinner when agent has finished all steps

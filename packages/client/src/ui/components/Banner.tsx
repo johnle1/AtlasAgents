@@ -8,40 +8,21 @@ import {
   bannerCenterPad,
   type LogoColor,
 } from "../banner/logoArt.js";
+import type { BannerProps } from "./types.js";
 
-/**
- * <Summary>
- * What it does:
- *   Defines the props interface for the Banner component.
- *
- * Used by:
- *   - Banner — receives model names and version through these props.
- *
- * Produced by:
- *   - App component — passes model configuration and version info.
- * </Summary>
- */
-export type BannerProps = {
-  /** Advisor model name shown in the banner footer. */
-  advisorModel: string;
-  /** Agent model name shown in the banner footer. */
-  agentModel?: string;
-  /** CLI version string e.g. "0.2.0". */
-  version: string;
-};
+export type { BannerProps } from "./types.js";
 
-/** Welcome message displayed in the banner center. */
+/** Welcome greeting string injected horizontally into the middle of the logo frame. */
 const WELCOME_TEXT = "Welcome back";
 
 /**
- * <Summary>
- * What it does:
- *   Renders a single row of the LoopyCode logo using colored blocks.
+ * Renders a row of grid-colored squares that comprise the colored startup logo.
  *
- * How it fits in the system:
- *   Helper component used by Banner to display the ASCII art logo.
- *   Each row consists of colored blocks that form the logo image.
- * </Summary>
+ * @remarks
+ * Outputs inline blocks mapped to colors in the `LogoColor` theme schema.
+ *
+ * @param props - Component parameters.
+ * @param props.row - The raw color grid columns representing one line of the logo.
  */
 const LogoRow: React.FC<{ row: LogoColor[] }> = ({ row }) => (
   <Box>
@@ -54,14 +35,13 @@ const LogoRow: React.FC<{ row: LogoColor[] }> = ({ row }) => (
 );
 
 /**
- * <Summary>
- * What it does:
- *   Renders a blank line with border characters on both sides.
+ * Renders an empty box spacer matching the horizontal grid margins.
  *
- * How it fits in the system:
- *   Helper component used by Banner to create spacing between sections.
- *   Maintains consistent border width and alignment.
- * </Summary>
+ * @remarks
+ * Used to insert clean vertical space inside the borders of the banner without breaking the frame.
+ *
+ * @param props - Component parameters.
+ * @param props.border - Closure executing string wraps inside colors.
  */
 const BorderedBlank: React.FC<{ border: (s: string) => React.ReactNode }> = ({
   border,
@@ -74,56 +54,58 @@ const BorderedBlank: React.FC<{ border: (s: string) => React.ReactNode }> = ({
 );
 
 /**
- * <Summary>
- * What it does:
- *   Renders the LoopyCode CLI welcome banner with logo, version info,
- *   and model configuration in a bordered box format.
+ * Renders the terminal welcome banner displayed on startup.
  *
- * How it fits in the system:
- *   Displays on startup to show the CLI version, configured models,
- *   and LoopyCode branding. Provides visual context about the
- *   current environment and configuration.
- * </Summary>
+ * @remarks
+ * Formats a premium visual display container that draws the LoopyCode logo, version,
+ * and currently active models in the terminal.
+ *
+ * @example
+ * ```tsx
+ * import React from "react";
+ * import { render } from "ink";
+ * import { Banner } from "./Banner.js";
+ * 
+ * render(<Banner version="1.0.0" advisorModel="gpt-4o" agentModel="gpt-4o-mini" />);
+ * ```
  */
 export const Banner: React.FC<BannerProps> = ({
   advisorModel,
   agentModel,
   version,
 }) => {
-  // ===== MODEL NAME PROCESSING =====
-  // Clean up advisor model name, show "not set" if empty
+  // Clean up advisor model name, falling back to a "not set" placeholder if empty.
   const advisor = advisorModel.trim() || "not set";
 
-  // Clean up agent model name, show "not set" if empty or undefined
+  // Clean up agent model name, falling back to a "not set" placeholder if empty.
   const agent = (agentModel ?? "").trim() || "not set";
 
-  // ===== TITLE FORMATTING =====
+  // Compute borders based on the static banner inner width configuration.
   const title = ` LoopyCode CLI v${version} `;
   const titleDashes = "─".repeat(Math.max(0, BANNER_INNER - 6 - title.length));
 
-  // ===== BORDER HELPER =====
-  // Creates colored border text elements
+  // Decorates frame components with the defined border color schema.
   const border = (borderChar: string) => (
     <Text color={BANNER_BORDER_HEX}>{borderChar}</Text>
   );
 
-  // ===== CENTERING CALCULATIONS =====
+  // Center alignments are calculated at layout-time based on terminal column offsets.
   const welcomePadding = bannerCenterPad(WELCOME_TEXT.length);
   const logoPadding = bannerCenterPad(LOGO_ROW_WIDTH);
 
   return (
     <Box flexDirection="column">
-      {/* ===== TOP BORDER WITH TITLE ===== */}
+      {/* Upper Border: hosts the application name and version details */}
       <Text>
         {border("╭──────")}
         <Text bold>{title}</Text>
         {border(`${titleDashes}╮`)}
       </Text>
 
-      {/* ===== SPACING AFTER TITLE ===== */}
+      {/* Top spacing divider */}
       <BorderedBlank border={border} />
 
-      {/* ===== WELCOME TEXT ===== */}
+      {/* Main greeting line centered inside the frame */}
       <Text>
         {border("│")}
         {" ".repeat(welcomePadding.left)}
@@ -132,10 +114,10 @@ export const Banner: React.FC<BannerProps> = ({
         {border("│")}
       </Text>
 
-      {/* ===== SPACING BEFORE LOGO ===== */}
+      {/* Spacing between greeting and graphical logo */}
       <BorderedBlank border={border} />
 
-      {/* ===== LOGO GRID ===== */}
+      {/* Grid rendering of logo art */}
       {LOGO_GRID.map((row, rowIndex) => (
         <Box key={rowIndex}>
           {border("│")}
@@ -146,10 +128,10 @@ export const Banner: React.FC<BannerProps> = ({
         </Box>
       ))}
 
-      {/* ===== SPACING AFTER LOGO ===== */}
+      {/* Spacer dividing logo and telemetry specs */}
       <BorderedBlank border={border} />
 
-      {/* ===== ADVISOR MODEL INFO ===== */}
+      {/* Active Advisor model information row */}
       <Text>
         {border("│")}
         {"  Advisor: "}
@@ -158,7 +140,7 @@ export const Banner: React.FC<BannerProps> = ({
         {border("│")}
       </Text>
 
-      {/* ===== AGENT MODEL INFO ===== */}
+      {/* Active Sub-agent model information row */}
       <Text>
         {border("│")}
         {"  Agent: "}
@@ -167,10 +149,10 @@ export const Banner: React.FC<BannerProps> = ({
         {border("│")}
       </Text>
 
-      {/* ===== SPACING BEFORE BOTTOM BORDER ===== */}
+      {/* Bottom spacing divider */}
       <BorderedBlank border={border} />
 
-      {/* ===== BOTTOM BORDER ===== */}
+      {/* Lower Border: closes the welcome banner box frame */}
       <Text>{border(`╰${"─".repeat(BANNER_INNER)}╯`)}</Text>
     </Box>
   );

@@ -89,11 +89,20 @@ export const setAgentBoards = (agentBoards: AgentBoardState[]): void => {
       );
 
       // If a task is still running, preserve its last reported activity message
+      // (but never keep escalating — that is internal and not shown in the UI).
+      const preservedActivity = previousAgentBoard?.activity;
+      const activity =
+        hasRunningTask &&
+        preservedActivity &&
+        preservedActivity.stage !== "escalating"
+          ? preservedActivity
+          : agentBoard.activity?.stage === "escalating"
+            ? undefined
+            : agentBoard.activity;
+
       return {
         ...agentBoard,
-        activity: hasRunningTask
-          ? (previousAgentBoard?.activity ?? agentBoard.activity)
-          : undefined,
+        activity,
       };
     }),
   );
@@ -109,6 +118,10 @@ export const updateAgentActivity = (
   agentId: number,
   agentActivity: { stage: AgentStage; message: string } | null,
 ): void => {
+  if (agentActivity?.stage === "escalating") {
+    agentActivity = null;
+  }
+
   const bridgeHooks = getBridgeHooks();
   bridgeHooks.onAgentBoards?.((previousAgentBoards) => {
     const agentBoardIndex = previousAgentBoards.findIndex(

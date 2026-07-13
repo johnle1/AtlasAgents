@@ -69,7 +69,7 @@ export interface UiConfig {
  *   agentTemp: 0.4,
  *   retries: 3,
  *   timeout: 600000,
- *   shellTimeoutMs: 30000,
+ *   shellTimeoutMs: 120000,
  *   maxContextBudget: 0.2,
  *   workspace: "/home/user/projects",
  *   showThinkOutput: false,
@@ -171,7 +171,7 @@ export interface Config {
    *
    * @remarks
    * Shell commands initiated by the server through the file proxy will be killed
-   * after this duration. Default is 30000ms (30 seconds). Increase for long-running
+   * after this duration. Default is 120000ms (2 minutes). Increase for long-running
    * operations, decrease for faster failure detection.
    */
   shellTimeoutMs: number;
@@ -256,8 +256,8 @@ const DEFAULT_CONFIG: Config = {
   // Prevents CLI hanging on slow or unresponsive models (10 minutes)
   timeout: 600_000,
 
-  // Kill shell commands after 30 seconds by default
-  shellTimeoutMs: 30_000,
+  // Kill shell commands after 2 minutes by default (npm create/install often need longer)
+  shellTimeoutMs: 120_000,
 
   // Caps how much of the context window memory injection can consume (20%)
   maxContextBudget: 0.2,

@@ -7,33 +7,33 @@ import { setTheme } from "../../theme/themeManager.js";
 import { useAppContext } from "../../DataContext.js";
 
 /**
- * <Summary>
- * What it does:
- *   Renders the appropriate prompt overlay component based on the request type.
+ * Router-style overlay component that selects and renders the active modal prompt based on the server request type.
  *
- * How it does it (step by step):
- *   1. Check if a prompt request exists, return null if not.
- *   2. Switch on request type to determine which prompt component to render.
- *   3. For theme requests: render ThemePicker.
- *   4. For plan edit requests: render PlanEditPrompt.
- *   5. For choice requests: render ChoicePrompt.
- *   6. For other requests: render LinePrompt (with masking if specified).
+ * @remarks
+ * Prompts are overlay boxes that block standard execution until user feedback is received.
+ * Supported prompt types:
+ * - `theme`: interactive color palette picker
+ * - `planEdit`: step-by-step editor for plans
+ * - `choice`: numeric multiple-choice index entry
+ * - default: standard single-line string prompt (with optional password masking)
  *
- * Parameters:
- *   None — uses promptReq from context.
- *
- * Returns:
- *   @returns The appropriate prompt component or null.
- * </Summary>
+ * @example
+ * ```tsx
+ * import React from "react";
+ * import { render } from "ink";
+ * import { PromptOverlay } from "./PromptOverlay.js";
+ * 
+ * // Note: Requires parent wrapper with active DataContext.
+ * ```
  */
 export const PromptOverlay: React.FC = () => {
   const { promptReq } = useAppContext();
 
-  // Don't render if no prompt request exists
+  // Check if a prompt window is active. If not, yield execution.
   if (!promptReq) return null;
   const request = promptReq;
 
-  // Render appropriate prompt based on request type
+  // Route the render flow based on the request variant payload.
   if (request.type === "theme") {
     return <ThemePicker />;
   }
@@ -49,14 +49,14 @@ export const PromptOverlay: React.FC = () => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Renders a single-line text input prompt with optional password masking.
+ * Renders a simple one-line textual input prompt (e.g., API keys, directory paths).
  *
- * How it fits in the system:
- *   Used for simple text input prompts where the user provides a single
- *   line of text (e.g., passwords, configuration values).
- * </Summary>
+ * @remarks
+ * Supports a `masked` parameter which formats characters as asterisks for hidden credential inputs.
+ *
+ * @param props - Component parameters.
+ * @param props.prompt - The question description string shown above the input cursor.
+ * @param props.masked - Toggles character hidden masking for passwords or secure keys.
  */
 const LinePrompt: React.FC<{ prompt: string; masked: boolean }> = ({
   prompt,
@@ -82,14 +82,14 @@ const LinePrompt: React.FC<{ prompt: string; masked: boolean }> = ({
 };
 
 /**
- * <Summary>
- * What it does:
- *   Renders a numeric choice input prompt with validation.
+ * Renders a bounded multiple-choice index selection prompt.
  *
- * How it fits in the system:
- *   Used when the user needs to select from a numbered list of options.
- *   Validates that input is a number within the valid range.
- * </Summary>
+ * @remarks
+ * Restricts inputs to integer selections between 1 and a specified upper bound.
+ *
+ * @param props - Component parameters.
+ * @param props.prompt - Descriptive text showing the choice lists.
+ * @param props.max - The maximum valid index number acceptable.
  */
 const ChoicePrompt: React.FC<{ prompt: string; max: number }> = ({
   prompt,
@@ -109,7 +109,7 @@ const ChoicePrompt: React.FC<{ prompt: string; max: number }> = ({
           }))
         }
         onSubmit={(submittedValue) => {
-          // Parse input as number, default to 1 if invalid
+          // Convert input index to integer, falling back safely to 1 on NaN.
           const parsedNumber = parseInt(submittedValue.trim(), 10);
           resolvePrompt(Number.isNaN(parsedNumber) ? 1 : parsedNumber);
         }}
@@ -119,15 +119,14 @@ const ChoicePrompt: React.FC<{ prompt: string; max: number }> = ({
 };
 
 /**
- * <Summary>
- * What it does:
- *   Renders a multi-line plan editing prompt with initial steps displayed.
+ * Renders a multi-line editing interface for updating advisor plans prior to execution.
  *
- * How it fits in the system:
- *   Used when the user wants to edit a generated plan. Shows initial
- *   plan steps and allows adding new steps line by line. An empty line
- *   submits the final plan.
- * </Summary>
+ * @remarks
+ * Displays the original plan, lists modified/new steps, and exposes a blank line
+ * prompt to append more steps. Submitting an empty step commits the plan list back to IPC.
+ *
+ * @param props - Component parameters.
+ * @param props.initial - Array of starting plan steps.
  */
 const PlanEditPrompt: React.FC<{ initial: string[] }> = ({ initial }) => {
   const { promptDraft, setPromptDraft } = useAppContext();
@@ -138,21 +137,21 @@ const PlanEditPrompt: React.FC<{ initial: string[] }> = ({ initial }) => {
         Revise plan (empty line when done). Agent grouping will be recalculated.
       </Text>
 
-      {/* ===== INITIAL PLAN STEPS ===== */}
+      {/* Render the baseline plan steps proposed by the advisor */}
       {initial.map((line, lineIndex) => (
         <Text key={`init-${lineIndex}`}>
           {lineIndex + 1}. {line}
         </Text>
       ))}
 
-      {/* ===== NEWLY ADDED STEPS ===== */}
+      {/* Render user-appended step overrides */}
       {promptDraft.planLines.map((line, lineIndex) => (
         <Text key={`new-${lineIndex}`}>
           {initial.length + lineIndex + 1}. {line}
         </Text>
       ))}
 
-      {/* ===== CURRENT INPUT LINE ===== */}
+      {/* Active input field allowing the user to type the next plan step */}
       <TextInput
         value={promptDraft.planCurrent}
         onChange={(inputValue) =>
@@ -162,9 +161,8 @@ const PlanEditPrompt: React.FC<{ initial: string[] }> = ({ initial }) => {
           }))
         }
         onSubmit={(submittedValue) => {
-          // Empty line submits the final plan
+          // Empty string indicates completion. We submit the updated list, or fallback to the initial plan.
           if (submittedValue.trim().length === 0) {
-            // Use edited lines if any, otherwise keep original
             const finalPlan =
               promptDraft.planLines.length > 0
                 ? promptDraft.planLines
@@ -173,7 +171,7 @@ const PlanEditPrompt: React.FC<{ initial: string[] }> = ({ initial }) => {
             return;
           }
 
-          // Add non-empty line to plan and clear input
+          // Append the newly written step and clear the buffer for the next input.
           setPromptDraft((previousDraft) => ({
             ...previousDraft,
             planLines: [...previousDraft.planLines, submittedValue.trim()],
@@ -186,34 +184,22 @@ const PlanEditPrompt: React.FC<{ initial: string[] }> = ({ initial }) => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Renders an interactive theme selection menu with keyboard navigation.
+ * Renders a choice selector list for switching terminal color themes.
  *
- * How it does it (step by step):
- *   1. Get list of available theme IDs from THEMES object.
- *   2. Track currently selected theme index.
- *   3. Handle keyboard input for navigation (up/down arrows) and selection (enter).
- *   4. Apply selected theme and close prompt on enter.
- *   5. Close prompt without changes on escape.
- *
- * Parameters:
- *   None — uses THEMES and context state.
- *
- * Returns:
- *   @returns Theme selection menu component.
- * </Summary>
+ * @remarks
+ * Binds `useInput` arrow controls to navigate themes, applying chosen colors
+ * via the theme manager on pressing `return`, or cancelling on `escape`.
  */
 const ThemePicker: React.FC = () => {
   const { promptDraft, setPromptDraft } = useAppContext();
 
-  // Get list of available theme IDs
+  // Enumerate theme keys configured in the static theme catalog.
   const themeIds = Object.keys(THEMES);
 
-  // Track currently selected theme index
+  // Cursor position highlighting the theme index candidate.
   const selectedIndex = promptDraft.themeSelected;
 
-  // ===== KEYBOARD INPUT HANDLING =====
+  // Intercept keyboard events to override arrow-key controls for navigation.
   useInput((_input, key) => {
     if (key.upArrow) {
       setPromptDraft((previousDraft) => ({
@@ -231,12 +217,12 @@ const ThemePicker: React.FC = () => {
       }));
     }
     if (key.return) {
-      // Apply selected theme and close prompt
+      // Update theme preferences globally in storage and exit prompt.
       setTheme(themeIds[selectedIndex]! as keyof typeof THEMES);
       resolvePrompt(undefined);
     }
     if (key.escape) {
-      // Close prompt without applying changes
+      // Dismiss prompt without saving the theme choice.
       resolvePrompt(undefined);
     }
   });
@@ -245,7 +231,7 @@ const ThemePicker: React.FC = () => {
     <Box flexDirection="column" borderStyle="round" paddingX={1}>
       <Text bold>Theme</Text>
 
-      {/* ===== THEME OPTIONS ===== */}
+      {/* Render theme candidates with indicator arrows on the selected item */}
       {themeIds.map((themeId, themeIndex) => (
         <Text
           key={`${themeId}-${themeIndex}`}

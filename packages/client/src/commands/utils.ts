@@ -1,88 +1,65 @@
 /**
- * Command utility functions shared across command handlers.
+ * Small shared helpers for slash-command handlers.
  *
- * This module provides reusable utility functions for common operations
- * in command handlers, such as port validation and error message formatting.
+ * @remarks
+ * Keep parsing / error formatting here so individual handlers stay focused on
+ * domain logic (config, models, memory, …).
  */
 
 /**
- * <Summary>
- * What it does:
- *   Parses and validates a port number string to ensure it's within the valid TCP/UDP port range.
+ * Parses a TCP/UDP port string into an integer in `1…65535`, or `null`.
  *
- * How it does it (step by step):
- *   1. Trims whitespace from the input string to handle user input with leading/trailing spaces.
- *   2. Parses the string as a base-10 integer to convert it to a number.
- *   3. Validates that the parsed number is not NaN (not a number).
- *   4. Validates that the port number is within the valid range (1-65535).
- *   5. Returns null if validation fails, otherwise returns the valid port number.
+ * @remarks
+ * Trims whitespace first. Rejects `NaN`, `0`, negatives, and values above
+ * `65535`. Does not accept trailing junk that `parseInt` would otherwise accept
+ * only partially beyond the leading digits (callers typically pass trimmed
+ * tokens from slash parsing).
  *
- * Parameters:
- *   @param portString - The port number as a string (e.g., "8080", "3000").
+ * @param portString - User input such as `"8080"` or `" 7000 "`.
+ * @returns Valid port number, or `null` when invalid.
  *
- * Returns:
- *   @returns The parsed port number if valid, null if invalid.
- * </Summary>
+ * @example
+ * ```ts
+ * parsePort("8080");   // 8080
+ * parsePort("0");      // null
+ * parsePort("65536");  // null
+ * parsePort("abc");    // null
+ * ```
  */
 export const parsePort = (portString: string): number | null => {
-  // ===== STEP 1: Trim whitespace from input =====
-  // Step 1a: Remove leading and trailing whitespace from the port string
-  // Step 1b: This handles cases where users might type " 8080 " or similar
   const trimmedPortString = portString.trim();
-
-  // ===== STEP 2: Parse string to number =====
-  // Step 2a: Parse the trimmed string as a base-10 integer
-  // Step 2b: This converts "8080" to the number 8080
   const portNumber = parseInt(trimmedPortString, 10);
 
-  // ===== STEP 3: Validate the parsed port number =====
-  // Step 3a: Check if the parsed value is NaN (not a number)
-  // Step 3b: Check if the port number is less than 1 (ports start at 1)
-  // Step 3c: Check if the port number is greater than 65535 (maximum valid port)
-  // Step 3d: Return null if any validation fails
+  // Inclusive IANA range for non-zero TCP ports the CLI will bind/connect to.
   if (Number.isNaN(portNumber) || portNumber < 1 || portNumber > 65_535) {
     return null;
   }
 
-  // ===== STEP 4: Return valid port number =====
-  // Step 4a: The port number passed all validation checks
-  // Step 4b: Return the valid port number for use in configuration
   return portNumber;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Formats an unknown error value into a human-readable string message.
+ * Turns an unknown thrown value into a user-facing error string.
  *
- * How it does it (step by step):
- *   1. Checks if the error is an instance of the Error class.
- *   2. If it's an Error instance, extracts the message property.
- *   3. If it's not an Error instance, converts the value to a string.
- *   4. Returns the formatted error message string.
+ * @remarks
+ * Prefer `Error.message` when available; otherwise `String(error)` so handlers
+ * can safely interpolate catch clauses without nested type guards.
  *
- * Parameters:
- *   @param error - The error value to format (can be Error, string, object, etc.).
+ * @param error - Value from a `catch` clause (`Error`, string, etc.).
+ * @returns Human-readable message suitable for `printError`.
  *
- * Returns:
- *   @returns A human-readable error message string.
- * </Summary>
+ * @example
+ * ```ts
+ * try {
+ *   await risky();
+ * } catch (err) {
+ *   printError(formatErrorMessage(err));
+ * }
+ * ```
  */
 export const formatErrorMessage = (error: unknown): string => {
-  // ===== STEP 1: Check if error is an Error instance =====
-  // Step 1a: Use instanceof to check if the error is a proper Error object
-  // Step 1b: Error objects have a message property that contains the error details
   if (error instanceof Error) {
-    // ===== STEP 1a-i: Extract error message =====
-    // Step 1a-i-1: Return the message property from the Error object
-    // Step 1a-i-2: This provides a clean, human-readable error message
     return error.message;
   }
-
-  // ===== STEP 2: Handle non-Error values =====
-  // Step 2a: If the error is not an Error instance, convert it to a string
-  // Step 2b: This handles cases where errors might be strings, numbers, or other objects
-  // Step 2c: String() conversion provides a fallback representation of the error
-  const errorAsString = String(error);
-  return errorAsString;
+  return String(error);
 };

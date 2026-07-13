@@ -1,68 +1,38 @@
+/**
+ * VS Code– and GitHub–inspired {@link Theme} palettes using truecolor hex tokens.
+ *
+ * @remarks
+ * Hex accents go through {@link fg} so terminals without 24-bit color get a
+ * 256-color approximation. Diff backgrounds use fixed 256-color washes shared
+ * with the custom dark/light palettes in `themes.ts`.
+ */
+
 import type { Theme } from "./themes.js";
 import { fg } from "./ansi256.js";
 
-/**
- * <Summary>
- * What it does:
- *   Provides common ANSI escape sequences for text formatting.
- *
- * Used by:
- *   - All theme objects in this file — use these for consistent formatting.
- *
- * Produced by:
- *   - None (static constants defined at module level).
- * </Summary>
- */
 const dim = "\x1b[2m";
 const bold = "\x1b[1m";
 const reset = "\x1b[0m";
 
-/**
- * <Summary>
- * What it does:
- *   Provides ANSI escape sequences for diff background colors in dark themes.
- *
- * Used by:
- *   - Dark themes (vscodeTheme, vscodeDarkModernTheme, githubDarkTheme, githubDimmedTheme) —
- *     use these for diff background colors.
- *
- * Produced by:
- *   - None (static constants defined at module level).
- * </Summary>
- */
+/** Shared dark add/remove washes (xterm 256). */
 const diffBackgroundDarkAdded = "\x1b[48;5;22m";
 const diffBackgroundDarkRemoved = "\x1b[48;5;52m";
 
-/**
- * <Summary>
- * What it does:
- *   Provides ANSI escape sequences for diff background colors in light themes.
- *
- * Used by:
- *   - Light themes (githubLightTheme) — use these for diff background colors.
- *
- * Produced by:
- *   - None (static constants defined at module level).
- * </Summary>
- */
+/** Shared light add/remove washes for {@link githubLightTheme}. */
 const diffBackgroundLightAdded = "\x1b[48;5;150m";
 const diffBackgroundLightRemoved = "\x1b[48;5;217m";
 
 /**
- * <Summary>
- * What it does:
- *   Provides the VS Code Dark+ theme matching the default VS Code color scheme.
+ * VS Code Dark+ look (classic blue/teal accents, `dark-plus` Shiki).
  *
- * Characteristics:
- *   - Blue and purple color scheme for primary accents
- *   - Teal for success states
- *   - Red for errors
- *   - Orange-peach for warnings
- *   - Uses dark-plus Shiki theme for syntax highlighting
+ * @remarks
+ * Hex values roughly track VS Code’s default dark token colors
+ * (`#569cd6` keywords/borders, `#4ec9b0` teal accents, etc.).
  *
- * How it fits in the system:
- *   Replicates the VS Code Dark+ theme for consistency with the popular editor.
- * </Summary>
+ * @example
+ * ```ts
+ * THEMES["vscode-dark"] === vscodeTheme; // registered under this export
+ * ```
  */
 export const vscodeTheme: Theme = {
   name: "VS Code Dark+",
@@ -90,22 +60,11 @@ export const vscodeTheme: Theme = {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Provides the VS Code Dark Modern theme with purple accents.
+ * VS Code Dark Modern look (purple/magenta borders, blue accents).
  *
- * Characteristics:
- *   - Purple color scheme for a modern aesthetic
- *   - Blue and teal for accents
- *   - Teal for success states
- *   - Coral red for errors
- *   - Orange-peach for warnings
- *   - Uses dark-plus Shiki theme for syntax highlighting
- *
- * How it fits in the system:
- *   Provides a modern purple variant of the VS Code theme for users who prefer
- *   a different color scheme than the classic blue/purple.
- * </Summary>
+ * @remarks
+ * Softer “modern” VS Code chrome — mauve borders (`#c586c0`) with blue
+ * `#569cd6` accents. Still uses `dark-plus` for Shiki.
  */
 export const vscodeDarkModernTheme: Theme = {
   name: "VS Code Dark Modern",
@@ -133,21 +92,11 @@ export const vscodeDarkModernTheme: Theme = {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Provides the GitHub Dark theme matching GitHub's dark mode color scheme.
+ * GitHub.com dark UI accents with `github-dark` Shiki highlighting.
  *
- * Characteristics:
- *   - Blue accent scheme matching GitHub's dark mode
- *   - Green for success states (GitHub's brand color)
- *   - Red for errors (GitHub's danger color)
- *   - Orange for warnings (GitHub's warning color)
- *   - Uses github-dark Shiki theme for syntax highlighting
- *
- * How it fits in the system:
- *   Replicates the GitHub Dark theme for consistency with the popular code hosting platform,
- *   making the CLI feel familiar to GitHub users.
- * </Summary>
+ * @remarks
+ * Brand greens/reds/oranges (`#3fb950`, `#f85149`, `#d29922`) and link blue
+ * `#58a6ff` mirror github.com dark mode chrome.
  */
 export const githubDarkTheme: Theme = {
   name: "GitHub Dark",
@@ -175,21 +124,10 @@ export const githubDarkTheme: Theme = {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Provides the GitHub Dimmed theme matching GitHub's dimmed mode color scheme.
+ * GitHub Dimmed / dark-dimmed palette (`github-dark-dimmed` Shiki).
  *
- * Characteristics:
- *   - Muted blue accent scheme matching GitHub's dimmed mode
- *   - Green for success states (GitHub's brand color, muted)
- *   - Red-orange for errors (GitHub's danger color, muted)
- *   - Yellow for warnings (GitHub's warning color)
- *   - Uses github-dark-dimmed Shiki theme for syntax highlighting
- *
- * How it fits in the system:
- *   Replicates the GitHub Dimmed theme for users who prefer GitHub's softer, less saturated
- *   color scheme while maintaining the familiar GitHub aesthetic.
- * </Summary>
+ * @remarks
+ * Lower-saturation twin of {@link githubDarkTheme} for softer terminals.
  */
 export const githubDimmedTheme: Theme = {
   name: "GitHub Dimmed",
@@ -217,22 +155,12 @@ export const githubDimmedTheme: Theme = {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Provides the GitHub Light theme matching GitHub's light mode color scheme.
+ * GitHub Light mode with light-terminal-friendly diff washes.
  *
- * Characteristics:
- *   - Blue accent scheme matching GitHub's light mode
- *   - Green for success states (GitHub's brand color)
- *   - Red for errors (GitHub's danger color)
- *   - Brown for warnings (GitHub's warning color in light mode)
- *   - Uses github-light Shiki theme for syntax highlighting
- *   - Light diff backgrounds for readability in light terminal environments
- *
- * How it fits in the system:
- *   Replicates the GitHub Light theme for users who prefer light mode or work in
- *   light terminal environments, maintaining GitHub's familiar aesthetic.
- * </Summary>
+ * @remarks
+ * Uses {@link diffBackgroundLightAdded} / {@link diffBackgroundLightRemoved}
+ * instead of the dark greens/reds so add/remove rows stay readable on light
+ * backgrounds. Shiki theme is `github-light`.
  */
 export const githubLightTheme: Theme = {
   name: "GitHub Light",

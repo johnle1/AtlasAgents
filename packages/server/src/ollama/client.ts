@@ -13,8 +13,10 @@
 import type {
   IOllamaAdminClient,
   IOllamaClient,
+  ChatWithToolsResult,
 } from "../orchestration/interfaces.js";
 import type { ChatOptions, Message } from "../orchestration/types.js";
+import type { ToolSchema } from "../orchestration/tools/toolHandler.js";
 import type {
   ModelInfo,
   OllamaModelSummary,
@@ -22,7 +24,9 @@ import type {
   RunningModel,
 } from "./types.js";
 import { Agent, fetch as undiciFetch } from "undici";
+import { AbortError } from "../errors/index.js";
 import { enrichOllamaFetchError } from "../orchestration/taskErrors.js";
+import { logger } from "../logger.js";
 import { OllamaError } from "./types.js";
 
 /** Default Ollama server URL when not specified in configuration. */
@@ -54,6 +58,23 @@ const buildDispatcher = (timeoutMs: number): Agent =>
     bodyTimeout: timeoutMs,
     connectTimeout: 60_000,
   });
+
+const abortReasonMessage = (signal: AbortSignal): string => {
+  const reason = signal.reason;
+  if (typeof reason === "string" && reason.length > 0) {
+    return reason;
+  }
+  if (reason instanceof Error && reason.message.length > 0) {
+    return reason.message;
+  }
+  return "Request aborted";
+};
+
+const throwIfAborted = (signal?: AbortSignal): void => {
+  if (signal?.aborted) {
+    throw new AbortError(abortReasonMessage(signal));
+  }
+};
 
 /**
  * <Summary>
@@ -196,7 +217,8 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
     // Step 1: Validate the timeout value (must be finite and positive)
     // Invalid timeouts could cause unexpected behavior or errors
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-      return; // Silently ignore invalid values
+      logger.warn({ timeoutMs }, "Ignoring invalid Ollama client timeout");
+      return;
     }
 
     // Step 2: If valid, update the timeoutMs property
@@ -333,6 +355,7 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
           stream: true,
           options: { temperature: options.temperature },
         }),
+        signal: options.signal,
       });
     } catch (networkError) {
       // Step 3: Handle network errors with enrichment
@@ -362,76 +385,196 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
     // Step 5: Set up stream reader and text decoder
     // The reader allows us to consume the stream chunk by chunk
     const streamReader = fetchResponse.body.getReader();
-    // The decoder converts binary chunks to text strings
     const textDecoder = new TextDecoder();
-    // Carry buffer holds partial data between chunks (incomplete lines)
     let carryBuffer = "";
 
-    // Step 6: Read stream chunks until completion
-    while (true) {
-      // Read the next chunk from the stream
-      const { done, value } = await streamReader.read();
+    try {
+      // Step 6: Read stream chunks until completion
+      while (true) {
+        throwIfAborted(options.signal);
+        const { done, value } = await streamReader.read();
 
-      // If the stream is complete, exit the loop
-      if (done) {
-        break;
+        // If the stream is complete, exit the loop
+        if (done) {
+          break;
+        }
+
+        // Decode the binary chunk to text and append to carry buffer
+        // { stream: true } handles incomplete multibyte characters correctly
+        carryBuffer += textDecoder.decode(value, { stream: true });
+
+        // Parse the carry buffer into complete lines and partial remainder
+        const { lines: completeLines, rest: partialData } =
+          parseNdjsonLines(carryBuffer);
+
+        // Update carry buffer with the partial remainder for next iteration
+        carryBuffer = partialData;
+
+        // Step 7: Parse each complete line as NDJSON and yield content pieces
+        for (const jsonLine of completeLines) {
+          try {
+            // Parse the JSON line to get the response chunk
+            const responseChunk = JSON.parse(jsonLine) as {
+              message?: { content?: string };
+            };
+
+            // Extract the content piece from the response
+            const contentPiece = responseChunk.message?.content;
+
+            // Only yield non-empty strings to avoid empty yields
+            if (typeof contentPiece === "string" && contentPiece.length > 0) {
+              yield contentPiece;
+            }
+          } catch {
+            // Skip malformed NDJSON lines (shouldn't happen normally)
+            // This is defensive programming to handle unexpected Ollama behavior
+          }
+        }
       }
 
-      // Decode the binary chunk to text and append to carry buffer
-      // { stream: true } handles incomplete multibyte characters correctly
-      carryBuffer += textDecoder.decode(value, { stream: true });
-
-      // Parse the carry buffer into complete lines and partial remainder
-      const { lines: completeLines, rest: partialData } =
-        parseNdjsonLines(carryBuffer);
-
-      // Update carry buffer with the partial remainder for next iteration
-      carryBuffer = partialData;
-
-      // Step 7: Parse each complete line as NDJSON and yield content pieces
-      for (const jsonLine of completeLines) {
+      // Step 8: Handle any trailing partial data after stream ends
+      // There might be one final incomplete line in the carry buffer
+      if (carryBuffer.trim().length > 0) {
         try {
-          // Parse the JSON line to get the response chunk
-          const responseChunk = JSON.parse(jsonLine) as {
+          // Try to parse the trailing partial data
+          const finalChunk = JSON.parse(carryBuffer) as {
             message?: { content?: string };
           };
+          const finalContentPiece = finalChunk.message?.content;
 
-          // Extract the content piece from the response
-          const contentPiece = responseChunk.message?.content;
-
-          // Only yield non-empty strings to avoid empty yields
-          if (typeof contentPiece === "string" && contentPiece.length > 0) {
-            yield contentPiece;
+          // Yield if it's valid content
+          if (
+            typeof finalContentPiece === "string" &&
+            finalContentPiece.length > 0
+          ) {
+            yield finalContentPiece;
           }
         } catch {
-          // Skip malformed NDJSON lines (shouldn't happen normally)
-          // This is defensive programming to handle unexpected Ollama behavior
+          // Ignore trailing partial line that couldn't be parsed
+          // This is normal if the stream ended mid-line
         }
       }
+    } finally {
+      await streamReader.cancel().catch(() => undefined);
+    }
+  };
+
+  chatWithTools = async (
+    model: string,
+    messages: Message[],
+    tools: ToolSchema[],
+    options: ChatOptions,
+    onToken?: (token: string) => void,
+  ): Promise<ChatWithToolsResult> => {
+    const chatApiUrl = `${this.baseUrl}/api/chat`;
+
+    let fetchResponse: Awaited<ReturnType<typeof undiciFetch>>;
+    try {
+      fetchResponse = await this.ollamaFetch(chatApiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages,
+          tools,
+          stream: true,
+          options: { temperature: options.temperature },
+        }),
+        signal: options.signal,
+      });
+    } catch (networkError) {
+      throw enrichOllamaFetchError(
+        this.baseUrl,
+        "chat with tools",
+        model,
+        networkError,
+      );
     }
 
-    // Step 8: Handle any trailing partial data after stream ends
-    // There might be one final incomplete line in the carry buffer
-    if (carryBuffer.trim().length > 0) {
-      try {
-        // Try to parse the trailing partial data
-        const finalChunk = JSON.parse(carryBuffer) as {
-          message?: { content?: string };
-        };
-        const finalContentPiece = finalChunk.message?.content;
+    if (!fetchResponse.ok) {
+      throw new OllamaError(
+        fetchResponse.status,
+        await readErrorBody(fetchResponse),
+      );
+    }
 
-        // Yield if it's valid content
-        if (
-          typeof finalContentPiece === "string" &&
-          finalContentPiece.length > 0
-        ) {
-          yield finalContentPiece;
-        }
-      } catch {
-        // Ignore trailing partial line that couldn't be parsed
-        // This is normal if the stream ended mid-line
+    if (!fetchResponse.body) {
+      throw new OllamaError(500, "No response body from Ollama chat stream");
+    }
+
+    const streamReader = fetchResponse.body.getReader();
+    const textDecoder = new TextDecoder();
+    let carryBuffer = "";
+    let content = "";
+    const toolCalls: ChatWithToolsResult["toolCalls"] = [];
+
+    const ingestChunk = (responseChunk: {
+      message?: {
+        content?: string;
+        tool_calls?: Array<{
+          function?: {
+            name?: string;
+            arguments?: Record<string, unknown>;
+          };
+        }>;
+      };
+    }): void => {
+      const contentPiece = responseChunk.message?.content;
+      if (typeof contentPiece === "string" && contentPiece.length > 0) {
+        content += contentPiece;
+        onToken?.(contentPiece);
       }
+
+      for (const toolCall of responseChunk.message?.tool_calls ?? []) {
+        const name = toolCall.function?.name;
+        if (typeof name !== "string" || name.length === 0) {
+          continue;
+        }
+        const rawArgs = toolCall.function?.arguments;
+        const args =
+          rawArgs !== null &&
+          typeof rawArgs === "object" &&
+          !Array.isArray(rawArgs)
+            ? rawArgs
+            : {};
+        toolCalls.push({ name, args });
+      }
+    };
+
+    try {
+      while (true) {
+        throwIfAborted(options.signal);
+        const { done, value } = await streamReader.read();
+        if (done) {
+          break;
+        }
+
+        carryBuffer += textDecoder.decode(value, { stream: true });
+        const { lines: completeLines, rest: partialData } =
+          parseNdjsonLines(carryBuffer);
+        carryBuffer = partialData;
+
+        for (const jsonLine of completeLines) {
+          try {
+            ingestChunk(JSON.parse(jsonLine));
+          } catch {
+            // skip malformed NDJSON
+          }
+        }
+      }
+
+      if (carryBuffer.trim().length > 0) {
+        try {
+          ingestChunk(JSON.parse(carryBuffer));
+        } catch {
+          // ignore trailing partial line
+        }
+      }
+    } finally {
+      await streamReader.cancel().catch(() => undefined);
     }
+
+    return { content, toolCalls };
   };
 
   /**

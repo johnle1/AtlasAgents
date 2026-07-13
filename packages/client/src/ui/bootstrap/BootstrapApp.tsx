@@ -27,7 +27,12 @@ import { createInkPromptPort } from "../promptPort.js";
 import { App } from "../App.js";
 import { SetupWizard } from "./SetupWizard.js";
 import { loadHistory } from "./historyPersist.js";
+import { wireSessionAbortSignal } from "./wireSessionAbortSignal.js";
 import { setInkActive } from "../uiBridge.js";
+import {
+  printTokenSaveInitTip,
+  syncTokenSaveTools,
+} from "../../commands/tokenSaveHandlers.js";
 
 /**
  * Props for {@link BootstrapApp}.
@@ -109,7 +114,8 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
 }) => {
   const { exit } = useApp();
 
-  // Registered by App so slash /exit and Ctrl+C share the same teardown path
+  // Registered by App so slash /exit and Ctrl+C share the same teardown path.
+  // Using a ref avoids re-rendering BootstrapApp when App mounts its exit handler.
   const exitHandlerRef = useRef<(() => void) | undefined>();
 
   const inputHistoryRef = useRef(loadHistory());
@@ -118,7 +124,9 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
     needsSetup ? "setup" : "connecting",
   );
 
-  // Config is null during first-run setup until the wizard calls onComplete
+  // Config is null during first-run setup until the wizard calls onComplete.
+  // Lazy-initialize with existing config when needsSetup is false to avoid
+  // unnecessary config reads on every render.
   const [appConfig, setAppConfig] = useState<Config | null>(() =>
     needsSetup ? null : applyCliOverrides(loadConfig(), cliOverrides),
   );
@@ -129,7 +137,9 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
     null,
   );
 
-  // uiBridge routes log output away from Ink while the terminal UI is active
+  // uiBridge routes log output away from Ink while the terminal UI is active.
+  // useLayoutEffect ensures this happens synchronously before paint to prevent
+  // log flicker during the initial render.
   useLayoutEffect(() => {
     setInkActive(true);
     return () => setInkActive(false);
@@ -137,6 +147,8 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
 
   const workspaceRootDirectory = useMemo(() => {
     if (!appConfig) return process.cwd();
+    // Fall back to process.cwd() if the config has an empty workspace string.
+    // This can happen when users clear the workspace field in the setup wizard.
     return appConfig.workspace.trim().length > 0
       ? appConfig.workspace
       : process.cwd();
@@ -151,7 +163,11 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
       void buildPromptLabel(localFileProxy.getCwd());
     });
 
+    // Wire the file proxy into the connection so the server can invoke it
+    // for workspace I/O, and wire the session abort signal so shell commands
+    // terminate when the connection drops.
     rsocketConnection.setFileProxy(localFileProxy);
+    wireSessionAbortSignal(rsocketConnection, localFileProxy);
 
     return { connection: rsocketConnection, fileProxy: localFileProxy };
   }, [appConfig, workspaceRootDirectory]);
@@ -161,6 +177,9 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
       return;
     }
 
+    // Flag to prevent state updates if the component unmounts during async work.
+    // This is critical because the connection effect can run for several seconds
+    // while the user might dismiss the error screen and trigger unmount.
     let connectionCancelled = false;
 
     const { connection: rsocketConnection, fileProxy: localFileProxy } =
@@ -191,7 +210,9 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
 
       const skillManager = new SkillManager(rsocketConnection);
 
-      // Skill sync is best-effort — a failure should not block the main UI
+      // Skill sync is best-effort — a failure should not block the main UI.
+      // Users can still interact with the server even if skills fail to sync,
+      // and they can retry manually with /skills sync.
       try {
         const syncedSkillCount = await skillManager.autoSync();
         if (syncedSkillCount > 0) {
@@ -209,7 +230,31 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
         );
       }
 
-      // Inform the user if a server session already exists; ignore RPC errors
+      try {
+        const syncedToolCount = await syncTokenSaveTools(
+          rsocketConnection,
+          workspaceRootDirectory,
+        );
+        if (syncedToolCount > 0) {
+          sessionInitializationMessages.push(
+            `Synced ${syncedToolCount} TokenSave tool(s) to server.`,
+          );
+        } else {
+          await printTokenSaveInitTip(workspaceRootDirectory);
+        }
+      } catch (tokenSaveSyncError) {
+        sessionInitializationMessages.push(
+          `TokenSave sync failed: ${
+            tokenSaveSyncError instanceof Error
+              ? tokenSaveSyncError.message
+              : String(tokenSaveSyncError)
+          }`,
+        );
+      }
+
+      // Inform the user if a server session already exists; ignore RPC errors.
+      // This is advisory only — startup continues without the hint if the RPC fails.
+      // The hint helps users avoid confusing state where two clients share one session.
       try {
         const sessionExists = await rsocketConnection.sendCommand<boolean>(
           "session.exists",
@@ -248,10 +293,14 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
     })();
 
     return () => {
+      // Set the flag to prevent state updates if the effect cleanup runs
+      // after async operations complete but before the component fully unmounts.
       connectionCancelled = true;
     };
   }, [bootstrapPhase, appConfig, connectionServices]);
 
+  // Persist input history on unmount so arrow-key navigation survives restarts.
+  // This runs on both normal exit and error-screen dismissal.
   useEffect(
     () => () => {
       onSaveHistory(inputHistoryRef.current);
@@ -259,6 +308,9 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
     [onSaveHistory],
   );
 
+  // Allow the user to dismiss the error screen with any key press.
+  // This is the only recovery path from a connection failure — the CLI
+  // exits cleanly rather than hanging.
   useInput(() => {
     if (bootstrapPhase === "error") {
       onSaveHistory(inputHistoryRef.current);

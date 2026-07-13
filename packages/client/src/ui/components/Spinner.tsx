@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
-import type { SpinnerState } from "../types.js";
 import { inTmux, isScreenReaderLikely } from "../terminalEnv.js";
 import { loadConfig } from "../../config.js";
+import type { StatusSpinnerProps as Props } from "./types.js";
 
 /** Dot animation patterns for tmux compatibility (tmux doesn't support ink-spinner). */
 const TMUX_DOTS = [".  ", ".. ", "..."];
@@ -12,85 +12,57 @@ const TMUX_DOTS = [".  ", ".. ", "..."];
 const TMUX_ANIMATION_MS = 750;
 
 /**
- * <Summary>
- * What it does:
- *   Defines the props interface for the StatusSpinner component.
+ * Renders an animated status indicator adapted to standard, multiplexed (tmux), or screen-reader terminal environments.
  *
- * Used by:
- *   - StatusSpinner — receives spinner state through these props.
+ * @remarks
+ * Standard spinner components (from `ink-spinner`) can break rendering blocks in terminal multiplexers like tmux
+ * or introduce high amounts of noise to accessibility software. This component evaluates the environment
+ * capabilities using client utilities (`inTmux`, `isScreenReaderLikely`) and resolves appropriate fallbacks:
+ * - tmux: falls back to simple ASCII character animation `.  ` -> `.. ` -> `...`
+ * - Screen Reader: emits a static text block describing the action (avoiding refresh loops)
+ * - Standard terminal: mounts the interactive dots spinner animation.
  *
- * Produced by:
- *   - Parent UI components — pass SpinnerState objects as props.
- * </Summary>
- */
-type Props = {
-  /** Current spinner state containing mode, label, and active status. */
-  state: SpinnerState | null;
-};
-
-/**
- * <Summary>
- * What it does:
- *   Renders an animated status spinner with adaptive behavior for different
- *   terminal environments (tmux, screen readers, standard terminals).
- *
- * How it fits in the system:
- *   Provides visual feedback during long-running operations (thinking, working).
- *   Adapts to terminal capabilities: uses dots for tmux, simple text for
- *   screen readers, and animated spinner for standard terminals.
- * </Summary>
+ * @example
+ * ```tsx
+ * import React from "react";
+ * import { render } from "ink";
+ * import { StatusSpinner } from "./Spinner.js";
+ * 
+ * const activeState = { active: true, mode: "thinking" as const, label: "Advisor" };
+ * render(<StatusSpinner state={activeState} />);
+ * ```
  */
 export const StatusSpinner: React.FC<Props> = ({ state }) => {
-  // ===== CONFIGURATION CHECK =====
-  // Check if spinner display is enabled in user configuration
+  // Query theme configuration to check if loading animations have been explicitly hidden.
   const showSpinner = loadConfig().ui.showSpinner !== false;
 
-  // ===== STATE MANAGEMENT =====
-  // Track current dot animation index for tmux compatibility
+  // Local state to track tmux animation frames (ignored in other terminal environments).
   const [dotIndex, setDotIndex] = useState(0);
 
   /**
-   * <Summary>
-   * What it does:
-   *   Manages tmux-specific dot animation when running in tmux environment.
+   * Registers a fallback animation loop when the client is running under tmux.
    *
-   * How it does it (step by step):
-   *   1. Check if spinner is active, running in tmux, and not for screen reader.
-   *   2. If conditions not met, return early (no animation needed).
-   *   3. Set up interval timer that cycles through dot patterns.
-   *   4. Update dot index using modulo to cycle through TMUX_DOTS array.
-   *   5. Return cleanup function to clear interval on unmount or state change.
-   *
-   * Parameters:
-   *   None — uses closure variable (state?.active).
-   *
-   * Returns:
-   *   void — called for side effects (timer management and state updates).
-   *
-   *   None (React useEffect hook, called by React on render).
-   * </Summary>
+   * @remarks
+   * Cycles index positions to animate `TMUX_DOTS` at `TMUX_ANIMATION_MS` intervals.
+   * This is disabled for standard terminals and screen-reader streams to preserve resources.
    */
   useEffect(() => {
-    // Only animate in tmux when spinner is active and screen reader not detected
     if (!state?.active || !inTmux() || isScreenReaderLikely()) return;
 
-    // Set up interval to cycle through dot animation patterns
     const timerId = setInterval(() => {
       setDotIndex((previousIndex) => (previousIndex + 1) % TMUX_DOTS.length);
     }, TMUX_ANIMATION_MS);
 
-    // Clean up interval when component unmounts or dependencies change
     return () => clearInterval(timerId);
   }, [state?.active]);
 
-  // Don't render if spinner is disabled or not active
+  // Prevent rendering if spinner features have been disabled or no task is executing.
   if (!showSpinner || !state?.active) return null;
 
-  // Determine verb based on spinner mode
+  // Switch display verb text depending on whether the system is analyzing (thinking) or executing (working).
   const verb = state.mode === "thinking" ? "thinking" : "working";
 
-  // ===== SCREEN READER MODE =====
-  // Simple text output without animation for screen reader compatibility
+  // Screen Reader: returns a flat, static text description to prevent constant screen reader announcements.
   if (isScreenReaderLikely()) {
     return (
       <Text>
@@ -99,8 +71,7 @@ export const StatusSpinner: React.FC<Props> = ({ state }) => {
     );
   }
 
-  // ===== TMUX MODE =====
-  // Use dot animation instead of ink-spinner (tmux doesn't support complex animations)
+  // tmux: renders the custom ASCII dot character sequence instead of the raw ansi-spin sequences.
   if (inTmux()) {
     return (
       <Box>
@@ -113,8 +84,7 @@ export const StatusSpinner: React.FC<Props> = ({ state }) => {
     );
   }
 
-  // ===== STANDARD TERMINAL MODE =====
-  // Use full ink-spinner animation with standard terminal support
+  // Standard Terminal: mounts the standard animated Ink SVG dots spinner.
   return (
     <Box>
       <Text color="cyan">

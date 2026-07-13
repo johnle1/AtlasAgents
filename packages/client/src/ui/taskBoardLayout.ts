@@ -75,16 +75,16 @@ export type TaskBoardLine = {
 };
 
 /**
- * Maps task status array and active activity messages into wrapped rendering lines.
+ * Maps task status array into wrapped rendering lines.
  *
  * @param tasks - List of active tasks.
- * @param activityMessage - Current activity step message details.
+ * @param _activityMessage - Ignored; activity status is not shown on the task board.
  * @param innerWidth - Target column wrap width.
  * @returns Array of renderable lines.
  */
 export const buildTaskBoardLines = (
   tasks: Array<{ id: number; text: string; state: string }>,
-  activityMessage: string | undefined,
+  _activityMessage: string | undefined,
   innerWidth: number,
 ): TaskBoardLine[] => {
   const lines: TaskBoardLine[] = [];
@@ -98,19 +98,6 @@ export const buildTaskBoardLines = (
         text: segment,
         isRunning: task.state === "running",
         isActivity: false,
-      });
-    });
-  }
-
-  if (activityMessage) {
-    const wrappedActivity = wrapTaskLine(activityMessage, innerWidth);
-    wrappedActivity.forEach((segment, segmentIndex) => {
-      lines.push({
-        key: `activity-${segmentIndex}`,
-        glyphPrefix: segmentIndex === 0 ? "" : CONTINUATION_INDENT,
-        text: segment,
-        isRunning: true,
-        isActivity: true,
       });
     });
   }

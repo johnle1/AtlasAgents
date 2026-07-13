@@ -1,8 +1,10 @@
 /**
- * Memory-related command handlers.
+ * Server preference-store slash commands under `/memory`.
  *
- * This module handles commands for managing server-side memory:
- * - /memory show, forget, clear
+ * @remarks
+ * Memory is learned user preference text (topics + rules), not chat history.
+ * Operations call through {@link Connection} (`getMemory`, `forgetMemory`,
+ * `clearMemory`).
  */
 
 import type { Connection } from "../connection/index.js";
@@ -10,26 +12,25 @@ import { printMemory, printError, printSuccess } from "../renderer.js";
 import { formatErrorMessage } from "./utils.js";
 
 /**
- * <Summary>
- * What it does:
- *   Handles "/memory show", "/memory forget <topic>", and "/memory clear"
- *   by routing to the appropriate memory operation on the server.
+ * Routes `/memory show | forget <topic> | clear`.
  *
- * How it does it (step by step):
- *   1. Routes based on subcommand (show, forget, clear).
- *   2. For show: calls Connection.getMemory and prints via renderer.printMemory.
- *   3. For forget: validates topic, calls Connection.forgetMemory.
- *   4. For clear: calls Connection.clearMemory.
- *   5. Prints success or error messages for each operation.
+ * @remarks
+ * - `show` — lists all topics via {@link printMemory}
+ * - `forget` — requires a non-empty topic argument (exact server key)
+ * - `clear` — wipes the entire store (irreversible from the client)
  *
- * Parameters:
- *   @param sub - Subcommand: "show", "forget", or "clear".
- *   @param arg - Argument for forget subcommand (topic name).
- *   @param conn - RSocket connection for server communication.
+ * Failures print errors and do not rethrow.
  *
- * Returns:
- *   @returns called for side effects only.
- * </Summary>
+ * @param sub - Subcommand after `/memory`.
+ * @param arg - Topic for `forget`; ignored otherwise.
+ * @param conn - Live RSocket connection.
+ *
+ * @example
+ * ```ts
+ * await handleMemory("show", "", connection);
+ * await handleMemory("forget", "coding-style", connection);
+ * await handleMemory("clear", "", connection);
+ * ```
  */
 export const handleMemory = async (
   sub: string,
@@ -39,13 +40,10 @@ export const handleMemory = async (
   switch (sub) {
     case "show": {
       try {
-        // Fetch and display memory entries from server
         const entries = await conn.getMemory();
         printMemory(entries);
       } catch (err) {
-        printError(
-          `Could not fetch memory: ${formatErrorMessage(err)}`,
-        );
+        printError(`Could not fetch memory: ${formatErrorMessage(err)}`);
       }
       break;
     }
@@ -56,7 +54,6 @@ export const handleMemory = async (
         return;
       }
       try {
-        // Forget specific topic from server memory
         await conn.forgetMemory(topic);
         printSuccess(`Forgot topic "${topic}".`);
       } catch (err) {
@@ -66,7 +63,6 @@ export const handleMemory = async (
     }
     case "clear": {
       try {
-        // Clear all memory entries from server
         await conn.clearMemory();
         printSuccess("All memories cleared.");
       } catch (err) {

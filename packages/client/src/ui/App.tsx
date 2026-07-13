@@ -34,7 +34,26 @@ import { useSubmitLine } from "./hooks/useSubmitLine.js";
 
 /**
  * Root component mounted by {@link BootstrapApp} once the server is connected.
- 
+ *
+ * @remarks
+ * {@link App} is a thin wrapper that provides the React context ({@link AppProvider})
+ * and renders the main application content ({@link AppContent}). All actual UI
+ * logic lives in {@link AppContent} and its child components.
+ *
+ * @example
+ * ```tsx
+ * This is typically rendered by BootstrapApp after successful connection:
+ * <App
+ *   connection={connection}
+ *   commandHandler={commandHandler}
+ *   fileProxy={fileProxy}
+ *   onSaveHistory={saveHistory}
+ *   initialHistoryLines={sessionMessages}
+ *   initialInputHistory={historyLines}
+ *   registerExit={registerExit}
+ *   onInputHistoryRef={historyRef}
+ * />
+ * ```
  */
 export const App: React.FC<AppProps> = (appProps) => (
   <AppProvider {...appProps}>
@@ -44,6 +63,23 @@ export const App: React.FC<AppProps> = (appProps) => (
 
 /**
  * Composes the terminal layout and connects hooks to shared context state.
+ *
+ * @remarks
+ * {@link AppContent} is where the UI is assembled: it wires up keyboard input,
+ * command submission, autocomplete, and the visual hierarchy (static history,
+ * streaming output, input box, status line). This component is intentionally
+ * focused on composition — business logic lives in dedicated hooks:
+ *
+ * - {@link useBridgeSetup} — handles server → UI message routing
+ * - {@link useConnectionStatus} — tracks RSocket connection state
+ * - {@link useConnectionDisconnectCleanup} — resets UI state on disconnect
+ * - {@link useKeyboardInput} — maps keyboard events to actions
+ * - {@link useSubmitLine} — handles command/line submission
+ *
+ * The layout uses Ink's {@link Static} component for committed history (which
+ * stays fixed at the top) and regular components for the live input area
+ * (which stays at the bottom). This creates a terminal-like experience where
+ * new output appears above the input line without scrolling the entire screen.
  */
 const AppContent: React.FC = () => {
   const {
@@ -86,7 +122,13 @@ const AppContent: React.FC = () => {
     onInputHistoryRef,
   } = useAppContext();
 
+  // Track the RSocket connection state for display in the status line.
+  // This hook subscribes to connection status changes and returns the current state.
   const connectionStatus = useConnectionStatus(connection);
+
+  // Reset UI state when the connection drops. This ensures that if the server
+  // disconnects mid-task, we clear spinners, streaming text, and agent boards
+  // so the user sees a clean state when they reconnect.
   useConnectionDisconnectCleanup(connection, {
     setTaskActive,
     setBusy,
@@ -98,17 +140,25 @@ const AppContent: React.FC = () => {
 
   const { exit } = useApp();
 
-  // New typing resets autocomplete selection and scroll window
+  // New typing resets autocomplete selection and scroll window.
+  // This ensures that when the user types a new character, we start from
+  // the top of the suggestion list rather than remembering a previous selection.
   useEffect(() => {
     setActiveIndex(0);
     setScrollOffset(0);
   }, [input, setActiveIndex, setScrollOffset]);
 
+  // Register the exit handler with BootstrapApp so Ctrl+C and /exit share
+  // the same teardown path. The cleanup function unregisters to prevent
+  // calling a stale exit handler if this component remounts.
   useEffect(() => {
     registerExit(exit);
     return () => registerExit(() => {});
   }, [exit, registerExit]);
 
+  // Wire up the server → UI message bridge. This hook subscribes to RSocket
+  // events and updates the UI state accordingly. It's the single source of
+  // truth for all server-initiated state changes.
   useBridgeSetup({
     setHistory,
     setStreamingText,
@@ -140,9 +190,20 @@ const AppContent: React.FC = () => {
   });
 
   /**
-   * Two-phase Enter when autocomplete is open: first Enter fills the
-   * highlighted command; second Enter (with input matching the fill)
-   * actually submits.
+   * Two-phase Enter handler when autocomplete is open.
+   *
+   * @remarks
+   * When the user presses Enter and autocomplete suggestions are visible:
+   * - First press: fills the input with the highlighted command (adds a trailing
+   *   space if the command requires arguments)
+   * - Second press (with input matching the filled value): submits the command
+   *
+   * This UX pattern lets users quickly select commands without accidentally
+   * submitting incomplete commands. For example, typing `/f` → Enter fills
+   * `/file ` (with space), then typing `read path` → Enter submits the full
+   * command.
+   *
+   * @param inputLine - The current input text to handle.
    */
   const handleSubmitCallback = useCallback(
     async (inputLine: string) => {
@@ -160,6 +221,9 @@ const AppContent: React.FC = () => {
         const autocompletedValue =
           selectedSuggestion.command + (needsSpaceAfterCommand ? " " : "");
 
+        // If the input already matches the autocompleted value, this is the
+        // second Enter press — submit the command. Otherwise, fill the input
+        // with the autocompleted value and wait for the user to continue typing.
         if (
           inputLine === autocompletedValue ||
           (!needsSpaceAfterCommand && inputLine === selectedSuggestion.command)
@@ -176,10 +240,17 @@ const AppContent: React.FC = () => {
     [activeIndex, submit, setInput],
   );
 
+  // Register the submit callback with the context so InputBox can invoke it.
+  // We use useCallback to memoize the handler and only update it when dependencies
+  // change, preventing unnecessary re-renders of InputBox.
   useEffect(() => {
     setHandleSubmit(() => handleSubmitCallback);
   }, [handleSubmitCallback, setHandleSubmit]);
 
+  // Build the keyboard input handler that maps raw key events to UI actions.
+  // This hook handles arrow keys (history navigation, autocomplete selection),
+  // Ctrl+C (interrupt), and other special keys. The handler is registered with
+  // Ink's useInput hook so it receives all keyboard events.
   const keyboardInputHandler = useKeyboardInput(
     {
       approval,
@@ -204,6 +275,9 @@ const AppContent: React.FC = () => {
 
   useInput(keyboardInputHandler);
 
+  // Compute autocomplete suggestions for the current input. We only show
+  // suggestions when there are matches, and we paginate the display to avoid
+  // overwhelming the terminal with a long list.
   const commandSuggestions = getCommandSuggestions(input);
   const shouldShowAutocomplete = commandSuggestions.length > 0;
   const visibleSuggestions = commandSuggestions.slice(
@@ -211,7 +285,11 @@ const AppContent: React.FC = () => {
     scrollOffset + AUTOCOMPLETE_VISIBLE_COUNT,
   );
 
-  // Static region: banner + committed history (does not scroll with live stream)
+  // Static region: banner + committed history (does not scroll with live stream).
+  // Ink's Static component renders items once and keeps them fixed at the top
+  // of the screen. This is critical for a terminal-like experience where new
+  // output appears above the input line without pushing old content off-screen.
+  // We memoize this array to avoid re-rendering the entire history on every keystroke.
   const staticEntries = useMemo(
     () => [
       ...bannerEntries,
@@ -226,6 +304,7 @@ const AppContent: React.FC = () => {
 
   return (
     <Box flexDirection="column" height="100%">
+      {/* Static region: fixed at top, contains banner and committed history */}
       <Static items={staticEntries}>
         {(staticEntry) =>
           staticEntry.kind === "banner" ? (
@@ -238,18 +317,24 @@ const AppContent: React.FC = () => {
         }
       </Static>
 
+      {/* Streaming history: appears below static region, updates in real-time */}
       <HistoryView />
 
+      {/* Agent task boards: one per active agent, shows parallel work */}
       {agentBoards.map((agentBoard) => (
         <AgentTaskBoard key={agentBoard.id} board={agentBoard} />
       ))}
 
+      {/* Status spinner: shows loading state for long-running operations */}
       <StatusSpinner state={spinner} />
 
+      {/* Approval menu: appears when server requests user confirmation */}
       {approval && <ApprovalMenu />}
 
+      {/* Prompt overlay: appears when server requests user input */}
       {promptReq && <PromptOverlay />}
 
+      {/* Input area: only shown when not in approval/prompt mode */}
       {!approval && !promptReq && (
         <Box flexDirection="column">
           {shouldShowAutocomplete && (
@@ -281,12 +366,15 @@ const AppContent: React.FC = () => {
             </Box>
           )}
 
+          {/* Input box: the main text input field */}
           <InputBox />
 
+          {/* Connection status line: shows Connected/Connecting/Disconnected */}
           <ConnectionStatusLine status={connectionStatus} />
         </Box>
       )}
 
+      {/* Double-Ctrl+C warning: shown when user presses Ctrl+C during a busy task */}
       {busy && sigintBusy === 1 && (
         <Text dimColor>Press Ctrl+C again to exit</Text>
       )}

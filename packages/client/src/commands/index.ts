@@ -1,45 +1,40 @@
 /**
- * Command handler module.
+ * Slash-command router for the LoopyCode CLI REPL.
  *
- * This module provides the main CommandHandler class that routes slash commands
- * to specialized handler functions. Each category of commands is split into
- * separate handler modules for better maintainability.
+ * @remarks
+ * {@link CommandHandler} sits between user input and task submission: lines that
+ * start with `/` are handled here; everything else is treated as a task by the
+ * caller. Domain logic lives in sibling modules (`configHandlers`,
+ * `modelHandlers`, …) so this file only owns parsing and dispatch.
  *
- * Command structure:
- * - Config commands: /set, /config, /agent
- * - Model commands: /models
- * - Skill commands: /skills
- * - Memory commands: /memory
- * - Workspace commands: /workspace, /cwd
- * - Display commands: /spinner, /think
- * - Session commands: /explore, /new, /exit
- * - Theme command: /theme
+ * Supported command families:
+ * - Config: `/set`, `/config`, `/agent`
+ * - Models: `/models`
+ * - Skills / memory: `/skills`, `/memory`
+ * - Workspace: `/workspace`, `/cwd`
+ * - Display: `/spinner`, `/think`, `/theme`
+ * - Session: `/explore`, `/new`, `/exit`
+ * - TokenSave: `/tokensave`
+ *
+ * @example
+ * ```ts
+ * const commands = new CommandHandler({
+ *   conn: connection,
+ *   prompts,
+ *   skills,
+ *   fileProxy,
+ * });
+ *
+ * if (await commands.handle("/models list")) {
+ *    was a slash command — do not send as a task
+ * }
+ * ```
  */
 
 import type { PromptPort } from "../ui/promptPort.js";
 import type { Connection } from "../connection/index.js";
 import type { SkillManager } from "../skills.js";
 import type { LocalFileProxy } from "../localFileProxy.js";
-
-/**
- * Dependencies required by the CommandHandler class.
- */
-export interface CommandHandlerDeps {
-  /** Live RSocket client for server-backed commands. */
-  conn: Connection;
-  /** REPL prompts used for user interaction. */
-  prompts: PromptPort;
-  /** Optional SkillManager for /skills command. */
-  skills?: SkillManager;
-  /** Optional file proxy for workspace operations. */
-  fileProxy?: LocalFileProxy;
-  /** Optional callback for prompt updates. */
-  onPromptUpdate?: () => void;
-  /** Optional custom exit handler. */
-  onExit?: () => void;
-}
-
-// Import handler functions from specialized modules
 import {
   handleAgent,
   handleSet as handleSetConfig,
@@ -52,48 +47,59 @@ import { handleMemory } from "./memoryHandlers.js";
 import { handleWorkspace, handleCwd } from "./workspaceHandlers.js";
 import { handleSpinner, handleThink } from "./displayHandlers.js";
 import { handleExplore, handleNew, handleExit } from "./sessionHandlers.js";
-
-// Import renderer functions
+import { handleTokenSave } from "./tokenSaveHandlers.js";
 import { printError } from "../renderer.js";
 
 /**
- * <Summary>
- * What it does:
- *   Parses leading-slash input and runs the matching local command handler without treating it as a task line.
+ * Injected collaborators required to run slash commands.
  *
- * How it fits in the system:
- *   Sits between index.ts readline and Connection: slash lines stop here; plain text is sent as tasks from index.
- * </Summary>
+ * @remarks
+ * Optional fields disable related commands gracefully (e.g. missing
+ * `fileProxy` still allows most commands; `/workspace` / `/cwd` degrade).
+ */
+export interface CommandHandlerDeps {
+  /** Live RSocket client for server-backed routes (`/models`, `/memory`, …). */
+  conn: Connection;
+
+  /** Interactive prompts (password, theme, numbered choices). */
+  prompts: PromptPort;
+
+  /** When set, `/skills` prefers SkillManager over module-level helpers. */
+  skills?: SkillManager;
+
+  /** Workspace sandbox for `/workspace`, `/cwd`, and `/tokensave`. */
+  fileProxy?: LocalFileProxy;
+
+  /** Invoked after workspace changes so the CLI prompt can refresh. */
+  onPromptUpdate?: () => void;
+
+  /**
+   * Custom process teardown for `/exit`.
+   * When omitted, {@link handleExit} prints goodbye and calls `process.exit(0)`.
+   */
+  onExit?: () => void;
+}
+
+/**
+ * Parses leading-slash input and dispatches to the matching handler module.
+ *
+ * @remarks
+ * Does **not** submit tasks — callers must check the boolean return and only
+ * forward non-command lines to `Connection.sendTask`. Unknown commands print
+ * an error but still return `true` so they are not sent as tasks.
  */
 export class CommandHandler {
-  /** Live RSocket client for server-backed commands. */
   private conn: Connection;
-  /** REPL prompts used for user interaction. */
   private prompts: PromptPort;
-  /** Optional SkillManager for /skills command. */
   private readonly skills?: SkillManager;
-  /** Optional file proxy for workspace operations. */
   private readonly fileProxy?: LocalFileProxy;
-  /** Optional callback for prompt updates. */
   private readonly onPromptUpdate?: () => void;
-  /** Optional custom exit handler. */
   private readonly onExit?: () => void;
+
   /**
-   * <Summary>
-   * What it does:
-   *   Captures the RSocket connection, readline instance, and optional SkillManager used by all command handlers.
+   * Stores dependencies for all routed handlers.
    *
-   * How it does it (step by step):
-   *   1. Stores conn, prompts, and optional dependencies on the instance for handler methods.
-   *
-   * Parameters:
-   *   @param deps - Object containing all CommandHandler dependencies.
-   *
-   * Returns:
-   *   void — constructor side effects only.
-   *
-   *   None (field assignment only).
-   * </Summary>
+   * @param deps - Connection, prompts, and optional skills/file-proxy hooks.
    */
   constructor(deps: CommandHandlerDeps) {
     this.conn = deps.conn;
@@ -105,37 +111,34 @@ export class CommandHandler {
   }
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Determines if the input is a slash command and routes it to the
-   *   appropriate handler, or returns false if it's plain task text.
+   * Attempts to handle `input` as a slash command.
    *
-   * How it does it (step by step):
-   *   1. Checks if input starts with "/" — returns false if not.
-   *   2. Splits input into command, subcommand, and argument.
-   *   3. Routes to the appropriate handler method based on command.
-   *   4. Prints error for unknown commands.
-   *   5. Returns true if a command was handled.
+   * @remarks
+   * Parsing: strip leading `/`, split on whitespace into
+   * `command` / `subcommand` / `argument` (argument may contain spaces).
+   * `/set advisor|agent` delegates model picking via
+   * {@link handleSetModel}. `/help` is intentionally removed (points users to
+   * `/config`).
    *
-   * Parameters:
-   *   @param input - Raw user input from the readline interface.
+   * @param input - Raw readline / prompt line from the user.
+   * @returns `true` if the line started with `/` (handled or unknown command);
+   *   `false` if it should be treated as plain task text.
    *
-   * Returns:
-   *   @returns true if command was handled, false if plain text.
-   * </Summary>
+   * @example
+   * ```ts
+   * await handler.handle("/set port 7000"); // true
+   * await handler.handle("refactor auth");  // false
+   * ```
    */
   handle = async (input: string): Promise<boolean> => {
-    // Return false if input doesn't start with "/" (not a command)
     if (!input.startsWith("/")) return false;
 
-    // Parse input into command parts: remove leading slash, split by whitespace
     const parts = input.slice(1).split(/\s+/);
     const command = parts[0]?.toLowerCase() ?? "";
     const subcommand = parts[1]?.toLowerCase() ?? "";
+    // Join remainder so values like hostnames or skill names may contain spaces.
     const argument = parts.slice(2).join(" ");
 
-    // Route to appropriate handler based on command
     switch (command) {
       case "set":
         await handleSetConfig(
@@ -166,6 +169,9 @@ export class CommandHandler {
         break;
       case "explore":
         await handleExplore(this.conn);
+        break;
+      case "tokensave":
+        await handleTokenSave(subcommand, argument, this.conn, this.fileProxy);
         break;
       case "workspace":
         await handleWorkspace(
@@ -200,7 +206,6 @@ export class CommandHandler {
         break;
     }
 
-    // Return true to indicate command was handled
     return true;
   };
 }

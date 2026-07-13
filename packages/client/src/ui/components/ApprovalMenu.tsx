@@ -3,38 +3,17 @@ import { Box, Text, useInput } from "ink";
 import type { ApprovalRequest, PlanDecision } from "../types.js";
 import { resolveApproval } from "../uiBridge.js";
 import { useAppContext } from "../../DataContext.js";
+import type { ApprovalMenuOption as Option } from "./types.js";
 
 /**
- * <Summary>
- * What it does:
- *   Defines the structure for a menu option with label, value, and optional color.
+ * Evaluates the request schema and generates the selectable menu items.
  *
- * Used by:
- *   - ApprovalMenu — renders selectable options for user approval decisions.
+ * @remarks
+ * Maps the incoming `ApprovalRequest` type (e.g., `planReview`, `runSkip`) to the correct list of
+ * available actions, colorizing high-stakes items to draw attention.
  *
- * Produced by:
- *   - buildOptions — creates option arrays based on approval request type.
- * </Summary>
- */
-type Option<T> = { label: string; value: T; color?: string };
-
-/**
- * <Summary>
- * What it does:
- *   Builds the appropriate menu options based on the type of approval request.
- *
- * How it does it (step by step):
- *   1. Check the approval request type to determine which options to show.
- *   2. For planReview: return Implement, Edit plan, Skip task options.
- *   3. For runSkip: return Run and Skip options.
- *   4. For other types: return Keep and Undo options.
- *
- * Parameters:
- *   @param request - The approval request containing type and details.
- *
- * Returns:
- *   @returns Array of menu options with labels and values.
- * </Summary>
+ * @param request - The active verification or approval payload received from the advisor.
+ * @returns A list of configuration options detailing menu text, selection value, and styling.
  */
 const buildOptions = (
   request: ApprovalRequest,
@@ -56,39 +35,43 @@ const buildOptions = (
         ];
 
 /**
- * <Summary>
- * What it does:
- *   Renders an interactive approval menu for user decisions with keyboard navigation.
+ * Renders an interactive decision form that blocks the main CLI loop until a choice is submitted.
  *
- * How it fits in the system:
- *   Displays approval requests (plan review, command execution, etc.) when the
- *   server requires user confirmation. Handles keyboard input for navigation
- *   and selection, then resolves the approval through the UI bridge.
- * </Summary>
+ * @remarks
+ * Listens to active approval state in the application context and binds global key events (`useInput`).
+ * Supports keyboard navigation via arrow keys and selection confirmation using the `return` key.
+ *
+ * @example
+ * ```tsx
+ * import React from "react";
+ * import { render } from "ink";
+ * import { ApprovalMenu } from "./ApprovalMenu.js";
+ * 
+ * // Note: Requires DataContext wrapper configured with an active approval request.
+ * ```
  */
 export const ApprovalMenu: React.FC = () => {
-  // ===== STATE ACCESS =====
+  // Pull interactive control states and state update functions from data context.
   const { approval, approvalSelected, setApprovalSelected } = useAppContext();
 
-  // ===== DERIVED STATE =====
-  // Build menu options based on current approval request type
+  // Maps the request action list depending on whether approval is required.
   const options = useMemo(
     () => (approval ? buildOptions(approval) : []),
     [approval],
   );
 
-  // ===== KEYBOARD INPUT HANDLING =====
+  // Binds standard keyboard listeners to intercept cursor controls and choices.
   useInput((_input, key) => {
-    // Only process input when there's an active approval request
+    // Escape early when no prompt is actively displayed to avoid key hijacking.
     if (!approval) return;
 
-    // Navigate up through menu options
+    // Navigate up option indices, keeping boundaries safe.
     if (key.upArrow) {
       setApprovalSelected((previousIndex) => Math.max(0, previousIndex - 1));
       return;
     }
 
-    // Navigate down through menu options
+    // Navigate down option indices, capping at option counts.
     if (key.downArrow) {
       setApprovalSelected((previousIndex) =>
         Math.min(options.length - 1, previousIndex + 1),
@@ -96,18 +79,17 @@ export const ApprovalMenu: React.FC = () => {
       return;
     }
 
-    // Submit selected option when Enter is pressed
+    // Submit selection value directly through the IPC channel bridge.
     if (key.return) {
       resolveApproval(options[approvalSelected]!.value);
     }
   });
 
-  // Don't render if no approval request exists
+  // Short-circuit render cycle if no confirmation dialog is pending from advisor.
   if (!approval) return null;
   const request = approval;
 
-  // ===== CONTEXT LINE GENERATION =====
-  // Build context description lines based on approval request type
+  // Format context rows based on target operation constraints.
   const contextLines =
     request.type === "planReview"
       ? [
@@ -126,12 +108,12 @@ export const ApprovalMenu: React.FC = () => {
       borderColor="gray"
       paddingX={1}
     >
-      {/* ===== CONTEXT INFORMATION ===== */}
+      {/* Dynamic Header details regarding the task / command being requested */}
       {contextLines.map((line, lineIndex) => (
         <Text key={`ctx-${lineIndex}`}>{line}</Text>
       ))}
 
-      {/* ===== MENU OPTIONS ===== */}
+      {/* Selectable choices formatted with hover indicators */}
       {options.map((option, optionIndex) => (
         <Text
           key={`opt-${optionIndex}`}
@@ -143,7 +125,7 @@ export const ApprovalMenu: React.FC = () => {
         </Text>
       ))}
 
-      {/* ===== KEYBOARD HINTS ===== */}
+      {/* Helper tooltip to assist developers navigating keyboard interactions */}
       <Text dimColor>↑↓ move · Enter to confirm</Text>
     </Box>
   );

@@ -1,3 +1,13 @@
+/**
+ * Theme contract and built-in palette registry for the LoopyCode CLI.
+ *
+ * @remarks
+ * Each {@link Theme} is a bag of ANSI CSI strings (not CSS). Custom palettes
+ * below compose classic 16-color / 256-color codes; VS Code and GitHub looks
+ * come from `vscodeGithubThemes.ts`. The theme manager (`themeManager.ts`)
+ * selects the active entry via `config.ui.theme`.
+ */
+
 import {
   githubDarkTheme,
   githubDimmedTheme,
@@ -7,252 +17,161 @@ import {
 } from "./vscodeGithubThemes.js";
 
 /**
- * <Summary>
- * What it does:
- *   Defines the shape of a theme object containing all color codes for terminal UI elements.
+ * Complete ANSI styling kit for one CLI appearance.
  *
- * Used by:
- *   - All theme objects — implement this interface to ensure consistent structure.
- *   - themeManager — uses this type for the activeTheme variable.
- *   - vscodeGithubThemes — creates theme objects implementing this interface.
+ * @remarks
+ * All color fields are escape sequences ready to embed in terminal strings
+ * (e.g. `"\x1b[36m"`). Always terminate styled spans with {@link Theme.reset}
+ * so colors do not bleed into later output. `shikiTheme` is a Shiki theme *id*
+ * for code highlighting, not an ANSI string.
  *
- * Produced by:
- *   - All theme objects (default, ocean, forest, monochrome, sunset, vscode themes, github themes).
- * </Summary>
+ * @example
+ * ```ts
+ * const t: Theme = THEMES.default!;
+ * process.stdout.write(`${t.success}ok${t.reset}\n`);
+ * ```
  */
 export interface Theme {
-  /** The display name of the theme for UI presentation. */
+  /** Human-readable name shown in `/theme` pickers. */
   name: string;
 
-  /** Border color for UI sections and panels. */
+  /** Box / panel border foreground. */
   border: string;
 
-  /** Text color for border labels and metadata. */
+  /** Labels on borders (version chips, metadata). */
   borderText: string;
 
-  /** Primary text color for main content and user messages. */
+  /** Default body text (often reset / default fg). */
   textPrimary: string;
 
-  /** Secondary text color for metadata, timestamps, and less important information. */
+  /** Muted metadata, timestamps, dim helpers. */
   textSecondary: string;
 
-  /** Accent color for highlighting important elements and interactive components. */
+  /** Highlights and interactive accents. */
   textAccent: string;
 
-  /** Bold text formatting escape sequence for emphasis. */
+  /** Bold emphasis CSI (usually `\x1b[1m`). */
   textBold: string;
 
-  /** Border color for thought/reasoning sections in agent output. */
+  /** Border around advisor/agent think boxes. */
   thinkBorder: string;
 
-  /** Text color for thought/reasoning content in agent output. */
+  /** Body text inside think boxes. */
   thinkText: string;
 
-  /** Text color for thought/reasoning labels in agent output. */
+  /** Label text for think sections. */
   thinkLabel: string;
 
-  /** Text color for added lines in diffs (green/warm colors). */
+  /** Foreground for diff “added” plain coloring. */
   diffAdded: string;
 
-  /** Text color for removed lines in diffs (red/cool colors). */
+  /** Foreground for diff “removed” plain coloring. */
   diffRemoved: string;
 
-  /** Text color for context lines in diffs (neutral/grayscale). */
+  /** Foreground for unchanged context lines. */
   diffContext: string;
 
-  /** Background color for added lines in diffs (dark themes). */
+  /** Background CSI for highlighted added lines. */
   diffBgAdded: string;
 
-  /** Background color for removed lines in diffs (dark themes). */
+  /** Background CSI for highlighted removed lines. */
   diffBgRemoved: string;
 
-  /** The Shiki syntax highlighting theme name to use for code blocks. */
+  /**
+   * Shiki theme id used when syntax-highlighting diff code
+   * (e.g. `"dark-plus"`, `"github-light"`).
+   */
   shikiTheme: string;
 
-  /** Text color for user prompt text in input fields. */
+  /** Default prompt input text color. */
   promptText: string;
 
-  /** Accent color for prompt highlights and focus indicators. */
+  /** Prompt caret / focus accent. */
   promptAccent: string;
 
-  /** Color for success messages and indicators. */
+  /** Success / affirmative messages. */
   success: string;
 
-  /** Color for error messages and indicators. */
+  /** Error / failure messages. */
   error: string;
 
-  /** Color for warning messages and indicators. */
+  /** Warning / caution messages. */
   warning: string;
 
-  /** Reset escape sequence to clear all formatting. */
+  /** Full SGR reset (`\x1b[0m`) — clear styles after a span. */
   reset: string;
 }
 
 /**
- * <Summary>
- * What it does:
- *   Provides common ANSI escape sequences for basic terminal colors and formatting.
+ * Shared classic ANSI / xterm-256 building blocks for custom themes.
  *
- * Used by:
- *   - All custom theme objects — compose colors from these basic codes.
- *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * @remarks
+ * Prefer composing these over raw escapes so palettes stay consistent.
+ * Values may be concatenated (e.g. `dim + cyan`) for compound styles.
  */
 const colorCodes = {
-  /** Resets all text formatting to default. */
   reset: "\x1b[0m",
-
-  /** Bold/bright text formatting. */
   bold: "\x1b[1m",
-
-  /** Dim/faded text formatting. */
   dim: "\x1b[2m",
-
-  /** White color (bright white). */
   white: "\x1b[97m",
-
-  /** Gray color (dark gray). */
   gray: "\x1b[90m",
-
-  /** Cyan color (standard cyan). */
   cyan: "\x1b[36m",
-
-  /** Bright cyan color. */
   cyanBright: "\x1b[96m",
-
-  /** Green color (standard green). */
   green: "\x1b[32m",
-
-  /** Bright green color. */
   greenBright: "\x1b[92m",
-
-  /** Red color (standard red). */
   red: "\x1b[31m",
-
-  /** Yellow color (standard yellow). */
   yellow: "\x1b[33m",
-
-  /** Blue color (standard blue). */
   blue: "\x1b[34m",
-
-  /** Bright blue color. */
   blueBright: "\x1b[94m",
-
-  /** Magenta color (standard magenta). */
   magenta: "\x1b[35m",
-
-  /** Orange color (ANSI 256-color cube). */
+  /** Warm orange from the 256-color cube (index 208). */
   orange: "\x1b[38;5;208m",
-
-  /** Teal color (ANSI 256-color cube). */
   teal: "\x1b[38;5;43m",
-
-  /** Forest green color (ANSI 256-color cube). */
   forest: "\x1b[38;5;34m",
-
-  /** Dim forest green color (ANSI 256-color cube). */
   forestDim: "\x1b[38;5;22m",
-
-  /** Salmon color (ANSI 256-color cube). */
   salmon: "\x1b[38;5;209m",
-
-  /** Peach color (ANSI 256-color cube). */
   peach: "\x1b[38;5;223m",
 };
 
-/**
- * <Summary>
- * What it does:
- *   Defines ANSI escape sequences for diff background colors in dark themes.
- *
- * Used by:
- *   - darkShiki — provides these background colors for dark theme diffs.
- *
- * Produced by:
- *   - None (static constants defined at module level).
- * </Summary>
- */
+/** Dark-theme add-line background (256-color index 22). */
 const diffBackgroundDarkAdded = "\x1b[48;5;22m";
+/** Dark-theme remove-line background (256-color index 52). */
 const diffBackgroundDarkRemoved = "\x1b[48;5;52m";
 
-/**
- * <Summary>
- * What it does:
- *   Defines ANSI escape sequences for diff background colors in light themes.
- *
- * Used by:
- *   - githubLightTheme — provides these background colors for light theme diffs.
- *
- * Produced by:
- *   - None (static constants defined at module level).
- * </Summary>
- */
-const diffBackgroundLightAdded = "\x1b[48;5;150m";
-const diffBackgroundLightRemoved = "\x1b[48;5;217m";
-
-/**
- * <Summary>
- * What it does:
- *   Defines ANSI escape sequences for diff background colors in monochrome themes.
- *
- * Used by:
- *   - monochrome theme — provides these background colors for monochrome diffs.
- *
- * Produced by:
- *   - None (static constants defined at module level).
- * </Summary>
- */
+/** Monochrome add-line background (near-black gray). */
 const diffBackgroundMonoAdded = "\x1b[48;5;235m";
+/** Monochrome remove-line background (slightly darker gray). */
 const diffBackgroundMonoRemoved = "\x1b[48;5;234m";
 
 /**
- * <Summary>
- * What it does:
- *   Provides common diff background colors for dark-themed Shiki syntax highlighting.
+ * Shared dark Shiki + dark diff backgrounds for custom dark palettes.
  *
- * Used by:
- *   - Custom dark themes (default, ocean, forest, sunset) — extend this base configuration.
- *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * @remarks
+ * Spread into theme objects so `default` / `ocean` / `forest` / `sunset` stay
+ * aligned on highlighting and diff wash colors.
  */
 const darkShikiConfig = {
-  /** Background color for added lines in dark themes. */
   diffBgAdded: diffBackgroundDarkAdded,
-
-  /** Background color for removed lines in dark themes. */
   diffBgRemoved: diffBackgroundDarkRemoved,
-
-  /** The Shiki theme name for dark mode syntax highlighting. */
   shikiTheme: "dark-plus",
 } as const;
 
 /**
- * <Summary>
- * What it does:
- *   Maps theme keys to theme objects containing all color codes for the UI.
+ * Registry of theme key → {@link Theme} for the CLI.
  *
- * How it fits in the system:
- *   Central theme registry that the themeManager uses to load and switch themes.
- *   Contains both custom themes and imported VS Code/GitHub themes for consistency.
- * </Summary>
+ * @remarks
+ * Keys are stable config ids (`config.ui.theme`). Display names live on
+ * `Theme.name`. Import vscode/github themes are keyed with dashed ids for
+ * readability (`"vscode-dark"`, `"github-light"`).
+ *
+ * @example
+ * ```ts
+ * const ocean = THEMES.ocean;
+ * const gh = THEMES["github-dark"];
+ * ```
  */
 export const THEMES: Record<string, Theme> = {
-  /**
-   * <Summary>
-   * What it does:
-   *   The default cyan-themed color scheme with balanced colors for good readability.
-   *
-   * Characteristics:
-   *   - Cyan accents for highlights and interactive elements
-   *   - Green for success states and diff additions
-   *   - Red for errors and diff removals
-   *   - Gray for secondary text and metadata
-   * </Summary>
-   */
+  /** Balanced cyan default used when no preference is set. */
   default: {
     name: "Default",
     border: colorCodes.dim + colorCodes.cyan,
@@ -276,18 +195,7 @@ export const THEMES: Record<string, Theme> = {
     reset: colorCodes.reset,
   },
 
-  /**
-   * <Summary>
-   * What it does:
-   *   An ocean-themed color scheme with cool blues and teals for a calm, aquatic feel.
-   *
-   * Characteristics:
-   *   - Blue and teal accents for a nautical color palette
-   *   - Teal for success states
-   *   - Salmon for errors (warm contrast to cool background)
-   *   - Peach for warnings (soft orange accent)
-   * </Summary>
-   */
+  /** Cool blues / teals. */
   ocean: {
     name: "Ocean",
     border: colorCodes.blueBright,
@@ -311,18 +219,7 @@ export const THEMES: Record<string, Theme> = {
     reset: colorCodes.reset,
   },
 
-  /**
-   * <Summary>
-   * What it does:
-   *   A forest-themed color scheme with greens and natural earth tones.
-   *
-   * Characteristics:
-   *   - Forest green accents for a nature-inspired palette
-   *   - Bright green for success states and diff additions
-   *   - Salmon for errors (natural contrast to forest greens)
-   *   - Yellow for warnings (sunlight accent)
-   * </Summary>
-   */
+  /** Greens / earth tones. */
   forest: {
     name: "Forest",
     border: colorCodes.forest,
@@ -347,16 +244,11 @@ export const THEMES: Record<string, Theme> = {
   },
 
   /**
-   * <Summary>
-   * What it does:
-   *   A monochrome color scheme using only black, white, and grayscale for maximum contrast.
+   * High-contrast grayscale (accessibility / distraction-free).
    *
-   * Characteristics:
-   *   - Pure black and white for high contrast accessibility
-   *   - Gray scales for secondary text and metadata
-   *   - White for success and errors (monochrome distinction)
-   *   - Custom monochrome diff backgrounds for consistency
-   * </Summary>
+   * @remarks
+   * Uses dedicated mono diff backgrounds instead of {@link darkShikiConfig}
+   * so green/red washes do not break the monochrome look.
    */
   monochrome: {
     name: "Monochrome",
@@ -383,18 +275,7 @@ export const THEMES: Record<string, Theme> = {
     reset: colorCodes.reset,
   },
 
-  /**
-   * <Summary>
-   * What it does:
-   *   A sunset-themed color scheme with warm oranges, pinks, and magentas.
-   *
-   * Characteristics:
-   *   - Warm orange and peach accents for a sunset color palette
-   *   - Peach for success states (warm positive feedback)
-   *   - Magenta for errors (strong warm contrast)
-   *   - Orange for warnings (sunlight intensity)
-   * </Summary>
-   */
+  /** Warm oranges / magentas. */
   sunset: {
     name: "Sunset",
     border: colorCodes.orange,
@@ -418,89 +299,38 @@ export const THEMES: Record<string, Theme> = {
     reset: colorCodes.reset,
   },
 
-  /**
-   * <Summary>
-   * What it does:
-   *   Import of the VS Code Dark+ theme from vscodeGithubThemes.
-   *
-   * Characteristics:
-   *   - Blue and purple color scheme matching VS Code default
-   *   - Teal for success states
-   *   - Red for errors
-   *   - Orange-peach for warnings
-   * </Summary>
-   */
+  /** VS Code Dark+ — see {@link vscodeTheme}. */
   "vscode-dark": vscodeTheme,
 
-  /**
-   * <Summary>
-   * What it does:
-   *   Import of the VS Code Dark Modern theme from vscodeGithubThemes.
-   *
-   * Characteristics:
-   *   - Purple and blue color scheme matching modern VS Code
-   *   - Teal for success states
-   *   - Coral red for errors
-   *   - Orange-peach for warnings
-   * </Summary>
-   */
+  /** VS Code Dark Modern — see {@link vscodeDarkModernTheme}. */
   "vscode-modern": vscodeDarkModernTheme,
 
-  /**
-   * <Summary>
-   * What it does:
-   *   Import of the GitHub Dark theme from vscodeGithubThemes.
-   *
-   * Characteristics:
-   *   - Blue accent scheme matching GitHub's dark mode
-   *   - Green for success states (GitHub's brand color)
-   *   - Red for errors (GitHub's danger color)
-   *   - Orange for warnings (GitHub's warning color)
-   * </Summary>
-   */
+  /** GitHub Dark — see {@link githubDarkTheme}. */
   "github-dark": githubDarkTheme,
 
-  /**
-   * <Summary>
-   * What it does:
-   *   Import of the GitHub Dimmed theme from vscodeGithubThemes.
-   *
-   * Characteristics:
-   *   - Muted blue color scheme matching GitHub's dimmed mode
-   *   - Green for success states (GitHub's brand color, muted)
-   *   - Red-orange for errors (GitHub's danger color, muted)
-   *   - Yellow for warnings (GitHub's warning color)
-   * </Summary>
-   */
+  /** GitHub Dimmed — see {@link githubDimmedTheme}. */
   "github-dimmed": githubDimmedTheme,
 
   /**
-   * <Summary>
-   * What it does:
-   *   Import of the GitHub Light theme from vscodeGithubThemes.
+   * GitHub Light — see {@link githubLightTheme}.
    *
-   * Characteristics:
-   *   - Blue accent scheme matching GitHub's light mode
-   *   - Green for success states (GitHub's brand color)
-   *   - Red for errors (GitHub's danger color)
-   *   - Brown for warnings (GitHub's warning color)
-   *   - Light diff backgrounds for readability
-   * </Summary>
+   * @remarks
+   * Only built-in light palette; uses light diff backgrounds from that module.
    */
   "github-light": githubLightTheme,
 };
 
 /**
- * <Summary>
- * What it does:
- *   Provides an array of all available theme keys for display and selection.
+ * All registry keys in {@link THEMES} (order follows object insertion).
  *
- * How it does it (step by step):
- *   1. Extract all keys from the THEMES object.
- *   2. Return the array of theme keys.
+ * @remarks
+ * Handy for `/theme` menus — iterate keys and read `THEMES[key].name`.
  *
- * Returns:
- *   @returns Array of theme key strings (e.g., ["default", "ocean", "forest", "monochrome", "sunset", "vscode-dark", "vscode-modern", "github-dark", "github-dimmed", "github-light"]).
- * </Summary>
+ * @example
+ * ```ts
+ * for (const key of THEME_KEYS) {
+ *   console.log(key, THEMES[key]!.name);
+ * }
+ * ```
  */
 export const THEME_KEYS = Object.keys(THEMES);

@@ -1,104 +1,85 @@
 /**
- * <Summary>
- * What it does:
- *   Defines directory names that should be skipped during file system traversal.
+ * Static policy sets for traversal skips, quiet routes, and shell classification.
  *
- * Used by:
- *   - File traversal and search functions — skip these directories to avoid
- *     unnecessary processing of generated files and dependencies.
+ * @remarks
+ * Consumed by directory listing, {@link LocalFileProxy.handle} spinner logic, and
+ * {@link classifyCommand}. Edit carefully — classification is intentionally
+ * heuristic, not a full shell security sandbox.
+ */
+
+/**
+ * Directory basenames skipped while walking or listing the workspace.
  *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * @remarks
+ * Avoids drowning listings in dependency/build noise (`node_modules`, `.git`,
+ * `dist`, `.next`). Matching is by **entry name only**, not full path.
  */
 export const SKIP_DIR_NAMES = new Set([
-  "node_modules" /** Node.js dependency directory (contains thousands of files) */,
-  ".git" /** Git repository metadata directory */,
-  "dist" /** Build output directory (generated code) */,
-  ".next" /** Next.js build output directory (generated code) */,
+  "node_modules",
+  ".git",
+  "dist",
+  ".next",
 ]);
 
 /**
- * <Summary>
- * What it does:
- *   Defines proxy routes that should execute instantly without showing a working spinner.
+ * Proxy routes that complete so quickly that a working spinner would flicker.
  *
- * Used by:
- *   - Proxy request handlers — skip spinner animation for these fast metadata routes.
- *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * @remarks
+ * {@link LocalFileProxy.handle} skips `startWorking` / teardown animation for
+ * these metadata routes (`file.get_cwd`, `command.classify`).
  */
 export const QUIET_PROXY_ROUTES = new Set([
-  "file.get_cwd" /** Get current working directory (instant metadata operation) */,
-  "command.classify" /** Classify command safety level (instant analysis operation) */,
+  "file.get_cwd",
+  "command.classify",
 ]);
 
 /**
- * <Summary>
- * What it does:
- *   Defines base shell commands that are considered safe to execute without user confirmation.
+ * Base executables treated as read-only → classification `"safe"`.
  *
- * Used by:
- *   - classifyCommand — checks if a command's base command is in this set to mark it as "safe".
- *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * @remarks
+ * Only the **first** whitespace token is matched (e.g. `ls`, `cat`). Pipelines
+ * or wrappers around dangerous tools are **not** fully modeled — unknown / mixed
+ * forms fall through to `"cautious"` or `"dangerous"` via token scans.
  */
 export const SAFE_BASE_COMMANDS = new Set([
-  "ls" /** List directory contents (read-only operation) */,
-  "cat" /** Display file contents (read-only operation) */,
-  "pwd" /** Print working directory (read-only operation) */,
-  "echo" /** Display text output (read-only operation) */,
-  "find" /** Search for files (read-only operation) */,
-  "grep" /** Search text in files (read-only operation) */,
-  "head" /** Display first lines of file (read-only operation) */,
-  "tail" /** Display last lines of file (read-only operation) */,
-  "wc" /** Count lines, words, characters (read-only operation) */,
+  "ls",
+  "find",
+  "cat",
+  "head",
+  "tail",
+  "grep",
+  "pwd",
+  "echo",
+  "wc",
 ]);
 
 /**
- * <Summary>
- * What it does:
- *   Defines git subcommands that are considered safe to execute without user confirmation.
+ * `git <subcommand>` values treated as read-only → `"safe"`.
  *
- * Used by:
- *   - classifyCommand — checks if a git command's subcommand is in this set to mark it as "safe".
- *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * @remarks
+ * Requires base command `git` plus a second token in this set (`status`, `log`,
+ * `diff`). Mutating git ops are left to the dangerous-token / cautious paths.
  */
-export const SAFE_GIT_SUBCOMMANDS = new Set([
-  "status" /** Show working tree status (read-only operation) */,
-  "log" /** Show commit logs (read-only operation) */,
-  "diff" /** Show changes between commits (read-only operation) */,
-]);
+export const SAFE_GIT_SUBCOMMANDS = new Set(["status", "log", "diff"]);
 
 /**
- * <Summary>
- * What it does:
- *   Defines command tokens and flags that indicate a command is potentially dangerous.
+ * Command tokens that force classification `"dangerous"`.
  *
- * Used by:
- *   - classifyCommand — checks if any token in the command matches this set to mark it as "dangerous".
- *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * @remarks
+ * Matched as whole whitespace-separated tokens after lowercasing (e.g. `rm`,
+ * `-rf`, `--force`). Presence of any token here fails closed to requiring
+ * explicit user approval with a danger warning in the CLI.
  */
 export const DANGEROUS_TOKENS = new Set([
-  "rm" /** Remove files or directories (destructive operation) */,
-  "rmdir" /** Remove empty directories (destructive operation) */,
-  "drop" /** Database drop command (destructive operation) */,
-  "truncate" /** Truncate files to zero size (destructive operation) */,
-  "reset" /** Git reset command (can discard changes) */,
-  "--hard" /** Git hard reset flag (destructive, discards all changes) */,
-  "--force" /** Force operation flag (bypasses safety checks) */,
-  "-rf" /** Recursive force flag for rm (destructive, no confirmation) */,
-  "-f" /** Force flag (bypasses safety checks) */,
-  "dd" /** Low-level disk write command (can overwrite data) */,
-  "mkfs" /** Make filesystem command (destructive, formats storage) */,
+  "rm",
+  "rmdir",
+  "-rf",
+  "-f",
+  "--force",
+  "--hard",
+  "drop",
+  "truncate",
+  "dd",
+  "mkfs",
+  "reset",
 ]);

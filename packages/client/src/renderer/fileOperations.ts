@@ -1,3 +1,12 @@
+/**
+ * Scrollback printers for local file-proxy operations (read/write/delete/…).
+ *
+ * @remarks
+ * Each `print*` mirrors a file-proxy route so the CLI history shows what the
+ * agent is doing. Paths go through {@link formatDisplayPath}. Many mutating
+ * ops call {@link beginBlockOutput} so the status bar yields to a history block.
+ */
+
 import type { DiffChunk } from "@loopycode/shared";
 import { beginBlockOutput } from "../agentStatus.js";
 import { renderDiffFromChunks } from "../diff/diffRenderer.js";
@@ -6,243 +15,143 @@ import { getTheme } from "../theme/themeManager.js";
 import { appendBlock, appendDiff } from "./sink.js";
 
 /**
- * <Summary>
- * What it does:
- *   Defines visual icons used to prefix different file operations in the output.
+ * Glyphs that prefix operation lines in scrollback.
  *
- * Used by:
- *   - All file operation print functions — use these icons to visually distinguish operation types.
- *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * @remarks
+ * Chosen to skim like a file-tree / shell prompt (`▸`, `│`, `$`, `>`). Kept as
+ * a single map so icons stay consistent across printers.
  */
 const OPERATION_ICONS = {
-  /** Icon for directory listing operations (expandable tree style) */
+  /** Expandable directory listing. */
   listDir: "▸",
-  /** Icon for file read operations (vertical bar like file tree) */
+  /** File read (tree-style bar). */
   read: "│",
-  /** Icon for file write operations (asterisk for modification) */
+  /** File write / modify. */
   write: "*",
-  /** Icon for file creation operations (plus sign for addition) */
+  /** New file. */
   create: "+",
-  /** Icon for directory creation operations (plus with slash for directory) */
+  /** New directory. */
   createDir: "+/",
-  /** Icon for deletion operations (minus sign for removal) */
+  /** Delete. */
   delete: "-",
-  /** Icon for bash/command operations (dollar sign like shell prompt) */
+  /** Shell (unused here; see shellOperations). */
   bash: "$",
-  /** Icon for directory change operations (greater-than sign like navigation) */
+  /** Directory change. */
   cd: ">",
+  /** Search / TokenSave lookup. */
+  search: "/",
 } as const;
 
 /**
- * <Summary>
- * What it does:
- *   Creates a styled operation line with secondary text color for non-critical operations.
+ * Builds a dim `icon Label(path)` line for low-emphasis ops (read, cd, search).
  *
- * How it does it (step by step):
- *   1. Get the current theme for text styling.
- *   2. Format the target path for display (shortens workspace paths).
- *   3. Build a styled string with the icon, label, and formatted path in secondary color.
- *   4. Return the complete styled operation line.
- *
- * Parameters:
- *   @param icon - The operation icon to display (e.g., "│", "*", "+").
- *   @param label - The operation label (e.g., "Read", "Write", "Create").
- *   @param target - The target path the operation applies to.
- *
- * Returns:
- *   @returns The styled operation line with secondary text color.
- * </Summary>
+ * @param icon - Prefix glyph from {@link OPERATION_ICONS}.
+ * @param label - Operation verb shown to the user.
+ * @param target - Absolute or relative path (shortened for display).
+ * @returns ANSI-styled single line ending in theme reset.
  */
 const operationLineDim = (
   icon: string,
   label: string,
   target: string,
 ): string => {
-  // ===== STEP 1: Get theme for styling =====
-  // Step 1a: Get the current theme for text coloring and styling
   const theme = getTheme();
-
-  // ===== STEP 2: Build styled operation line =====
-  // Step 2a: Format the target path for display (shortens workspace paths to relative)
-  // Step 2b: Build the operation line with icon, label, and formatted path
-  // Step 2c: Use secondary text color to indicate this is a less critical operation
-  // Step 2d: Apply theme reset at the end to prevent color bleeding
   return `${theme.textSecondary}${icon} ${label}(${formatDisplayPath(target)})${theme.reset}`;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Creates a styled operation line with bold path text for critical operations.
+ * Builds `icon Label(**path**)` with a bold path for high-emphasis mutations.
  *
- * How it does it (step by step):
- *   1. Get the current theme for text styling.
- *   2. Format the target path for display (shortens workspace paths).
- *   3. Build a styled string with the icon and label in normal text.
- *   4. Format the path with bold styling for emphasis.
- *   5. Return the complete styled operation line.
- *
- * Parameters:
- *   @param icon - The operation icon to display (e.g., "+", "-", "+/").
- *   @param label - The operation label (e.g., "Create", "Delete", "CreateDir").
- *   @param target - The target path the operation applies to.
- *
- * Returns:
- *   @returns The styled operation line with bold path text.
- * </Summary>
+ * @param icon - Prefix glyph from {@link OPERATION_ICONS}.
+ * @param label - Operation verb.
+ * @param target - Path shown bold inside parentheses.
+ * @returns ANSI-styled single line.
  */
 const operationLineBoldPath = (
   icon: string,
   label: string,
   target: string,
 ): string => {
-  // ===== STEP 1: Get theme for styling =====
-  // Step 1a: Get the current theme for text coloring and styling
   const theme = getTheme();
-
-  // ===== STEP 2: Build styled operation line =====
-  // Step 2a: Build the operation line with icon and label in normal text
-  // Step 2b: Format the target path for display (shortens workspace paths)
-  // Step 2c: Apply bold styling to the path for emphasis on critical operations
-  // Step 2d: Apply theme reset at the end to prevent color bleeding
   return `${icon} ${label}(${theme.textBold}${formatDisplayPath(target)}${theme.reset})`;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays a directory listing operation with expansion hint.
+ * Prints a directory listing header with a ctrl+o expand hint.
  *
- * How it does it (step by step):
- *   1. Get the current theme for text styling.
- *   2. Format the directory path for display.
- *   3. Build a styled line with the list icon, operation label, and path.
- *   4. Add a hint about using ctrl+o to expand the directory.
- *   5. Append the styled line to the output block.
+ * @param path - Directory being listed.
  *
- * Parameters:
- *   @param path - The directory path being listed.
- *
- * Returns:
- *   @returns Returns after displaying the directory listing operation.
- * </Summary>
+ * @example
+ * ```ts
+ * printListDir("/proj/src");
+ * ```
  */
 export const printListDir = (path: string): void => {
-  // ===== STEP 1: Get theme for styling =====
-  // Step 1a: Get the current theme for text coloring and styling
   const theme = getTheme();
-
-  // ===== STEP 2: Build and display directory listing line =====
-  // Step 2a: Format the directory path for display (shortens workspace paths)
-  // Step 2b: Build the operation line with list icon, operation label, and formatted path
-  // Step 2c: Add a hint about using ctrl+o to expand the directory for navigation
-  // Step 2d: Use secondary text color to indicate this is a read-only operation
-  // Step 2e: Append the styled line to the output block for display
+  // Hint is right-padded so it aligns visually with the operation label.
   appendBlock([
     `${theme.textSecondary}${OPERATION_ICONS.listDir} ListDir(${formatDisplayPath(path)})${theme.reset}          ${theme.textSecondary}(ctrl+o to expand)${theme.reset}`,
   ]);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays a file read operation with minimal styling.
+ * Prints a file-read operation line (dim styling).
  *
- * How it does it (step by step):
- *   1. Build a styled operation line using the dim formatting function.
- *   2. Use the read icon and "Read" label with the file path.
- *   3. Append the styled line to the output block.
- *
- * Parameters:
- *   @param path - The file path being read.
- *
- * Returns:
- *   @returns Returns after displaying the read operation.
- * </Summary>
+ * @param path - File being read.
  */
 export const printRead = (path: string): void => {
-  // ===== STEP 1: Build and display read operation line =====
-  // Step 1a: Build the styled operation line using the dim formatting function
-  // Step 1b: Use the read icon (│) and "Read" label with the file path
-  // Step 1c: Append the styled line to the output block for display
+  beginBlockOutput();
   appendBlock([operationLineDim(OPERATION_ICONS.read, "Read", path)]);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays a file write operation with a diff of the changes.
+ * Prints a TokenSave / search operation line (same visual weight as Read).
  *
- * How it does it (step by step):
- *   1. Begin a block output section for formatted display.
- *   2. Render the diff from the diff chunks with syntax highlighting.
- *   3. Append the diff with the file path as the header.
+ * @param label - Human label (e.g. from {@link tokenSaveHistoryLabel}).
+ * @param target - Search query or resource target string.
+ */
+export const printTokenSaveOp = (label: string, target: string): void => {
+  beginBlockOutput();
+  appendBlock([operationLineDim(OPERATION_ICONS.search, label, target)]);
+};
+
+/**
+ * Prints an upcoming file write as a syntax-highlighted diff for approval.
  *
- * Parameters:
- *   @param path - The file path being written.
- *   @param chunks - Array of diff chunks representing the changes.
+ * @remarks
+ * Renders {@link DiffChunk}s via {@link renderDiffFromChunks}, then stores the
+ * body under a `"Write <path>"` diff history card.
  *
- * Returns:
- *   @returns Resolves after displaying the write operation with diff.
- * </Summary>
+ * @param path - File about to be written.
+ * @param diffChunks - Unified-diff chunks (old → new).
+ *
+ * @example
+ * ```ts
+ * await printWrite("/proj/a.ts", chunks);
+ * ```
  */
 export const printWrite = async (
   path: string,
   diffChunks: DiffChunk[],
 ): Promise<void> => {
-  // ===== STEP 1: Begin formatted output section =====
-  // Step 1a: Start a block output section for proper formatting and spacing
   beginBlockOutput();
-
-  // ===== STEP 2: Render diff from chunks =====
-  // Step 2a: Render the diff from the diff chunks with syntax highlighting
-  // Step 2b: This process can be async as it may involve syntax highlighting
   const diffBody = await renderDiffFromChunks(path, diffChunks);
-
-  // ===== STEP 3: Display diff with header =====
-  // Step 3a: Append the diff with the file path as the operation header
-  // Step 3b: Format the path for display (shortens workspace paths)
   appendDiff(`Write ${formatDisplayPath(path)}`, diffBody);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays a file creation operation with a preview of the content.
+ * Prints a create-file header plus an indented content preview.
  *
- * How it does it (step by step):
- *   1. Begin a block output section for formatted display.
- *   2. Build the operation line with bold path styling.
- *   3. Split the preview content into lines.
- *   4. Indent each non-empty line for visual hierarchy.
- *   5. Add blank lines for spacing around the preview.
- *   6. Append the complete lines to the output block.
- *
- * Parameters:
- *   @param path - The file path being created.
- *   @param preview - The content preview to display.
- *
- * Returns:
- *   @returns Returns after displaying the create operation with preview.
- * </Summary>
+ * @param path - File being created.
+ * @param preview - Full or truncated file body to show beneath the header.
  */
 export const printCreate = (path: string, preview: string): void => {
-  // ===== STEP 1: Begin formatted output section =====
-  // Step 1a: Start a block output section for proper formatting and spacing
   beginBlockOutput();
 
-  // ===== STEP 2: Build output lines =====
-  // Step 2a: Build the operation line with bold path styling for emphasis
-  // Step 2b: Add a blank line after the header for spacing
-  // Step 2c: Split the preview content into individual lines
-  // Step 2d: Map each line: if non-empty, indent with 4 spaces; if empty, keep as blank
-  // Step 2e: Add a trailing blank line for spacing
   const outputLines = [
     operationLineBoldPath(OPERATION_ICONS.create, "Create", path),
     "",
+    // Indent preview so it nests under the Create header visually.
     ...preview
       .split("\n")
       .map((previewLine) =>
@@ -251,38 +160,16 @@ export const printCreate = (path: string, preview: string): void => {
     "",
   ];
 
-  // ===== STEP 3: Display output lines =====
-  // Step 3a: Append the complete lines to the output block for display
   appendBlock(outputLines);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays a directory creation operation.
+ * Prints a create-directory operation line (bold path).
  *
- * How it does it (step by step):
- *   1. Begin a block output section for formatted display.
- *   2. Build the operation line with bold path styling.
- *   3. Add a blank line for spacing.
- *   4. Append the complete lines to the output block.
- *
- * Parameters:
- *   @param path - The directory path being created.
- *
- * Returns:
- *   @returns Returns after displaying the directory creation operation.
- * </Summary>
+ * @param path - Directory being created.
  */
 export const printCreateDir = (path: string): void => {
-  // ===== STEP 1: Begin formatted output section =====
-  // Step 1a: Start a block output section for proper formatting and spacing
   beginBlockOutput();
-
-  // ===== STEP 2: Build and display output lines =====
-  // Step 2a: Build the operation line with bold path styling for emphasis
-  // Step 2b: Add a blank line after the header for spacing
-  // Step 2c: Append the complete lines to the output block for display
   appendBlock([
     operationLineBoldPath(OPERATION_ICONS.createDir, "CreateDir", path),
     "",
@@ -290,40 +177,13 @@ export const printCreateDir = (path: string): void => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays a file deletion operation with a warning message.
+ * Prints a delete operation with a permanent-removal warning.
  *
- * How it does it (step by step):
- *   1. Begin a block output section for formatted display.
- *   2. Get the current theme for warning styling.
- *   3. Build the operation line with bold path styling.
- *   4. Add blank lines for spacing around the warning.
- *   5. Build a warning message with warning color and warning icon.
- *   6. Append the complete lines to the output block.
- *
- * Parameters:
- *   @param path - The file path being deleted.
- *
- * Returns:
- *   @returns Returns after displaying the deletion operation with warning.
- * </Summary>
+ * @param path - File or directory about to be deleted.
  */
 export const printDelete = (path: string): void => {
-  // ===== STEP 1: Begin formatted output section =====
-  // Step 1a: Start a block output section for proper formatting and spacing
   beginBlockOutput();
-
-  // ===== STEP 2: Get theme for warning styling =====
-  // Step 2a: Get the current theme for warning color and styling
   const theme = getTheme();
-
-  // ===== STEP 3: Build and display output lines =====
-  // Step 3a: Build the operation line with bold path styling for emphasis
-  // Step 3b: Add blank lines for spacing around the warning message
-  // Step 3c: Build a warning message with warning color and warning icon (⚠)
-  // Step 3d: The warning message clearly states the operation is permanent
-  // Step 3e: Append the complete lines to the output block for display
   appendBlock([
     operationLineBoldPath(OPERATION_ICONS.delete, "Delete", path),
     "",
@@ -333,121 +193,61 @@ export const printDelete = (path: string): void => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays a directory change operation with minimal styling.
+ * Prints a cwd change (`cd`) operation line.
  *
- * How it does it (step by step):
- *   1. Build a styled operation line using the dim formatting function.
- *   2. Use the cd icon and "cd" label with the directory path.
- *   3. Append the styled line to the output block.
- *
- * Parameters:
- *   @param path - The directory path being changed to.
- *
- * Returns:
- *   @returns Returns after displaying the directory change operation.
- * </Summary>
+ * @param path - New directory path.
  */
 export const printCd = (path: string): void => {
-  // ===== STEP 1: Build and display cd operation line =====
-  // Step 1a: Build the styled operation line using the dim formatting function
-  // Step 1b: Use the cd icon (>) and "cd" label with the directory path
-  // Step 1c: Append the styled line to the output block for display
   appendBlock([operationLineDim(OPERATION_ICONS.cd, "cd", path)]);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Defines the shape of a directory entry for display purposes.
- *
- * Used by:
- *   - printListDirEntries — uses this type for directory entry parameters.
- *
- * Produced by:
- *   - Directory listing functions — create objects of this shape for display.
- * </Summary>
+ * One row in an interactive directory expand listing.
  */
 export type DirEntry = {
-  /** The name of the directory entry (file or directory name). */
+  /** Basename of the file or directory. */
   name: string;
 
-  /**
-   * Indicates whether this entry is a directory.
-   * true = directory, false = file.
-   */
+  /** `true` when this entry is a directory (gets expand hint). */
   isDirectory: boolean;
 
   /**
-   * Optional flag indicating the entry cannot be read.
-   * When true, displays an error icon instead of the normal icon.
+   * When `true`, show an error `!` icon instead of the normal glyph
+   * (unreadable entry).
    */
   noRead?: boolean;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays a list of directory entries with appropriate icons and indentation.
+ * Prints indented directory children after an expand (`ctrl+o`) action.
  *
- * How it does it (step by step):
- *   1. Get the current theme for text styling.
- *   2. Calculate the indentation padding based on the indent level.
- *   3. Map each directory entry to a styled display line.
- *   4. Determine the appropriate icon based on entry type and read status.
- *   5. Add expand hint for directories with ctrl+o shortcut.
- *   6. Apply indentation to each line for visual hierarchy.
- *   7. Append all styled lines to the output block.
+ * @remarks
+ * Directories get a `▸` + expand hint; files get `│`; unreadable entries get
+ * a themed `!`. Indent is raw space count from the expand UI state.
  *
- * Parameters:
- *   @param entries - Array of directory entries to display.
- *   @param indent - The indentation level (number of spaces to indent).
- *
- * Returns:
- *   @returns Returns after displaying the directory entries.
- * </Summary>
+ * @param entries - Children to render.
+ * @param indent - Leading spaces for nesting under the parent row.
  */
 export const printListDirEntries = (
   entries: DirEntry[],
   indent: number,
 ): void => {
-  // ===== STEP 1: Get theme for styling =====
-  // Step 1a: Get the current theme for text coloring and styling
   const theme = getTheme();
-
-  // ===== STEP 2: Calculate indentation padding =====
-  // Step 2a: Calculate the padding string based on the indent level
-  // Step 2b: Each indent level adds two spaces of indentation
   const indentationPadding = " ".repeat(indent);
 
-  // ===== STEP 3: Build styled entry lines =====
-  // Step 3a: Map each directory entry to a styled display line
   const entryLines = entries.map((directoryEntry) => {
-    // ===== STEP 3a-1: Determine entry icon =====
-    // Step 3a-1a: If the entry cannot be read, show error icon (!)
-    // Step 3a-1b: If it's a directory, show list icon (▸)
-    // Step 3a-1c: If it's a file, show read icon (│)
     const entryIcon = directoryEntry.noRead
       ? `${theme.error}!${theme.reset}`
       : directoryEntry.isDirectory
         ? OPERATION_ICONS.listDir
         : OPERATION_ICONS.read;
 
-    // ===== STEP 3a-2: Determine expand hint =====
-    // Step 3a-2a: If the entry is a directory, add expand hint with ctrl+o shortcut
-    // Step 3a-2b: If it's a file, no hint is needed (no expansion)
     const expandHint = directoryEntry.isDirectory
       ? `  ${theme.textSecondary}(ctrl+o to expand)${theme.reset}`
       : "";
 
-    // ===== STEP 3a-3: Build complete entry line =====
-    // Step 3a-3a: Apply indentation padding for visual hierarchy
-    // Step 3a-3b: Add icon, entry name, and expand hint (if applicable)
     return `${indentationPadding}  ${entryIcon} ${directoryEntry.name}${expandHint}`;
   });
 
-  // ===== STEP 4: Display entry lines =====
-  // Step 4a: Append all styled entry lines to the output block for display
   appendBlock(entryLines);
 };

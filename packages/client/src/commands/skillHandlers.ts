@@ -1,8 +1,10 @@
 /**
- * Skill-related command handlers.
+ * Custom skill slash commands under `/skills`.
  *
- * This module handles commands for managing custom skills:
- * - /skills list, add, sync
+ * @remarks
+ * Skills are local markdown instruction packs. Prefer an injected
+ * {@link SkillManager} when present; otherwise fall back to module-level
+ * helpers and {@link Connection.syncSkills}.
  */
 
 import {
@@ -16,27 +18,24 @@ import type { Connection } from "../connection/index.js";
 import { formatErrorMessage } from "./utils.js";
 
 /**
- * <Summary>
- * What it does:
- *   Handles "/skills list", "/skills add <name>", and "/skills sync"
- *   by routing to the appropriate skill operation.
+ * Routes `/skills list | add <name> | sync`.
  *
- * How it does it (step by step):
- *   1. Routes based on subcommand (list, add, sync).
- *   2. For list: calls listSkills and prints via renderer.printSkills.
- *   3. For add: validates name, calls addSkill to create file and open editor.
- *   4. For sync: calls readAllSkills, then Connection.syncSkills to upload.
- *   5. Prints success or error messages for each operation.
+ * @remarks
+ * - `list` — prints local skill names
+ * - `add` — creates a skill file (and typically opens an editor via create/add)
+ * - `sync` — uploads skill payloads to the server for advisor/agent use
  *
- * Parameters:
- *   @param sub - Subcommand: "list", "add", or "sync".
- *   @param arg - Argument for add subcommand (skill name).
- *   @param skills - Optional SkillManager instance.
- *   @param conn - RSocket connection for syncing skills.
+ * @param sub - Subcommand after `/skills`.
+ * @param arg - Skill name for `add`.
+ * @param skills - Optional SkillManager; when set, `sync`/`list`/`create` use it.
+ * @param conn - Connection used by the no-manager sync fallback.
  *
- * Returns:
- *   @returns called for side effects only.
- * </Summary>
+ * @example
+ * ```ts
+ * await handleSkills("list", "", skills, connection);
+ * await handleSkills("add", "testing", skills, connection);
+ * await handleSkills("sync", "", skills, connection);
+ * ```
  */
 export const handleSkills = async (
   sub: string,
@@ -46,7 +45,6 @@ export const handleSkills = async (
 ): Promise<void> => {
   switch (sub) {
     case "list":
-      // List available skills using SkillManager or module function
       printSkills(skills?.list() ?? listSkills());
       break;
     case "add": {
@@ -56,7 +54,6 @@ export const handleSkills = async (
         return;
       }
       try {
-        // Create skill using SkillManager or module function
         if (skills) {
           skills.create(skillName);
         } else {
@@ -69,7 +66,6 @@ export const handleSkills = async (
       break;
     }
     case "sync": {
-      // Use SkillManager if available
       if (skills) {
         try {
           const syncedCount = await skills.sync();
@@ -79,13 +75,12 @@ export const handleSkills = async (
           }
           printSuccess(`Synced ${syncedCount} skill(s) to server.`);
         } catch (err) {
-          printError(
-            `Sync failed: ${formatErrorMessage(err)}`,
-          );
+          printError(`Sync failed: ${formatErrorMessage(err)}`);
         }
         break;
       }
-      // Fallback to module functions if no SkillManager
+
+      // No SkillManager — read files from disk and push via Connection.
       const skillList = readAllSkills();
       if (skillList.length === 0) {
         printError("No skills to sync. Use /skills add <name> first.");

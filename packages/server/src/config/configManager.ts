@@ -128,6 +128,16 @@ export const SERVER_DEFAULTS = {
    * 0.2 reserves 20% of context window for system messages and metadata.
    */
   maxContextBudget: 0.2,
+
+  /**
+   * When true, agent uses native Ollama tool_calls instead of legacy <<TOOL>> text.
+   */
+  agentModelSupportsTools: false,
+
+  /**
+   * When true, advisor uses native Ollama tool_calls for propose_plan.
+   */
+  advisorModelSupportsTools: false,
 } as const;
 
 /**
@@ -178,6 +188,16 @@ export type ServerConfig = {
    * Empty string indicates not yet configured.
    */
   agentModel: string;
+
+  /**
+   * When true, agent model uses native Ollama tool calling API.
+   */
+  agentModelSupportsTools: boolean;
+
+  /**
+   * When true, advisor model uses native Ollama tool calling API.
+   */
+  advisorModelSupportsTools: boolean;
 
   /**
    * Temperature setting for advisor model (0.0 to 1.0).
@@ -377,12 +397,23 @@ const storedModel = (value: unknown): string =>
  *   @returns Complete configuration with defaults applied.
  * </Summary>
  */
+const asBoolean = (value: unknown, fallback: boolean): boolean =>
+  typeof value === "boolean" ? value : fallback;
+
 const mergeConfig = (storedConfig: Record<string, unknown>): ServerConfig => ({
-  // Step 1: Extract advisor model (empty string means not configured)
   advisorModel: storedModel(storedConfig.advisorModel),
 
-  // Step 2: Extract agent model (empty string means not configured)
   agentModel: storedModel(storedConfig.agentModel),
+
+  agentModelSupportsTools: asBoolean(
+    storedConfig.agentModelSupportsTools,
+    SERVER_DEFAULTS.agentModelSupportsTools,
+  ),
+
+  advisorModelSupportsTools: asBoolean(
+    storedConfig.advisorModelSupportsTools,
+    SERVER_DEFAULTS.advisorModelSupportsTools,
+  ),
 
   // Step 3: Merge advisor temperature with default
   advisorTemp: asNumber(storedConfig.advisorTemp, SERVER_DEFAULTS.advisorTemp),
@@ -429,6 +460,8 @@ const mergeConfig = (storedConfig: Record<string, unknown>): ServerConfig => ({
 const WRITABLE_CONFIG_KEYS = [
   "advisorTemp",
   "agentTemp",
+  "agentModelSupportsTools",
+  "advisorModelSupportsTools",
   "retries",
   "timeout",
   "maxContextBudget",
@@ -686,6 +719,16 @@ export class ConfigManager implements IConfigManager {
     return modelName;
   };
 
+  getAgentModelSupportsTools = async (): Promise<boolean> => {
+    const config = await this._loadRaw();
+    return config.agentModelSupportsTools;
+  };
+
+  getAdvisorModelSupportsTools = async (): Promise<boolean> => {
+    const config = await this._loadRaw();
+    return config.advisorModelSupportsTools;
+  };
+
   /**
    * <Summary>
    * What it does:
@@ -918,6 +961,13 @@ export class ConfigManager implements IConfigManager {
         }
         if (value < 0 || value > 1) {
           throw new ConfigError(`maxContextBudget must be between 0 and 1`);
+        }
+      } else if (
+        key === "agentModelSupportsTools" ||
+        key === "advisorModelSupportsTools"
+      ) {
+        if (typeof value !== "boolean") {
+          throw new ConfigError(`${key} must be a boolean`);
         }
       } else if (key === "lastConsolidatedAt") {
         if (typeof value !== "number") {

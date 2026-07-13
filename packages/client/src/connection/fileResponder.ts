@@ -1,36 +1,36 @@
+/**
+ * RSocket responder that executes server-initiated local file proxy requests.
+ *
+ * @remarks
+ * During the client handshake, {@link Connection} registers this responder so
+ * the server can `requestResponse` into the client to read/write/delete workspace
+ * files (and related proxy routes). Requests are `{ route, payload }` JSON;
+ * responses are JSON result envelopes from {@link LocalFileProxy.handle}, or
+ * `{ ok: false, error }` when the proxy is missing or throws.
+ */
+
 import type { Payload } from "@rsocket/core";
 import type { LocalFileProxy } from "../localFileProxy.js";
 import { formatErrorMessage } from "../commands/utils.js";
 
 /**
- * <Summary>
- * What it does:
- *   Describes the RSocket responder stream interface used to send responses
- *   back to the server for requestResponse calls.
+ * Minimal responder stream used to write the single response frame.
  *
- * Used by:
- *   - RequestResponseResponder — callback signature for incoming requests.
- *
- * Produced by:
- *   - RSocket runtime — passed into the responder callback.
- * </Summary>
+ * @remarks
+ * Mirrors the subset of the RSocket responder API this module needs: one
+ * `onNext` with `isComplete: true` ends the requestResponse exchange.
  */
 type ResponderStream = {
-  /** Sends one response payload; isComplete=true marks the final frame. */
+  /** Sends one payload; pass `isComplete: true` for the final (only) frame. */
   onNext: (payload: Payload, isComplete: boolean) => void;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Function signature for handling a single server-initiated requestResponse.
+ * Handler signature expected by `@rsocket/core` for inbound `requestResponse`.
  *
- * Used by:
- *   - createFileResponder — returned as the requestResponse handler.
- *
- * Produced by:
- *   - createFileResponder — factory function.
- * </Summary>
+ * @remarks
+ * Must return quickly with `cancel` / `onExtension` hooks; heavy work runs in
+ * a fire-and-forget async IIFE so the RSocket event loop is not blocked.
  */
 type RequestResponseResponder = (
   payload: Payload,
@@ -38,38 +38,45 @@ type RequestResponseResponder = (
 ) => { cancel: () => void; onExtension: () => void };
 
 /**
- * <Summary>
- * What it does:
- *   Builds the RSocket responder object that handles server-initiated file
- *   operations by delegating to LocalFileProxy.
+ * Builds the responder config object passed to `RSocketConnector`.
  *
- * How it does it (step by step):
- *   1. Returns a responder config with a requestResponse handler.
- *   2. On each incoming request: decode JSON route and payload.
- *   3. Call fileProxy.handle(route, payload) and serialise the result.
- *   4. On missing proxy or errors: respond with { ok: false, error } JSON.
+ * @remarks
+ * The proxy instance is closed over at factory call time (during
+ * `Connection.connect`). Call {@link Connection.setFileProxy} before connect
+ * so the handshake embeds a live proxy. If `fileProxy` is still `null`, the
+ * client answers with a structured `{ ok: false }` error instead of throwing
+ * into the RSocket stack.
  *
- * Parameters:
- *   @param fileProxy - File proxy instance, or null if
- *     not yet initialised via Connection.setFileProxy.
+ * File-proxy cancellation is unimplemented (`cancel` is a no-op): workspace
+ * ops are short-lived; long cancels would need cooperative abort inside the
+ * proxy.
  *
- * Returns:
- *   @returns RSocket responder
- *     config passed to RSocketConnector.
- * </Summary>
+ * @param fileProxy - Active {@link LocalFileProxy}, or `null` if not ready.
+ * @returns `{ requestResponse }` suitable for `RSocketConnector`’s `responder`.
+ *
+ * @example
+ * ```ts
+ * const responder = createFileResponder(fileProxy);
+ * const connector = new RSocketConnector({
+ *   transport,
+ *   setup: {
+ *     dataMimeType: "application/json",
+ *     metadataMimeType: "application/json",
+ *     keepAlive: 30_000,
+ *     lifetime: 120_000,
+ *   },
+ *   responder,
+ * });
+ * ```
  */
 export const createFileResponder = (
   fileProxy: LocalFileProxy | null,
 ): { requestResponse: RequestResponseResponder } => {
   return {
     requestResponse: (payload, responderStream) => {
-      // ===== STEP 1: Handle Request Asynchronously =====
-      // Step 1a: Use async IIFE so the RSocket callback returns immediately
-      // Step 1b: Response is sent via responderStream.onNext when processing completes
+      // Return cancel hooks synchronously; do I/O on a microtask/async path.
       void (async () => {
         try {
-          // ===== STEP 2: Validate File Proxy =====
-          // Step 2a: If setFileProxy was never called, return an error response
           if (!fileProxy) {
             responderStream.onNext(
               {
@@ -85,52 +92,37 @@ export const createFileResponder = (
             return;
           }
 
-          // ===== STEP 3: Decode Incoming Payload =====
-          // Step 3a: Extract UTF-8 string from payload data buffer
+          // Empty / missing data is treated as `{}` so route parsing still runs.
           const raw = payload.data?.toString("utf-8") ?? "{}";
-
-          // Step 3b: Parse JSON to extract route and payload fields
           const body = JSON.parse(raw) as {
             route?: string;
             payload?: unknown;
           };
 
-          // ===== STEP 4: Dispatch to File Proxy =====
-          // Step 4a: Extract route string (default to empty if missing)
           const route = String(body.route ?? "");
-
-          // Step 4b: Call file proxy to handle the operation on local filesystem
           const result = await fileProxy.handle(route, body.payload);
 
-          // ===== STEP 5: Send Success Response =====
-          // Step 5a: Serialize result to JSON and send as response with COMPLETE flag
           responderStream.onNext(
             { data: Buffer.from(JSON.stringify(result)) },
             true,
           );
         } catch (err) {
-          // ===== STEP 6: Send Error Response =====
-          // Step 6a: Extract error message from Error object or stringify unknown values
+          // Always complete the stream — leaving it open stalls the server.
           const message = formatErrorMessage(err);
-
-          // Step 6b: Send error envelope back to server with COMPLETE flag
           responderStream.onNext(
             {
-              data: Buffer.from(
-                JSON.stringify({ ok: false, error: message }),
-              ),
+              data: Buffer.from(JSON.stringify({ ok: false, error: message })),
             },
             true,
           );
         }
       })();
 
-      // ===== STEP 7: Return Cancellation Handle =====
-      // Step 7a: RSocket requires cancel/onExtension handlers; no-op for file ops
+      // Required by the RSocket responder contract; file ops do not cancel mid-flight.
       return {
         cancel: () => {},
         onExtension: () => {},
       };
     },
   };
-}
+};

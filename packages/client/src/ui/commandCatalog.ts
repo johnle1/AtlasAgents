@@ -151,6 +151,7 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   },
   {
     command: "/spinner",
+    label: "/spinner on|off",
     description: "Toggle spinner display",
     requiresArgs: true,
   },

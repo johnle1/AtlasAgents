@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    /**
+     * "bundler" lets TypeScript accept .js extensions in imports and resolve
+     * them to .ts files — matching what Vitest does at runtime via its
+     * vite-powered resolver.
+     */
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["vitest/globals"],
+    "paths": {
+      "@loopycode/shared": ["../packages/shared/src/index.ts"]
+    }
+  },
+  "include": [
+    "**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
