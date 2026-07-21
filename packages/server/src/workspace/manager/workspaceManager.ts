@@ -1,69 +1,221 @@
 /**
- * Manages workspace operations by relaying file system commands (read, write, list, search) from the server to a connected CLI client via RSocket bridge, with optional operation logging. How it works (high level): 1. Stores a requesterId that identifies the connected client. 2. Each operation validates that a client is bound, then sends the operation to that client. 3. Supports optional context recording that logs operations for experience/learning purposes. Key Concepts: - requesterId: String that identifies which client session to route operations to. - ClientBridge: RSocket transport layer that handles client communication. - WorkspaceRecorderContext: Optional logging context with taskId for operation tracking. - WorkspaceError: Custom error type for workspace-specific failures (NO_ROOT, OUTSIDE_ROOT, NOT_FOUND).
+ * Proxies workspace operations (read, write, list, search) from server to a connected CLI client via RSocket bridge.
  *
  * @remarks
- * - Orchestrator — uses setRoot, readFile, writeFile for task execution. - Advisor — uses searchFiles and listStructure for codebase exploration. - Agent — uses workspace operations for file manipulation during tasks.
- * : WorkspaceManager — Proxies file operations to the connected CLI client.
+ * This class acts as a remote file system abstraction that routes all workspace operations
+ * (file reads, writes, edits, directory listing, and file searching) through a {@link ClientBridge}
+ * to a single connected CLI client. This design allows the server to maintain zero knowledge
+ * of the actual file system layout and delegate all I/O to the client.
+ *
+ * **Lifecycle:**
+ * 1. Constructor accepts a ClientBridge (typically injected via dependency injection)
+ * 2. {@link bindRequester} must be called with a client session ID before any operations can proceed
+ * 3. All operations validate the requester is bound and the manager hasn't been disposed
+ * 4. {@link dispose} should be called when the session ends to free resources
+ *
+ * **Operation logging:**
+ * If a {@link WorkspaceRecorderContext} is passed to read/write/edit operations, the manager
+ * logs those operations for audit/replay purposes. Pass `undefined` or omit the context to skip logging.
+ *
+ * **Path safety:**
+ * All paths are validated via {@link assertRelativeWorkspacePath} to prevent directory traversal
+ * attacks and ensure paths are workspace-relative (not absolute).
+ *
+ * @example
+ * ```ts
+ * const bridge = new ClientBridge(...);
+ * const manager = new WorkspaceManager(bridge);
+ *
+ * // Bind the manager to a specific client session
+ * manager.bindRequester("client_abc123");
+ *
+ * // Read a file
+ * const content = await manager.readFile("src/index.ts");
+ *
+ * // Write a file
+ * const outcome = await manager.writeFile("src/index.ts", "new content");
+ * if (!outcome.accepted) {
+ *   console.log("Write rejected:", outcome.feedback);
+ * }
+ *
+ * // Edit with a surgical replacement
+ * const editOutcome = await manager.editFile(
+ *   "src/index.ts",
+ *   "old code snippet",
+ *   "new code snippet"
+ * );
+ * ```
+ *
+ * @see {@link ClientBridge} for the transport mechanism
+ * @see {@link WorkspaceRecorderContext} for optional logging configuration
  */
 
 import type { ClientBridge } from "../../transport/clientBridge.js";
+import * as path from "node:path";
 import { buildEditAnchorHint } from "../execution/editFileHelpers.js";
 import { NotFoundError, ValidationError } from "../../errors/index.js";
 import {
   type WorkspaceRecorderContext,
+  type FileWriteOutcome,
   WorkspaceError,
-} from "./workspaceTypes.js";
+} from "./types.js";
 
 /**
- * Maintains connection state to a single client and routes all file operations through that client's RSocket bridge, with optional operation logging. How it works (instance lifecycle): 1. Create instance with ClientBridge passed to constructor. 2. Wait for client to connect (requesterId set via bindRequester). 3. Call workspace methods (readFile, writeFile, etc.) which relay to that client. 4. Operations validate requesterId is set, then send via bridge. 5. Optional context parameter enables operation logging.
+ * Options for {@link WorkspaceManager.editFile} method.
+ */
+type EditFileOptions = {
+  /** If true, replace all occurrences of oldText. If false, oldText must appear exactly once. */
+  replaceAll?: boolean;
+  /** Optional context for logging this operation. */
+  ctx?: WorkspaceRecorderContext;
+};
+
+/**
+ * Validates and sanitizes a file path to prevent directory traversal and ensure it is workspace-relative.
  *
  * @remarks
- * - Container assembly — creates and configures WorkspaceManager. - Orchestration layer (Advisor, Agent, Orchestrator) — calls workspace methods.
- * : WorkspaceManager — Proxies file operations to connected CLI client.
+ * This validation is critical for security — prevents attackers from using `../../etc/passwd`
+ * or absolute paths to access files outside the workspace root. All workspace operations
+ * must pass paths through this function before sending to the client.
+ *
+ * **Rules enforced:**
+ * - Path must not be empty after trimming whitespace
+ * - Path must be relative (not starting with `/` or `C:\` on Windows)
+ * - Path must not contain `..` segments (even if surrounded by slashes)
+ * - Both forward slashes `/` and backslashes `\` are normalized
+ *
+ * @param filePath - The file path to validate, e.g. `"src/index.ts"` or `"packages/core/README.md"`
+ * @param field - The name of the field being validated, used in error messages for clarity.
+ *   Defaults to `"path"`, but can be customized to `"oldPath"`, `"outputFile"`, etc.
+ * @returns The trimmed, validated path ready to send to the client.
+ * @throws {@link ValidationError} if path is empty, absolute, or contains `..` segments.
+ *   Error messages include the field name for context.
+ *
+ * @example
+ * ```ts
+ * // Valid paths
+ * assertRelativeWorkspacePath("src/index.ts");           // ✓
+ * assertRelativeWorkspacePath("  README.md  ");          // ✓ (whitespace trimmed)
+ * assertRelativeWorkspacePath("deep/nested/file.json");  // ✓
+ *
+ * // Invalid paths (throw ValidationError)
+ * assertRelativeWorkspacePath("");                       // ✗ empty
+ * assertRelativeWorkspacePath("/etc/passwd");            // ✗ absolute
+ * assertRelativeWorkspacePath("../../secret.txt");       // ✗ contains '..'
+ * assertRelativeWorkspacePath("src/../etc/passwd");      // ✗ contains '..'
+ * ```
  */
+const assertRelativeWorkspacePath = (
+  filePath: string,
+  field = "path",
+): string => {
+  const trimmed = filePath.trim();
+  // Reject empty paths — the caller must provide a non-empty path.
+  if (!trimmed) {
+    throw new ValidationError(`${field} is required`);
+  }
+  // Reject absolute paths — all workspace paths must be relative to the workspace root.
+  if (path.isAbsolute(trimmed)) {
+    throw new ValidationError(
+      `${field} must be relative to the workspace root`,
+    );
+  }
+  // Reject paths containing '..' segments — prevents escaping the workspace directory.
+  const segments = trimmed.split(/[/\\]/);
+  if (segments.some((segment) => segment === "..")) {
+    throw new ValidationError(`${field} must not contain '..' segments`);
+  }
+  return trimmed;
+};
+
 export class WorkspaceManager {
+  /**
+   * The ID of the currently bound client session, or null if no session is bound yet.
+   * Set via {@link bindRequester} when a client connects.
+   */
   private requesterId: string | null = null;
+
+  /**
+   * Tracks whether this manager has been disposed. Once "DISPOSED", all operations
+   * will throw an error. This prevents accidental reuse after cleanup.
+   */
   private state: "ACTIVE" | "DISPOSED" = "ACTIVE";
 
   /**
- * Stores a reference to the ClientBridge for later use in routing operations. How it works (step by step): 1. Receives ClientBridge instance (parameter property). 2. Stores bridge reference as private readonly field (automatic via parameter property syntax). 3. Initializes requesterId to null (no client connected yet). 4. Ready to bind a client via bindRequester() when client connects.
- *
- * @remarks
- * : Constructor — Initializes WorkspaceManager with RSocket bridge.
- * Parameters: Note: Uses TypeScript parameter property syntax: `private readonly bridge: ClientBridge` automatically creates and assigns the field without explicit body code.
- *
- * @param bridge - RSocket bridge for client communication.
- */
+   * Creates a new WorkspaceManager.
+   *
+   * @param bridge - The ClientBridge transport layer used to send file commands
+   *   to the connected CLI client. The bridge must be properly initialized and
+   *   ready to handle requests before this manager is used.
+   *
+   * @remarks
+   * The manager is created in an "unbound" state. {@link bindRequester} must be
+   * called before any file operations will succeed. This allows the manager to be
+   * instantiated before a client connection is established.
+   *
+   * @example
+   * ```ts
+   * const bridge = new ClientBridge(...);
+   * const manager = new WorkspaceManager(bridge);
+   * // Now call manager.bindRequester(...) when client connects
+   * ```
+   */
   constructor(private readonly bridge: ClientBridge) {}
 
   /**
- * Stores the requesterId so that subsequent workspace operations know which client to route to. How it does it (step by step): 1. Receives requesterId from the newly connected client. 2. Stores it in the instance's private requesterId field. 3. Subsequent operations can now use this requesterId to send commands via bridge.
- *
- * @remarks
- * : bindRequester — Registers a client session identifier.
- *
- * @param requesterId - Unique client session identifier from RSocket metadata.
- */
+   * Binds this manager to a specific client session ID.
+   *
+   * @remarks
+   * This method must be called exactly once after construction and before any file operations.
+   * Binding associates all subsequent operations with the given client session. If this is
+   * called multiple times, the previous requesterId is silently overwritten.
+   *
+   * In a multi-client server, each client would have its own WorkspaceManager instance
+   * bound to its own session ID, so each client's file operations are isolated.
+   *
+   * @param requesterId - The unique session ID of the connected client, e.g. "client_abc123".
+   *   This ID is used as the recipient address when routing requests through the ClientBridge.
+   *
+   * @example
+   * const manager = new WorkspaceManager(bridge);
+   * manager.bindRequester("client_session_xyz");
+   *
+   * // Now operations will route to that client
+   * const content = await manager.readFile("README.md");
+   */
   bindRequester = (requesterId: string): void => {
     this.requesterId = requesterId;
   };
 
   /**
- * Ensures a client is bound to this workspace manager, throwing an error if not. Used by all workspace operations to guarantee safe routing. How it does it (step by step): 1. Checks if requesterId is set (null check). 2. If not set, throws WorkspaceError with code NO_ROOT. 3. If set, returns the requesterId for use in bridge.request().
- *
- * @remarks
- * : requireRequester — Validates and returns the bound client session identifier.
- *
- * @returns Valid requesterId guaranteed to be non-null.
- * @throws {@link Error} — code: "NO_ROOT" if no client session is bound.
- */
+   * Ensures the manager is in a valid state for operations and returns the bound requester ID.
+   *
+   * @remarks
+   * This is a guard method called at the start of every operation to validate preconditions:
+   * 1. The manager hasn't been disposed (state is still "ACTIVE")
+   * 2. A client session has been bound (requesterId is set)
+   *
+   * If either condition fails, a {@link WorkspaceError} is thrown with a descriptive code
+   * and message. This prevents silent failures or operations routing to undefined clients.
+   *
+   * @returns The requesterId string if both conditions pass.
+   * @throws {@link WorkspaceError} with code "DISPOSED" if the manager has been disposed.
+   * @throws {@link WorkspaceError} with code "NO_ROOT" if no client session is bound.
+   *
+   * @example
+   * // This is only called internally before operations:
+   * // const id = this.requireRequester(); // Throws if not ready
+   * // await this.bridge.request(id, ...);
+   */
   private requireRequester = (): string => {
+    // Check if this manager has been cleaned up already.
     if (this.state === "DISPOSED") {
       throw new WorkspaceError(
         "DISPOSED",
         "WorkspaceManager has been disposed",
       );
     }
+    // Check if a client session is bound. Without this, we have nowhere to route requests.
     if (!this.requesterId) {
       throw new WorkspaceError("NO_ROOT", "No client session bound");
     }
@@ -71,154 +223,329 @@ export class WorkspaceManager {
   };
 
   /**
- * Changes the current working directory on the client side by sending a file.cd command. How it does it (step by step): 1. Validates that a client session is bound (requireRequester). 2. Prepares a file.cd command with the target workspacePath. 3. Sends the command via ClientBridge to the connected client. 4. Waits for the response (asynchronous operation). 5. Returns when the client confirms the directory change.
- *
- * @remarks
- * : setRoot — Sets the working directory for the connected client.
- *
- * @param workspacePath - Absolute path to set as the client's working directory.
- * @throws {@link Error} — code: "NO_ROOT" if no client session is bound.
- */
+   * Changes the working directory for the bound client session to the specified workspace path.
+   *
+   * @remarks
+   * This operation tells the client to change its internal working directory. All subsequent
+   * relative file paths sent by the server are resolved from this new root. This is typically
+   * called once when a workspace is opened to anchor subsequent file operations.
+   *
+   * The path is NOT validated (unlike file paths in read/write/edit), so the client is
+   * responsible for ensuring the path exists and is accessible.
+   *
+   * @param workspacePath - The absolute or relative path to set as the new working directory,
+   *   e.g. "/home/user/my-project" or ".".
+   * @throws {@link WorkspaceError} if the manager is disposed or no client is bound.
+   * @throws If the client cannot change to the specified directory (delegated to client).
+   *
+   * @example
+   * await manager.setRoot("/home/user/projects/my-app");
+   * // Now manager.readFile("src/index.ts") resolves to /home/user/projects/my-app/src/index.ts
+   */
   setRoot = async (workspacePath: string): Promise<void> => {
     const id = this.requireRequester();
     await this.bridge.request(id, "file.cd", { path: workspacePath });
   };
 
   /**
- * Converts a relative path into an absolute path for file operations. Currently a pass-through that returns the path unchanged (server-side resolution). How it does it (step by step): 1. Receives a relative path string as input. 2. Returns it unchanged (resolution happens on client side via file operations). 3. Placeholder for future path resolution logic if needed on server side.
- *
- * @remarks
- * : resolvePath — Resolves a relative path to its absolute form.
- * Returns: Note: This method is a placeholder for potential future server-side path resolution. Client-side path resolution happens naturally during file operations.
- *
- * @param relativePath - Path that may be relative or absolute.
- * @returns Path (currently returned unchanged).
- */
+   * Resolves a relative workspace path to an absolute file system path.
+   *
+   * @remarks
+   * In the current implementation, this is a pass-through that returns the input unchanged.
+   * The server maintains zero knowledge of the actual file system layout — all resolution
+   * is delegated to the client. This method exists as a placeholder for future path resolution
+   * logic or as a normalization point if needed.
+   *
+   * Callers typically use this before storing paths in logs or error messages to ensure
+   * consistency and clarity about what path was actually used.
+   *
+   * @param relativePath - A workspace-relative path, typically already validated via
+   *   {@link assertRelativeWorkspacePath}.
+   * @returns The resolved path. Currently returns the input unchanged.
+   *
+   * @example
+   * const resolvedPath = manager.resolvePath("src/index.ts");
+   * console.log("File: " + resolvedPath);
+   */
   resolvePath = (relativePath: string): string => {
     return relativePath;
   };
 
   /**
- * Retrieves the full content of a file from the client via RSocket bridge, with optional operation logging for experience recording. How it does it (step by step): 1. Validates that a client session is bound (requireRequester). 2. Sends a file.read command to the client with the file path. 3. Awaits the response containing the file content. 4. If context with recorder is provided, logs this read operation. 5. Returns the file content string.
- *
- * @remarks
- * : readFile — Reads file content from the connected client's workspace.
- *
- * @param filePath - Path to the file to read.
- * @param ctx - Optional context with recorder/taskId for logging.
- * @returns File content as string.
- * @throws {@link Error} — code: "NO_ROOT" if no client session is bound.
- * @throws — Network or file operation errors from ClientBridge.
- */
+   * Reads and returns the entire contents of a file.
+   *
+   * @remarks
+   * This method sends a read request to the bound client, which retrieves the file from the
+   * actual file system and returns its contents as a string. The entire file is loaded into
+   * memory, so this is not suitable for very large files (use streaming for that if needed).
+   *
+   * **Path validation:** The path is validated via {@link assertRelativeWorkspacePath} to prevent
+   * directory traversal attacks before sending to the client.
+   *
+   * **Operation logging:** If a {@link WorkspaceRecorderContext} is provided with a recorder
+   * and taskId, this read operation is logged for audit or replay purposes.
+   *
+   * @param filePath - The workspace-relative path to the file, e.g. "src/index.ts".
+   *   Must not be absolute or contain ".." segments.
+   * @param ctx - Optional context for logging this operation. If provided with a recorder
+   *   and taskId, the read is logged for audit purposes.
+   * @returns The file contents as a string (UTF-8 assumed).
+   * @throws {@link ValidationError} if the path is invalid (absolute, empty, or contains "..").
+   * @throws {@link WorkspaceError} if the manager is disposed or no client is bound.
+   * @throws If the file doesn't exist or can't be read (delegated to client).
+   *
+   * @example
+   * const content = await manager.readFile("package.json");
+   * console.log(content); // File contents as string
+   *
+   * // With logging
+   * const content = await manager.readFile("src/index.ts", {
+   *   recorder: auditLog,
+   *   taskId: "task_123"
+   * });
+   * // The read operation is now recorded for audit purposes
+   */
   readFile = async (
     filePath: string,
     ctx?: WorkspaceRecorderContext,
   ): Promise<string> => {
+    // Validate and sanitize the path to prevent directory traversal.
+    const safePath = assertRelativeWorkspacePath(filePath);
     const id = this.requireRequester();
+    // Send a read request to the client and wait for the file contents.
     const data = await this.bridge.request<{ content: string }>(
       id,
       "file.read",
-      { path: filePath },
+      { path: safePath },
     );
+    // Log this operation if a recorder context was provided.
     if (ctx?.recorder && ctx.taskId) {
-      ctx.recorder.logRead(ctx.taskId, filePath);
+      ctx.recorder.logRead(ctx.taskId, safePath);
     }
     return data.content;
   };
 
   /**
- * Sends file content to the client to write to disk, returning the diff if accepted. Client can accept or reject (e.g., if file is locked), with optional operation logging. How it does it (step by step): 1. Validates that a client session is bound (requireRequester). 2. Sends a file.write command to the client with file path and content. 3. Awaits response containing accepted flag and optional diff. 4. If client rejected the write, returns undefined. 5. If context with recorder is provided, logs this write operation. 6. Returns the diff string (what changed) or undefined if rejected.
- *
- * @remarks
- * : writeFile — Writes content to a file in the connected client's workspace.
- *
- * @param filePath - Path to the file to write.
- * @param content - Full file content to write.
- * @param ctx - Optional context with recorder/taskId for logging.
- * @returns Diff of changes if accepted, undefined if rejected.
- * @throws {@link Error} — code: "NO_ROOT" if no client session is bound.
- * @throws — Network or file operation errors from ClientBridge.
- */
+   * Writes content to a file, replacing its entire contents. May be rejected by the client.
+   *
+   * @remarks
+   * This method sends content to the client for writing. The client may accept or reject
+   * the write (e.g., if the file is currently open for editing or a conflict is detected).
+   * A rejection is not an error — the caller receives { accepted: false, feedback: "reason" }
+   * and must decide how to proceed.
+   *
+   * **Path validation:** The path is validated via {@link assertRelativeWorkspacePath} before sending.
+   *
+   * **Client feedback:** If the write is rejected, feedback contains a human-readable reason.
+   * If accepted, diff contains a unified diff showing the changes (if available).
+   *
+   * **Operation logging:** The write is logged only if accepted and contains actual changes.
+   * Empty diffs are not logged.
+   *
+   * @param filePath - The workspace-relative path to the file, e.g. "src/index.ts".
+   * @param content - The new file contents to write (UTF-8).
+   * @param ctx - Optional context for logging. Write operations are only logged if accepted
+   *   and the diff is non-empty.
+   * @returns {@link FileWriteOutcome} indicating acceptance, with optional diff and feedback.
+   * @throws {@link ValidationError} if the path is invalid.
+   * @throws {@link WorkspaceError} if the manager is disposed or no client is bound.
+   *
+   * @example
+   * const outcome = await manager.writeFile("src/index.ts", "console.log('hello');");
+   * if (outcome.accepted) {
+   *   console.log("Write succeeded. Diff:", outcome.diff);
+   * } else {
+   *   console.log("Write rejected:", outcome.feedback);
+   * }
+   *
+   * // With logging
+   * const outcome = await manager.writeFile("src/index.ts", newContent, {
+   *   recorder: auditLog,
+   *   taskId: "task_123"
+   * });
+   */
   writeFile = async (
     filePath: string,
     content: string,
     ctx?: WorkspaceRecorderContext,
-  ): Promise<string | undefined> => {
+  ): Promise<FileWriteOutcome> => {
+    // Validate the path to prevent directory traversal.
+    const safePath = assertRelativeWorkspacePath(filePath);
     const id = this.requireRequester();
+    // Send the write request to the client. It may accept or reject the write.
     const data = await this.bridge.request<{
       accepted: boolean;
       diff?: string;
-    }>(id, "file.write", { path: filePath, content });
+      feedback?: string;
+    }>(id, "file.write", { path: safePath, content });
+    // If the client rejected the write, return early with the feedback.
     if (!data.accepted) {
-      return undefined;
+      return { accepted: false, feedback: data.feedback };
     }
+    // The write was accepted. Now check if we should log it.
     const diff = data.diff ?? "";
+    // Only log if we have a non-empty diff. Empty diffs mean no changes were actually made.
     if (ctx?.recorder && ctx.taskId && diff.length > 0) {
-      ctx.recorder.logWrite(ctx.taskId, filePath, diff);
+      ctx.recorder.logWrite(ctx.taskId, safePath, diff);
     }
-    return diff;
+    return { accepted: true, diff };
   };
 
   /**
-   * Applies a surgical in-place edit after reading current content.
-   * @throws {Error} When anchor is missing or ambiguous.
+   * Performs a surgical in-place text replacement in a file after reading current content.
+   *
+   * @remarks
+   * This method implements a "find-and-replace" operation that works by:
+   * 1. Reading the current file content
+   * 2. Counting occurrences of the old text anchor
+   * 3. Validating that the anchor is unambiguous (unless `replaceAll` is true)
+   * 4. Performing the replacement
+   * 5. Writing the updated content back via {@link writeFile}
+   *
+   * **Anchor ambiguity:** If `oldText` appears multiple times and `replaceAll` is false,
+   * an error is thrown with a helpful hint (via {@link buildEditAnchorHint}) suggesting
+   * adding more context to make the anchor unique. This prevents silent incorrect replacements.
+   *
+   * **Logging:** The operation is logged as a single write via {@link writeFile}, which
+   * means it inherits the logging behavior of file writes — only logged if the diff is non-empty.
+   *
+   * @param filePath - The workspace-relative path to the file to edit, e.g. "src/index.ts".
+   * @param oldText - The exact text to find and replace. Must be non-empty. If this text
+   *   appears multiple times and options.replaceAll is false, an error is thrown.
+   * @param newText - The replacement text. Can be empty to delete the oldText segment.
+   * @param options - Optional configuration for the edit operation.
+   *   - replaceAll: If true, all occurrences of oldText are replaced. If false (default),
+   *     oldText must appear exactly once to avoid ambiguous replacements.
+   *   - ctx: Optional context for logging the resulting write operation.
+   * @returns {@link FileWriteOutcome} indicating whether the write succeeded, with optional diff.
+   * @throws {@link ValidationError} if oldText is empty.
+   * @throws {@link ValidationError} if oldText appears multiple times and replaceAll is false.
+   * @throws {@link NotFoundError} if oldText is not found in the file. Includes a hint from
+   *   {@link buildEditAnchorHint} suggesting similar text.
+   * @throws {@link ValidationError} if the path is invalid.
+   * @throws {@link WorkspaceError} if the manager is disposed or no client is bound.
+   *
+   * @example
+   * // Simple replacement with unique anchor
+   * const outcome = await manager.editFile(
+   *   "src/index.ts",
+   *   "const x = 1;",
+   *   "const x = 2;"
+   * );
+   *
+   * // Replace all occurrences of a common pattern
+   * const outcome = await manager.editFile(
+   *   "src/index.ts",
+   *   "console.log",
+   *   "logger.info",
+   *   { replaceAll: true }
+   * );
+   *
+   * // Delete a line by replacing with empty string
+   * const outcome = await manager.editFile(
+   *   "src/index.ts",
+   *   "// TODO: remove this\nconst x = 1;",
+   *   "const x = 1;"
+   * );
+   *
+   * // With logging context
+   * const outcome = await manager.editFile(
+   *   "src/index.ts",
+   *   "oldSnippet",
+   *   "newSnippet",
+   *   { replaceAll: true, ctx: { recorder, taskId } }
+   * );
+   *
+   * @see {@link buildEditAnchorHint} for the hint generation logic
    */
   editFile = async (
     filePath: string,
     oldText: string,
     newText: string,
-    replaceAll = false,
-    ctx?: WorkspaceRecorderContext,
-  ): Promise<string | undefined> => {
+    options?: EditFileOptions,
+  ): Promise<FileWriteOutcome> => {
+    const { replaceAll = false, ctx } = options ?? {};
+
+    // Validate the file path.
+    const safePath = assertRelativeWorkspacePath(filePath);
+    // The oldText anchor must be non-empty; an empty anchor is meaningless.
     if (oldText.length === 0) {
       throw new ValidationError("edit_file: old anchor must be non-empty");
     }
 
-    const content = await this.readFile(filePath, ctx);
+    // Read the current file content to search for the anchor.
+    const content = await this.readFile(safePath, ctx);
+    // Count all occurrences of the old text in the file to check for ambiguity.
     let count = 0;
     let searchFrom = 0;
     while (searchFrom <= content.length) {
-      const idx = content.indexOf(oldText, searchFrom);
-      if (idx === -1) {
+      const matchIndex = content.indexOf(oldText, searchFrom);
+      if (matchIndex === -1) {
         break;
       }
       count += 1;
-      searchFrom = idx + oldText.length;
+      // Move search position past this occurrence to find the next one.
+      searchFrom = matchIndex + oldText.length;
     }
 
+    // If the anchor text isn't found at all, throw an error with a helpful hint.
     if (count === 0) {
       const hint = buildEditAnchorHint(content, oldText);
       throw new NotFoundError(
-        `edit_file: anchor not found in "${filePath}".${hint}`,
+        `edit_file: anchor not found in "${safePath}".${hint}`,
       );
     }
 
+    // If the anchor appears multiple times and replaceAll is false, reject the edit to prevent mistakes.
     if (!replaceAll && count > 1) {
       throw new ValidationError(
-        `edit_file: old appears ${count} times in "${filePath}"; add more context or set replace_all: true`,
+        `edit_file: old appears ${count} times in "${safePath}"; add more context or set replace_all: true`,
       );
     }
 
+    // Perform the actual replacement. Use split/join for replaceAll to be explicit; use replace for single.
     const updated = replaceAll
       ? content.split(oldText).join(newText)
       : content.replace(oldText, newText);
 
-    return this.writeFile(filePath, updated, ctx);
+    // Write the updated content back to the file.
+    return this.writeFile(safePath, updated, ctx);
   };
 
   /**
- * Fetches a text representation of the directory tree from the client, with optional depth limit to control how deep the tree goes. How it does it (step by step): 1. Validates that a client session is bound (requireRequester). 2. Sends a file.list_dir command to the client with depth parameter. 3. Awaits response containing text representation of the directory tree. 4. Returns the text representation for display or parsing.
- *
- * @remarks
- * : listStructure — Retrieves the directory structure of the workspace.
- *
- * @param depth - Maximum depth of directory tree to retrieve.
- * @returns Text representation of directory structure.
- * @throws {@link Error} — code: "NO_ROOT" if no client session is bound.
- * @throws — Network or file operation errors from ClientBridge.
- */
+   * Lists the workspace directory structure up to a specified depth.
+   *
+   * @remarks
+   * This operation requests a tree-like listing of the workspace directory from the client.
+   * The listing is returned as a formatted text string (typically with indentation to show
+   * hierarchy). Depth controls how many levels of nesting are included:
+   * - depth: 1 shows only the workspace root contents (1 level)
+   * - depth: 2 shows root and immediate children (2 levels)
+   * - etc.
+   *
+   * Use this to display the project structure to the user or for navigation purposes.
+   *
+   * @param depth - The maximum directory nesting level to include in the listing.
+   *   Must be a positive integer. Behavior with 0 or negative values is undefined.
+   * @returns A formatted text string representing the directory tree, with file names,
+   *   directories, and visual hierarchy markers (typically ASCII tree characters).
+   * @throws {@link WorkspaceError} if the manager is disposed or no client is bound.
+   * @throws If the workspace root is inaccessible (delegated to client).
+   *
+   * @example
+   * const structure = await manager.listStructure(3);
+   * console.log(structure);
+   * // Output:
+   * // src/
+   * //   index.ts
+   * //   utils/
+   * //     helper.ts
+   * // package.json
+   * // README.md
+   */
   listStructure = async (depth: number): Promise<string> => {
     const id = this.requireRequester();
+    // Request a directory listing from the client with the specified depth limit.
     const data = await this.bridge.request<{ text: string }>(
       id,
       "file.list_dir",
@@ -228,18 +555,35 @@ export class WorkspaceManager {
   };
 
   /**
- * Finds all files matching a given pattern (e.g., glob, regex) in the client's workspace and returns their paths. How it does it (step by step): 1. Validates that a client session is bound (requireRequester). 2. Sends a file.search command to the client with the search pattern. 3. Awaits response containing array of matching file paths. 4. Returns the array of paths for further processing.
- *
- * @remarks
- * : searchFiles — Searches for files matching a pattern in the workspace.
- *
- * @param pattern - Search pattern (glob, regex, or file name).
- * @returns Array of file paths matching the pattern.
- * @throws {@link Error} — code: "NO_ROOT" if no client session is bound.
- * @throws — Network or file operation errors from ClientBridge.
- */
+   * Searches for files matching a glob or text pattern in the workspace.
+   *
+   * @remarks
+   * This method sends a search request to the client, which performs the actual file system
+   * search. The pattern syntax depends on the client implementation — typically glob patterns
+   * (e.g. "*.ts", "src/**\/*.test.ts") or text-search patterns.
+   *
+   * Results are returned as an array of workspace-relative file paths. The search is
+   * performed on the client side, so performance depends on workspace size and client capabilities.
+   *
+   * @param pattern - A search pattern, typically a glob (e.g. "**\/*.ts", "*.json").
+   *   The exact pattern syntax is determined by the client implementation.
+   * @returns An array of workspace-relative paths matching the pattern. Returns an empty
+   *   array if no matches are found.
+   * @throws {@link WorkspaceError} if the manager is disposed or no client is bound.
+   * @throws If the search fails (delegated to client).
+   *
+   * @example
+   * // Find all TypeScript files
+   * const tsFiles = await manager.searchFiles("**\/*.ts");
+   * console.log(tsFiles); // ["src/index.ts", "src/utils/helper.ts", ...]
+   *
+   * // Find all test files
+   * const tests = await manager.searchFiles("**\/*.test.ts");
+   * console.log(tests.length); // 42
+   */
   searchFiles = async (pattern: string): Promise<string[]> => {
     const id = this.requireRequester();
+    // Send the search pattern to the client and retrieve matching file paths.
     const data = await this.bridge.request<{ paths: string[] }>(
       id,
       "file.search",
@@ -248,23 +592,79 @@ export class WorkspaceManager {
     return data.paths;
   };
 
+  /**
+   * Calls a Model Context Protocol (MCP) tool on the client side.
+   *
+   * @remarks
+   * This method bridges to MCP tools available on the client, allowing the server
+   * to invoke client-side capabilities dynamically. The tool name and arguments are
+   * sent to the client, which handles the actual invocation. Results include both
+   * success responses and error states, all returned in a single result object.
+   *
+   * **Timeouts:** An optional timeout can be specified to prevent hung requests.
+   * If the timeout is exceeded, the request throws or returns an error (depending on
+   * the bridge implementation).
+   *
+   * @param tool - The name of the MCP tool to invoke, e.g. "filesystem.read", "search.query".
+   * @param args - The tool arguments, typically an object. The structure depends on the specific tool.
+   * @param timeoutMs - Optional timeout in milliseconds. If the client doesn't respond
+   *   within this time, the request fails. Omit for no timeout.
+   * @returns A result object containing:
+   *   - isError: boolean indicating success (false) or failure (true)
+   *   - data: The tool's return value (if isError is false)
+   *   - errorMessage: Description of the error (if isError is true)
+   * @throws {@link WorkspaceError} if the manager is disposed or no client is bound.
+   * @throws If the bridge request fails or times out.
+   *
+   * @example
+   * const result = await manager.callMcpTool("filesystem.stat", { path: "README.md" });
+   * if (result.isError) {
+   *   console.log("Error:", result.errorMessage);
+   * } else {
+   *   console.log("File stats:", result.data);
+   * }
+   *
+   * // With timeout
+   * const result = await manager.callMcpTool(
+   *   "search.query",
+   *   { pattern: "TODO" },
+   *   5000  // 5 second timeout
+   * );
+   */
   callMcpTool = async (
     tool: string,
     args: unknown,
     timeoutMs?: number,
   ): Promise<{ isError: boolean; data?: unknown; errorMessage?: string }> => {
     const id = this.requireRequester();
-    return this.bridge.request(id, "mcp.call", { tool, arguments: args }, timeoutMs);
+    // Route the MCP tool call to the client via the bridge.
+    return this.bridge.request(
+      id,
+      "mcp.call",
+      { tool, arguments: args },
+      timeoutMs,
+    );
   };
 
   /**
- * Sets state to DISPOSED and clears requesterId to prevent accidental use after disposal. How it does it (step by step): 1. Sets state to DISPOSED. 2. Sets requesterId to null. 3. Subsequent operations will throw DISPOSED errors.
- *
- * @remarks
- * : dispose — Cleans up workspace manager resources.
- */
+   * Cleans up this WorkspaceManager and prevents further operations.
+   *
+   * @remarks
+   * This method marks the manager as disposed, freeing resources and preventing accidental
+   * reuse after a session ends. Any operations attempted after dispose will throw
+   * a {@link WorkspaceError} with code "DISPOSED".
+   *
+   * Call this when the client session terminates to ensure clean resource cleanup and
+   * prevent silent failures from stale manager references.
+   *
+   * @example
+   * manager.dispose();
+   * // Now any call to manager.readFile() will throw WorkspaceError("DISPOSED", ...)
+   */
   dispose = (): void => {
+    // Mark the manager as disposed so future operations will be rejected.
     this.state = "DISPOSED";
+    // Clear the requester ID to be thorough (defensive programming).
     this.requesterId = null;
   };
 }

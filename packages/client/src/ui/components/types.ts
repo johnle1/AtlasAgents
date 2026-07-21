@@ -7,20 +7,20 @@
  */
 import type { ConnectionStatus } from "../../connection/index.js";
 import type {
-  AgentBoardState,
-  AgentStatusState,
+  SubagentBoardState,
+  SubagentStatusState,
   ApprovalRequest,
   PlanDecision,
   SpinnerState,
 } from "../types.js";
 
-/** Props for {@link AgentStatusBox}; one status row per agent or advisor. */
-export type AgentStatusBoxProps = AgentStatusState;
+/** Props for {@link SubagentStatusBox}; one status row per agent or agent. */
+export type SubagentStatusBoxProps = SubagentStatusState;
 
-/** Props for {@link AgentTaskBoard}. */
-export type AgentTaskBoardProps = {
+/** Props for {@link SubagentTaskBoard}. */
+export type SubagentTaskBoardProps = {
   /** The board model representing an agent and its checklist of tasks. */
-  board: AgentBoardState;
+  board: SubagentBoardState;
 };
 
 /**
@@ -44,10 +44,10 @@ export type { ApprovalRequest };
 
 /** Props for {@link Banner}. */
 export type BannerProps = {
-  /** The model identifier assigned to the orchestrating advisor role. */
-  advisorModel: string;
-  /** The model identifier assigned to background sub-agents. */
-  agentModel?: string;
+  /** The model identifier assigned to the orchestrating agent role. */
+  agentModel: string;
+  /** The model identifier assigned to background subagents. */
+  subagentModel?: string;
   /** Semantic version string of the current LoopyCode CLI application bundle. */
   version: string;
 };

@@ -7,8 +7,8 @@ import {
   appendHistory,
   cancelPendingApprovals,
   cancelPendingPrompts,
-  clearAgentBoards,
-  clearAgentStatuses,
+  clearSubagentBoards,
+  clearSubagentStatuses,
   setBusy as setBridgeBusy,
   setSpinner as setBridgeSpinner,
   setStreamingText as setBridgeStreamingText,
@@ -37,16 +37,16 @@ const resetTaskUiState = (
   setBridgeBusy(false);
   setBridgeSpinner(null);
   setBridgeStreamingText(null);
-  clearAgentStatuses();
-  clearAgentBoards();
+  clearSubagentStatuses();
+  clearSubagentBoards();
 
   // Reset React context state (used by UI rendering)
   setters.setTaskActive(false);
   setters.setBusy(false);
   setters.setSpinner(null);
   setters.setStreamingText(null);
-  setters.setAgentStatuses(() => new Map());
-  setters.setAgentBoards([]);
+  setters.setSubagentStatuses(() => new Map());
+  setters.setSubagentBoards([]);
 };
 
 /**

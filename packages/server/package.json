@@ -4,7 +4,8 @@
   "description": "LoopyCode RSocket server",
   "main": "dist/index.js",
   "bin": {
-    "loopy-server": "dist/index.js"
+    "loopy-server": "dist/index.js",
+    "loopy-detect-hardware": "dist/hardware/detectHardware.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

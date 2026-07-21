@@ -9,7 +9,7 @@ import {
 
 describe("extractNetworkCause", () => {
   it("does not treat AppError codes as network causes", () => {
-    const error = new ValidationError("Advisor returned invalid plan JSON");
+    const error = new ValidationError("Agent returned invalid plan JSON");
     expect(extractNetworkCause(error)).toBeNull();
   });
 
@@ -24,15 +24,15 @@ describe("extractNetworkCause", () => {
 
 describe("formatOrchestratorFailure", () => {
   it("omits Network detail for validation failures", () => {
-    const error = new ValidationError("Advisor returned invalid plan JSON");
+    const error = new ValidationError("Agent returned invalid plan JSON");
     const formatted = formatOrchestratorFailure(error, {
-      phase: "advisor.plan",
-      advisorModel: "gemma4:26b",
+      phase: "agent.plan",
+      subagentModel: "gemma4:26b",
     });
 
-    expect(formatted).toContain("Task failed during advisor planning.");
-    expect(formatted).toContain("Advisor returned invalid plan JSON");
-    expect(formatted).toContain("Advisor model: gemma4:26b");
+    expect(formatted).toContain("Task failed during agent planning.");
+    expect(formatted).toContain("Agent returned invalid plan JSON");
+    expect(formatted).toContain("Agent model: gemma4:26b");
     expect(formatted).not.toContain("Network detail:");
   });
 });

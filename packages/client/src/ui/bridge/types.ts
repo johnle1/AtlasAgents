@@ -8,8 +8,8 @@
 
 import type { Config } from "../../config.js";
 import type {
-  AgentBoardState,
-  AgentStatusState,
+  SubagentBoardState,
+  SubagentStatusState,
   ApprovalRequest,
   ApprovalResult,
   HistoryItem,
@@ -33,14 +33,14 @@ export type BridgeHooks = {
   /** Callback invoked when spinner state changes. */
   onSpinner?: (spinnerState: SpinnerState | null) => void;
   /** Callback invoked to update agent statuses map. */
-  onAgentStatuses?: (
+  onSubagentStatuses?: (
     statusUpdater: (
-      previousStatusMap: Map<number | "advisor", AgentStatusState>,
-    ) => Map<number | "advisor", AgentStatusState>,
+      previousStatusMap: Map<number | "agent", SubagentStatusState>,
+    ) => Map<number | "agent", SubagentStatusState>,
   ) => void;
   /** Callback invoked to update agent boards array. */
-  onAgentBoards?: (
-    boardUpdater: (previousBoards: AgentBoardState[]) => AgentBoardState[],
+  onSubagentBoards?: (
+    boardUpdater: (previousBoards: SubagentBoardState[]) => SubagentBoardState[],
   ) => void;
   /** Callback invoked when an approval request changes. */
   onApprovalChange?: (approvalRequest: ApprovalRequest | null) => void;

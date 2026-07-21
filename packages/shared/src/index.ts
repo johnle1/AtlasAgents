@@ -7,12 +7,12 @@ export {
   getDiffDisplayLines,
 } from "./diffEngine.js";
 export type {
-  AgentBoardSnapshot,
-  AgentPlan,
+  SubagentBoardSnapshot,
+  SubagentPlan,
+  SubagentStage,
+  SubagentStatusSource,
+  SubagentTaskSnapshot,
   AgentStage,
-  AgentStatusSource,
-  AgentTaskSnapshot,
-  AdvisorStage,
   PlanExecution,
   PullProgress,
   QueuedTaskSnapshot,

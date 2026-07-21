@@ -7,7 +7,7 @@ import {
   createTokenSaveToolHandlers,
   formatMcpData,
 } from "../../packages/server/src/orchestration/tools/tokenSaveToolHandler.js";
-import type { ToolSchema } from "../../packages/server/src/orchestration/tools/toolHandler.js";
+import type { ToolSchema } from "../../packages/server/src/orchestration/tools/types.js";
 
 const schema = (name: string): ToolSchema => ({
   type: "function",
@@ -22,14 +22,14 @@ const mockCtx = (
   workspace: { callMcpTool: ReturnType<typeof vi.fn> },
   escalationCount = 0,
 ) => {
-  const emitAgentStatus = vi.fn();
+  const emitSubagentStatus = vi.fn();
   return {
     ctx: {
       workspace,
       escalationCount,
-      emitAgentStatus,
+      emitSubagentStatus,
     } as never,
-    emitAgentStatus,
+    emitSubagentStatus,
   };
 };
 
@@ -68,9 +68,9 @@ describe("createTokenSaveToolHandlers", () => {
       isError: false,
       data: "result text",
     });
-    const { ctx, emitAgentStatus } = mockCtx({ callMcpTool });
+    const { ctx, emitSubagentStatus } = mockCtx({ callMcpTool });
     const result = await handler!.execute({ query: "foo" }, ctx);
-    expect(emitAgentStatus).toHaveBeenCalledWith(
+    expect(emitSubagentStatus).toHaveBeenCalledWith(
       "searching",
       "◌",
       'Searching "foo"...',

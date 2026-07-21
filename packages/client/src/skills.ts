@@ -179,6 +179,38 @@ export const readAllSkills = (): SkillPayload[] => {
 };
 
 /**
+ * Reads all skill markdown files from an arbitrary directory.
+ *
+ * @remarks
+ * Used by `/skills sync <path>` to sync skills from a custom directory
+ * instead of the default ~/.agent-cli/skills/ location. Unlike readAllSkills,
+ * this does not seed defaults or fall back on error — an invalid path throws.
+ *
+ * @param dirPath - Absolute path to a directory containing skill .md files.
+ * @returns Array of { name, content } objects.
+ * @throws When dirPath does not exist or is not a directory.
+ *
+ * @example
+ * ```ts
+ * const skills = readSkillsFromDir("/Users/john/my-skills");
+ * console.log(skills); // [{ name: "coding", content: "..." }, ...]
+ * ```
+ */
+export const readSkillsFromDir = (dirPath: string): SkillPayload[] => {
+  const stats = fs.statSync(dirPath);
+  if (!stats.isDirectory()) {
+    throw new Error(`Not a directory: ${dirPath}`);
+  }
+  return fs
+    .readdirSync(dirPath)
+    .filter((name) => name.endsWith(".md"))
+    .map((name) => ({
+      name: name.replace(/\.md$/, ""),
+      content: fs.readFileSync(path.join(dirPath, name), "utf-8"),
+    }));
+};
+
+/**
  * Manages local skill markdown files and syncs them to the server.
  *
  * @remarks
@@ -239,24 +271,27 @@ export class SkillManager {
   readAll = (): SkillPayload[] => readAllSkills();
 
   /**
-   * Reads all local skills and uploads them to the server.
+   * Reads local skills and uploads them to the server.
    *
    * @remarks
-   * Calls readAllSkills to get current payloads, then uploads them via
-   * Connection.syncSkills. Returns the count of skills synced.
+   * Reads from ~/.agent-cli/skills/ by default, or from `dirPath` when
+   * given (via readSkillsFromDir), then uploads them via Connection.syncSkills.
+   * Only ever runs when the user explicitly triggers it (e.g. `/skills sync`) —
+   * there is no automatic sync on connect.
    *
+   * @param dirPath - Optional directory to sync skills from instead of the
+   *   default ~/.agent-cli/skills/ location.
    * @returns Count of skills synced.
+   *
+   * @example
+   * ```ts
+   * await manager.sync(); // Uploads ~/.agent-cli/skills/
+   * await manager.sync("/Users/john/my-skills"); // Uploads from a custom path
+   * ```
    */
-  sync = async (): Promise<number> => {
-    const skills = readAllSkills();
+  sync = async (dirPath?: string): Promise<number> => {
+    const skills = dirPath ? readSkillsFromDir(dirPath) : readAllSkills();
     await this.conn.syncSkills(skills);
     return skills.length;
   };
-
-  /**
-   * Syncs local skills to the server once (e.g., after connect).
-   *
-   * @returns Count of skills synced.
-   */
-  autoSync = async (): Promise<number> => this.sync();
 }

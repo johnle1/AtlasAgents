@@ -2,7 +2,7 @@
  * Coordinates agent activity spinners and terminal output with the Ink UI.
  *
  * @remarks
- * The LoopyCode client renders a live spinner while an agent or advisor is
+ * The LoopyCode client renders a live spinner while an agent or subagent is
  * working. This module is the thin bridge between task lifecycle code
  * (file proxy, renderers) and the Ink spinner in {@link ./ui/uiBridge.js | uiBridge}.
  *
@@ -106,24 +106,24 @@ const startAnimated = (mode: SpinnerState["mode"], label: string): void => {
 };
 
 /**
- * Shows a "thinking" spinner, typically while the advisor is planning.
+ * Shows a "thinking" spinner, typically while the agent is planning.
  *
- * @param nextLabel - Text shown beside the spinner. Defaults to `"Advisor"`.
+ * @param nextLabel - Text shown beside the spinner. Defaults to `"Agent"`.
  *
  * @example
  * ```ts
  * setTaskActive(true);
- * startThinking("Advisor");
+ * startThinking("Agent");
  * ```
  */
-export const startThinking = (nextLabel = "Advisor"): void => {
+export const startThinking = (nextLabel = "Agent"): void => {
   startAnimated("thinking", nextLabel);
 };
 
 /**
- * Shows a "working" spinner, typically while an agent runs tools.
+ * Shows a "working" spinner, typically while a subsubagent runs tools.
  *
- * @param nextLabel - Text shown beside the spinner. Defaults to `"Agent"`.
+ * @param nextLabel - Text shown beside the spinner. Defaults to `"Subagent"`.
  *
  * @example
  * ```ts
@@ -131,7 +131,7 @@ export const startThinking = (nextLabel = "Advisor"): void => {
  * startWorking("Running tests");
  * ```
  */
-export const startWorking = (nextLabel = "Agent"): void => {
+export const startWorking = (nextLabel = "Subagent"): void => {
   startAnimated("working", nextLabel);
 };
 

@@ -1,12 +1,13 @@
 /**
- * <Summary>
- * What it does:
- *   Type definitions and parsing functions for preference rules.
+ * Parsing and validation functions for preference rules.
  *
- * How it fits in the system:
- *   Provides type definitions for the on-disk file format and functions
- *   to normalize and validate preference rule objects.
- * </Summary>
+ * @remarks
+ * Provides functions to normalize and validate untrusted rule objects from disk,
+ * subagent responses, or user input. Handles backward compatibility (createdAt → timestamp),
+ * type coercion with safe defaults, and file structure validation.
+ *
+ * Used by {@link PreferenceManager} and {@link ContextBuilder} to ensure
+ * rules are well-formed before storage or context injection.
  */
 
 import type {
@@ -14,35 +15,14 @@ import type {
   PreferenceRule,
   PreferenceSource,
 } from "../../orchestration/interfaces.js";
+import type { PreferencesFile } from "../types.js";
 
 /**
- * <Summary>
- * What it does:
- *   Type definition for the on-disk preferences file structure.
+ * Maps confidence levels to numeric ranks for comparison.
  *
- * How it fits in the system:
- *   The file is stored as JSON with a version field for future compatibility
- *   and a rules array containing all PreferenceRule objects.
- *
- * Fields:
- *   version — File format version (currently 1).
- *   rules — Array of preference rules to persist.
- * </Summary>
- */
-export type PreferencesFile = {
-  version: 1;
-  rules: PreferenceRule[];
-};
-
-/**
- * <Summary>
- * What it does:
- *   Maps confidence levels to numeric ranks for comparison.
- *
- * How it fits in the system:
- *   Used by higherConfidence to determine which of two confidence levels is higher.
- *   The numeric ranks allow simple comparison: higher rank = higher confidence.
- * </Summary>
+ * @remarks
+ * Used by {@link higherConfidence} to determine which confidence level is higher.
+ * Higher rank = higher confidence.
  */
 const CONFIDENCE_RANK: Record<PreferenceConfidence, number> = {
   low: 0,
@@ -51,133 +31,112 @@ const CONFIDENCE_RANK: Record<PreferenceConfidence, number> = {
 };
 
 /**
- * @async is not needed - this is a synchronous function
- * <Summary>
- * What it does:
- *   Normalizes untrusted confidence value to valid PreferenceConfidence type.
+ * Normalizes untrusted confidence value to valid PreferenceConfidence type.
  *
- * How it does it (step by step):
- *   1. Check if value matches one of the valid confidence levels.
- *   2. If valid, return it unchanged.
- *   3. Otherwise, default to 'medium' for safety.
+ * @param raw - Untrusted value from subagent response or file
+ * @returns One of 'high', 'medium', 'low' (defaults to 'medium')
  *
- * Parameters:
- *   @param raw - Untrusted value from advisor or file.
+ * @remarks
+ * Type-checks against valid confidence levels. Returns safe default ('medium')
+ * if value is invalid, missing, or wrong type. Never throws.
  *
- * Returns:
- *   @returns One of 'high'|'medium'|'low'.
- * </Summary>
+ * @example
+ * ```ts
+ * parseConfidence("high")     // "high"
+ * parseConfidence("INVALID")  // "medium"
+ * parseConfidence(null)       // "medium"
+ * ```
  */
 export const parseConfidence = (raw: unknown): PreferenceConfidence => {
-  // Step 1: Check if value matches one of the valid confidence levels
-  // We use strict equality to ensure type safety - only exact string matches are accepted
   if (raw === "high" || raw === "medium" || raw === "low") {
-    // Step 2: If valid, return it unchanged (TypeScript knows this is safe)
     return raw;
   }
-  // Step 3: Otherwise, default to 'medium' for safety
-  // 'medium' is a safe default when we can't determine the intended confidence level
+  // Safe default when value is invalid or missing
   return "medium";
 };
 
 /**
- * <Summary>
- * What it does:
- *   Normalizes untrusted source value to valid PreferenceSource type.
+ * Normalizes untrusted source value to valid PreferenceSource type.
  *
- * How it does it (step by step):
- *   1. Check if value matches one of the valid source types.
- *   2. If valid, return it unchanged.
- *   3. Otherwise, default to 'explicit' for safety.
+ * @param raw - Untrusted value from subagent response or file
+ * @returns One of 'explicit', 'outcome', 'fix', 'style' (defaults to 'explicit')
  *
- * Parameters:
- *   @param raw - Untrusted value from advisor or file.
+ * @remarks
+ * **Valid sources:**
+ * - `explicit` — manually set by user (safe default)
+ * - `outcome` — learned from task outcome
+ * - `fix` — learned from escalation guidance
+ * - `style` — learned from user edits
  *
- * Returns:
- *   @returns One of 'explicit'|'outcome'|'fix'|'style'.
- * </Summary>
+ * Type-checks against valid sources. Returns 'explicit' (user-intended rules)
+ * if value is invalid or missing. Never throws.
  */
 export const parseSource = (raw: unknown): PreferenceSource => {
-  // Step 1: Check if value matches one of the valid source types
-  // Source indicates where the rule came from:
-  // - 'explicit': manually set by user
-  // - 'outcome': learned from task outcome via advisor
-  // - 'fix': learned from escalation guidance
-  // - 'style': learned from user edits
   if (
     raw === "explicit" ||
     raw === "outcome" ||
     raw === "fix" ||
     raw === "style"
   ) {
-    // Step 2: If valid, return it unchanged (TypeScript knows this is safe)
     return raw;
   }
-  // Step 3: Otherwise, default to 'explicit' for safety
-  // 'explicit' is a safe default as it represents user-intended rules
+  // Safe default: user-intended rules
   return "explicit";
 };
 
 /**
- * <Summary>
- * What it does:
- *   Validates and normalizes an untrusted rule object into a PreferenceRule.
+ * Validates and normalizes an untrusted rule object into a PreferenceRule.
  *
- * How it does it (step by step):
- *   1. Check if input is an object (reject primitives and null).
- *   2. Extract and type-check each field with safe defaults.
- *   3. Handle backward compatibility for createdAt field.
- *   4. Reject rules with missing required fields (id, text, timestamp).
- *   5. Return normalized PreferenceRule or null if invalid.
+ * @param unknownRule - Untrusted rule object from file or subagent response
+ * @returns Normalized PreferenceRule or null if required fields missing or invalid
  *
- * Parameters:
- *   @param unknownRule - Untrusted rule object from file or advisor.
+ * @remarks
+ * **Type coercion & validation:**
+ * - Required: id, text, timestamp (non-empty strings)
+ * - Optional: topics (string array), scope (string, default "all")
+ * - Confidence/source validated via {@link parseConfidence} and {@link parseSource}
+ * - timesApplied must be finite, non-negative number
  *
- * Returns:
- *   @returns Normalized rule or null if invalid.
- * </Summary>
+ * **Backward compatibility:** Accepts `createdAt` (old format) if `timestamp` absent.
+ *
+ * Returns null without throwing on validation failure. Safe defaults are applied
+ * to fields; only missing required fields cause rejection.
+ *
+ * @example
+ * ```ts
+ * normaliseRule({
+ *   id: "abc", text: "Use TypeScript", timestamp: "2025-01-01T00:00:00Z",
+ *   topics: ["typescript"], confidence: "high"
+ * })
+ * // Returns well-formed PreferenceRule
+ *
+ * normaliseRule({ text: "Missing required id" })
+ * // null (missing id)
+ * ```
  */
 export const normaliseRule = (unknownRule: unknown): PreferenceRule | null => {
-  // Step 1: Check if input is an object (reject primitives and null)
-  // This is a safety check to prevent runtime errors when accessing properties
   if (typeof unknownRule !== "object" || unknownRule === null) {
     return null;
   }
 
-  // Step 2: Extract and type-check each field with safe defaults
-  // We cast to Record<string, unknown> to allow property access while maintaining type safety
   const ruleObj = unknownRule as Record<string, unknown>;
 
-  // Required field: unique identifier for the rule
+  // Extract required and optional fields with type coercion
   const id = typeof ruleObj.id === "string" ? ruleObj.id : "";
-
-  // Required field: human-readable rule text
   const text = typeof ruleObj.text === "string" ? ruleObj.text : "";
-
-  // Optional field: array of topic strings for categorization
-  // We filter to ensure only strings are included in the array
   const topics = Array.isArray(ruleObj.topics)
     ? ruleObj.topics.filter(
         (topicItem): topicItem is string => typeof topicItem === "string",
       )
     : [];
-
-  // Optional field: scope for where the rule applies (e.g., "typescript", "python", "all")
-  // Default to "all" if missing or empty
   const scope =
     typeof ruleObj.scope === "string" && ruleObj.scope.length > 0
       ? ruleObj.scope
       : "all";
-
-  // Optional field: confidence level with validation via parseConfidence
   const confidence = parseConfidence(ruleObj.confidence);
-
-  // Optional field: source with validation via parseSource
   const source = parseSource(ruleObj.source);
 
-  // Step 3: Handle backward compatibility for createdAt field
-  // Older versions used 'createdAt', newer versions use 'timestamp'
-  // We check both to support migration from old format
+  // Support both 'timestamp' (new) and 'createdAt' (old) fields for backward compatibility
   const timestamp =
     typeof ruleObj.timestamp === "string"
       ? ruleObj.timestamp
@@ -185,21 +144,17 @@ export const normaliseRule = (unknownRule: unknown): PreferenceRule | null => {
         ? ruleObj.createdAt
         : "";
 
-  // Optional field: times the rule has been applied
-  // Must be a finite number and non-negative; defaults to 0
   const timesApplied =
     typeof ruleObj.timesApplied === "number" &&
     Number.isFinite(ruleObj.timesApplied)
       ? Math.max(0, Math.floor(ruleObj.timesApplied))
       : 0;
 
-  // Step 4: Reject rules with missing required fields (id, text, timestamp)
-  // These three fields are essential for rule uniqueness and tracking
+  // Reject if required fields are missing
   if (id.length === 0 || text.length === 0 || timestamp.length === 0) {
     return null;
   }
 
-  // Step 5: Return normalized PreferenceRule with all fields validated
   return {
     id,
     text,
@@ -213,71 +168,72 @@ export const normaliseRule = (unknownRule: unknown): PreferenceRule | null => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Validates and normalizes the entire preferences file structure.
+ * Validates and normalizes the entire preferences file structure.
  *
- * How it does it (step by step):
- *   1. Check if input is an object with a 'rules' array.
- *   2. Normalize each rule via normaliseRule.
- *   3. Filter out any invalid rules (null results).
- *   4. Return normalized file or empty file if input is invalid.
+ * @param raw - Untrusted file object from disk
+ * @returns Normalized PreferencesFile with valid rules (empty if invalid)
  *
- * Parameters:
- *   @param raw - Untrusted file object from disk.
+ * @remarks
+ * **Structure validation:**
+ * - Checks if input is an object with a 'rules' array
+ * - Maps each rule through {@link normaliseRule}
+ * - Filters out invalid rules (those that normalize to null)
+ * - Returns empty file (no crash) if structure is wrong
  *
- * Returns:
- *   @returns Normalized file with valid rules.
- * </Summary>
+ * Safe graceful degradation: malformed files → empty file instead of throwing.
+ * Used by {@link PreferenceManager.load} to restore preferences from disk.
+ *
+ * @example
+ * ```ts
+ * normaliseFile({ version: 1, rules: [{ id: "a", text: "rule", timestamp: "..." }] })
+ * // { version: 1, rules: [PreferenceRule, ...] }
+ *
+ * normaliseFile({ invalid: "structure" })
+ * // { version: 1, rules: [] }
+ * ```
  */
 export const normaliseFile = (raw: unknown): PreferencesFile => {
-  // Step 1: Check if input is an object with a 'rules' array
-  // This validates the basic structure before processing individual rules
   if (
     typeof raw === "object" &&
     raw !== null &&
     "rules" in raw &&
     Array.isArray((raw as { rules: unknown }).rules)
   ) {
-    // Step 2: Normalize each rule via normaliseRule
-    // This validates each individual rule and converts it to the proper format
-    // Step 3: Filter out any invalid rules (null results)
-    // normaliseRule returns null for invalid rules, so we filter those out
+    // Normalize each rule and filter out invalid ones
     const rules = (raw as { rules: unknown[] }).rules
       .map(normaliseRule)
       .filter((rule): rule is PreferenceRule => rule !== null);
     return { version: 1, rules };
   }
-  // Step 4: Return empty file if input is invalid
-  // If the structure is completely wrong, we return a valid empty file rather than crashing
+  // Invalid structure → return empty file gracefully
   return { version: 1, rules: [] };
 };
 
 /**
- * <Summary>
- * What it does:
- *   Returns the higher of two confidence levels based on rank.
+ * Returns the higher of two confidence levels.
  *
- * How it does it (step by step):
- *   1. Compare confidence ranks using CONFIDENCE_RANK mapping.
- *   2. Return the confidence with the higher rank.
+ * @param confidenceA - First confidence level
+ * @param confidenceB - Second confidence level
+ * @returns The higher confidence level (high > medium > low)
  *
- * Parameters:
- *   @param confidenceA - First confidence level.
- *   @param confidenceB - Second confidence level.
+ * @remarks
+ * **Ranking:** high (2) > medium (1) > low (0).
+ * On tie, returns `confidenceA` (arbitrary but consistent).
  *
- * Returns:
- *   @returns The higher confidence level.
- * </Summary>
+ * Used by {@link PreferenceManager.add} when merging similar rules
+ * to keep the highest confidence.
+ *
+ * @example
+ * ```ts
+ * higherConfidence("low", "high")     // "high"
+ * higherConfidence("medium", "medium") // "medium"
+ * higherConfidence("high", "medium")   // "high"
+ * ```
  */
 export const higherConfidence = (
   confidenceA: PreferenceConfidence,
   confidenceB: PreferenceConfidence,
 ): PreferenceConfidence => {
-  // Step 1: Compare confidence ranks using CONFIDENCE_RANK mapping
-  // CONFIDENCE_RANK maps: low=0, medium=1, high=2
-  // Step 2: Return the confidence with the higher rank
-  // If ranks are equal, we return confidenceA (arbitrary but consistent)
   return CONFIDENCE_RANK[confidenceA] >= CONFIDENCE_RANK[confidenceB]
     ? confidenceA
     : confidenceB;

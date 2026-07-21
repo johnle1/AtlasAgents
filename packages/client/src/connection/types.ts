@@ -19,7 +19,7 @@ export type { InstalledModel } from "../frames.js";
  *
  * @remarks
  * Memory is learned preference text, not chat history. Each entry groups rules
- * under a topic key the advisor/agent can cite later (for example coding style
+ * under a topic key the agent/subagent can cite later (for example coding style
  * or project layout preferences).
  *
  * @example
@@ -48,8 +48,8 @@ export interface MemoryEntry {
  * One local skill file to upload via `skills.sync`.
  *
  * @remarks
- * Skills are markdown instruction packs the server exposes to the advisor and
- * agent during task execution. `name` is the basename (no extension); `content`
+ * Skills are markdown instruction packs the server exposes to the agent and
+ * subagent during task execution. `name` is the basename (no extension); `content`
  * is the full markdown body.
  *
  * @example
@@ -161,10 +161,10 @@ export type CommandResponseEnvelope = {
  * const payload: TaskStreamPayload = {
  *   kind: "task",
  *   text: "Add unit tests for the banner layout helpers",
- *   advisorModel: "gemma3:27b",
- *   agentModel: "gemma3:4b",
- *   advisorTemp: 0.2,
- *   agentTemp: 0.3,
+ *   subagentModel: "gemma3:27b",
+ *   subsubagentModel: "gemma3:4b",
+ *   agentTemp: 0.2,
+ *   subagentTemp: 0.3,
  * };
  * ```
  */
@@ -175,17 +175,23 @@ export type TaskStreamPayload = {
   /** Natural-language task description from the user. */
   text: string;
 
-  /** Ollama model id for the advisor role (planning / orchestration). */
-  advisorModel: string;
+  /** Ollama model id for the agent role (planning / orchestration). */
+  subagentModel: string;
 
-  /** Ollama model id for the agent role (tool use / edits). */
-  agentModel: string;
+  /** Ollama model id for the subagent role (tool use / edits). */
+  subsubagentModel: string;
 
-  /** Advisor sampling temperature in roughly `0.0`–`1.0`. */
-  advisorTemp: number;
+  /** Provider serving the agent role (e.g. "ollama", "vllm-gpu"). */
+  agentProvider: string;
+
+  /** Provider serving the subagent role (e.g. "ollama", "vllm-gpu"). */
+  subagentProvider: string;
 
   /** Agent sampling temperature in roughly `0.0`–`1.0`. */
   agentTemp: number;
+
+  /** Subagent sampling temperature in roughly `0.0`–`1.0`. */
+  subagentTemp: number;
 };
 
 /**

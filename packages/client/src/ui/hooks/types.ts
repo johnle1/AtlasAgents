@@ -28,8 +28,8 @@ export type BridgeSetupContext = Pick<
   | "setApproval"
   | "setPromptReq"
   | "setBannerEntries"
-  | "setAgentStatuses"
-  | "setAgentBoards"
+  | "setSubagentStatuses"
+  | "setSubagentBoards"
 >;
 
 /**
@@ -45,8 +45,8 @@ export type ConnectionDisconnectCleanupSetters = Pick<
   | "setBusy"
   | "setSpinner"
   | "setStreamingText"
-  | "setAgentStatuses"
-  | "setAgentBoards"
+  | "setSubagentStatuses"
+  | "setSubagentBoards"
 >;
 
 /**

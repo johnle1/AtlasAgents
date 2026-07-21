@@ -1,62 +1,72 @@
 /**
- * <Summary>
- * What it does:
- *   Extracts pipeline phases from AdvisorOrchestrator.runTask.
+ * Core orchestration pipeline for executing end-user tasks.
  *
- * How it does it (step by step):
- *   1. Initializes task and experience recorder.
- *   2. Explores codebase if no session snapshot exists.
- *   3. Builds context and selects skills.
- *   4. Calls advisor to plan the task.
- *   5. Executes agent pool over the plan.
- *   6. Combines results or emits single result.
- *   7. Records outcome.
+ * @remarks
+ * Extracts pipeline phases from AgentOrchestrator.runTask for better testability.
+ * The pipeline executes the following phases:
+ * 1. Task initialization and experience recording setup
+ * 2. Context building and skill selection
+ * 3. Agent planning with DAG generation
+ * 4. Agent pool execution with dependency management
+ * 5. Result combination or single result emission
+ * 6. Experience recording and outcome reporting
  *
- * Parameters:
- *   @param deps - Orchestrator dependencies.
- *   @param params - Task parameters.
- *
- * Returns:
- *   @returns Task execution outcome.
- * </Summary>
+ * The pipeline supports cancellation via AbortSignal and emits progress
+ * updates throughout execution. Worker pool manages concurrent subtask execution
+ * with proper dependency resolution and deadlock detection.
  */
 
 import { randomUUID } from "node:crypto";
 import type { TaskFrame } from "../../transport/frames.js";
 import { Agent } from "../agent/agent.js";
-import { TaskSkippedError } from "../advisor/advisorErrors.js";
-import { exploreCodebase } from "../exploreCodebase.js";
-import { deriveAgentPlans, modeLabelFromMaxAgents } from "../planHelpers.js";
+import { Subagent } from "../subagent/subagent.js";
+import { modeLabelFromMaxAgents } from "../planHelpers.js";
 import type {
-  AdvisorPlan,
+  SubagentPlan,
   OrchestrationOutcome,
-  PlannedSubtask,
+  ToolResultSummary,
 } from "../types.js";
-import { formatOrchestratorFailure } from "../taskErrors.js";
 import {
-  available,
-  buildAgentBoardSnapshots,
-  complete,
-  createReadyQueue,
-  take,
-  WorkSignal,
-  workerCountFor,
-} from "../readyQueue.js";
-import {
-  AbortError,
-  OrchestrationError,
-  NotFoundError,
-} from "../../errors/index.js";
-import {
-  buildSessionContext,
-  emptyPlan,
-  formatPoolProgress,
-  formatPoolStart,
-  toOrderedResults,
-  type OrchestratorPipelineDeps,
-  type OrchestratorPipelineParams,
+  formatOrchestratorFailure,
+  markOrchestratorErrorReported,
+} from "../taskErrors.js";
+import { AbortError, NotFoundError } from "../../errors/index.js";
+import { logger } from "../../logger.js";
+import type {
+  OrchestratorPipelineDeps,
+  OrchestratorPipelineParams,
 } from "./orchestratorPipelineTypes.js";
+import {
+  emitFinalResult,
+  emptyPlan,
+  preparePlanningContext,
+  runAgentPool,
+  runPlanningWithRevisions,
+  toOrderedResults,
+} from "./orchestratorPipelineHelpers.js";
 
+/**
+ * Runs the complete orchestration pipeline for a single task.
+ *
+ * @remarks
+ * This is the core pipeline function that coordinates all phases of task execution.
+ * It handles context building, skill selection, agent planning, subagent pool execution,
+ * result combination, and experience recording. The function is designed to be
+ * transport-agnostic and can be called from any router implementation.
+ *
+ * The pipeline uses a worker pool pattern for concurrent subtask execution with
+ * proper dependency resolution. Subtasks are executed in dependency order, and
+ * the pool size is determined by the maxSubagents parameter and plan complexity.
+ *
+ * @param deps - Orchestrator dependencies including all required services
+ * @param params - Task parameters including session info, task text, and callbacks
+ *
+ * @returns Task execution outcome with plan, results, and error status
+ *
+ * @throws {@link AbortError} When the operation is cancelled via AbortSignal
+ * @throws {@link NotFoundError} When per-connection context is required but missing
+ * @throws {@link OrchestrationError} When subtask execution fails or deadlock occurs
+ */
 export const runOrchestratorPipeline = async (
   deps: OrchestratorPipelineDeps,
   params: OrchestratorPipelineParams,
@@ -66,24 +76,29 @@ export const runOrchestratorPipeline = async (
     skillManager,
     sessionManager,
     experienceRecorder,
-    advisor,
-    ollama,
+    // Agent passed to AgentOrchestrator but reconstructed here with model-specific
+    // provider client — allows for per-task provider overrides (e.g., different LLM endpoint).
+    agent: _unused,
+    providerRegistry,
     config,
   } = deps;
 
   const {
-    session,
     taskText,
     emit,
     signal,
     perConn,
     modelOverrides,
-    maxAgents = 3,
+    maxSubagents = 3,
   } = params;
 
+  // Unique ID for this task run — used for experience recording, auditing, and linking logs across the pipeline.
   const taskId = randomUUID();
-  let plan: AdvisorPlan = emptyPlan();
-  const resultMap = new Map<number, string>();
+  let plan: SubagentPlan = emptyPlan();
+  // Accumulates results keyed by subtask id as they complete. Used to build final ordered results
+  // even if execution fails mid-way, so partial results are not lost.
+  const resultMap = new Map<number, ToolResultSummary>();
+  // Updated throughout pipeline phases; returned to caller with final status, plan, and partial/complete results.
   let outcome: OrchestrationOutcome = {
     ok: false,
     plan,
@@ -91,7 +106,23 @@ export const runOrchestratorPipeline = async (
     error: "not started",
   };
 
-  const agent = new Agent({ ollama, config, advisor });
+  const agent = new Agent({
+    ollama: providerRegistry.getRoleClient(
+      "agent",
+      modelOverrides?.agentProvider,
+    ),
+    config,
+  });
+
+  const subagent = new Subagent({
+    ollama: providerRegistry.getRoleClient(
+      "subagent",
+      modelOverrides?.subagentProvider,
+    ),
+    config,
+    agent: agent,
+    extraTools: perConn?.tokenSaveTools,
+  });
 
   const emitToken = (text: string): void => {
     if (text.length > 0) {
@@ -103,20 +134,26 @@ export const runOrchestratorPipeline = async (
     emit(frame);
   };
 
+  // Track current pipeline phase for error reporting — allows diagnostics to pinpoint
+  // where failure occurred (e.g., "failed at phase: agent.plan").
   let phase = "init";
-  let advisorModel = "";
   let agentModel = "";
+  let subagentModel = "";
   let primaryError: unknown;
 
   try {
+    // Fail fast on abort — prevents unnecessary context building and agent queries
+    // if the client has already cancelled the operation.
     if (signal.aborted) {
       throw new AbortError("Operation aborted");
     }
 
-    const serverAdvisor = await config.getAdvisorModel();
+    // Model resolution: per-task overrides take precedence over server config.
+    // This allows callers to experiment with different model endpoints/versions per-task.
     const serverAgent = await config.getAgentModel();
-    advisorModel = modelOverrides?.advisorModel?.trim() || serverAdvisor;
+    const serverSubagent = await config.getSubagentModel();
     agentModel = modelOverrides?.agentModel?.trim() || serverAgent;
+    subagentModel = modelOverrides?.subagentModel?.trim() || serverSubagent;
 
     await experienceRecorder.start(taskId, taskText);
 
@@ -126,231 +163,88 @@ export const runOrchestratorPipeline = async (
       );
     }
 
-    if (!(await sessionManager.exists())) {
-      emit({ kind: "token", text: "  Exploring codebase...\n" });
-      const explored = await exploreCodebase(perConn.workspace, emit, signal);
-      await sessionManager.saveSnapshot(explored.snapshot);
-      emit({ kind: "token", text: "  ✓ Codebase snapshot saved.\n\n" });
-    }
-
     phase = "context";
-    const contextHeader = await contextBuilder.build(taskText, advisorModel);
-    const selected = await skillManager.selectForTask(taskText);
-    const skillBody = selected
-      .map((s, i) => {
-        const label = i === 0 ? "Stack skill" : "Domain skill";
-        return `[${label}: ${s.name}.md]\n${s.content.trim()}`;
-      })
-      .join("\n\n");
+    const { contextHeader, skillBody } = await preparePlanningContext(
+      { contextBuilder, skillManager, sessionManager, config },
+      { taskText, subagentModel, modelOverrides, perConn, emit, signal },
+    );
 
     emitStatus({
       kind: "status",
-      source: "advisor",
+      source: "agent",
       stage: "understanding",
       icon: "◌",
-      message: "Advisor planning the task...",
+      message: "Agent planning the task...",
     });
 
-    phase = "advisor.plan";
-    const modeLabel = modeLabelFromMaxAgents(maxAgents);
-    try {
-      plan = await advisor.plan(
-        taskText,
-        contextHeader,
-        skillBody,
-        modelOverrides,
-        {
-          onThink: (text: string) => {
-            emit({ kind: "think", text, advisor: true });
-          },
-          reviewPlan: (advisorPlan: AdvisorPlan) =>
-            perConn.planBroker.request(
-              taskText,
-              advisorPlan.subtasks.map((s: PlannedSubtask) => s.text),
-              advisorPlan.risks,
-              deriveAgentPlans(advisorPlan.subtasks),
-              advisorPlan.agentCount,
-              advisorPlan.execution,
-              modeLabel,
-            ),
-        },
-        maxAgents,
-      );
-    } catch (err) {
-      if (err instanceof TaskSkippedError) {
-        emitToken("\nTask skipped.\n");
-        outcome = {
-          ok: true,
-          plan: emptyPlan(),
-          results: [],
-        };
-        return outcome;
-      }
-      throw err;
+    phase = "agent.plan";
+    const modeLabel = modeLabelFromMaxAgents(maxSubagents);
+    // Planning may include multiple revisions if the agent's first attempt had validation gaps
+    // (e.g., incomplete verification steps, missing COMMAND PLAN). Supports user review/edit via hooks.
+    const planningResult = await runPlanningWithRevisions(agent, {
+      taskText,
+      contextHeader,
+      skillBody,
+      modelOverrides,
+      maxSubagents,
+      modeLabel,
+      perConn,
+      sessionManager,
+      emit,
+      signal,
+    });
+    // User explicitly skipped the task during review — emit and exit cleanly (success, not error).
+    if (planningResult.skipped) {
+      emitToken("\nTask skipped.\n");
+      outcome = {
+        ok: true,
+        plan: emptyPlan(),
+        results: [],
+      };
+      return outcome;
     }
+    plan = planningResult.plan;
 
     emitStatus({
       kind: "status",
-      source: "advisor",
+      source: "agent",
       stage: "ready",
       icon: "✓",
       message: `Plan ready · ${plan.agentCount} group${plan.agentCount === 1 ? "" : "s"} · ${plan.execution}`,
     });
 
-    const totalTasks = plan.subtasks.length;
-    const workerCount = workerCountFor(maxAgents, plan);
-    const queue = createReadyQueue(plan.subtasks);
-    const workSignal = new WorkSignal();
-
-    const emitAdvisorPoolStatus = (
-      message: string,
-      icon: "◌" | "✓" = "◌",
-      includeBoards = true,
-    ): void => {
-      emitStatus({
-        kind: "status",
-        source: "advisor",
-        stage: "ready",
-        icon,
-        message,
-        ...(includeBoards
-          ? {
-              agentBoards: buildAgentBoardSnapshots(plan.subtasks, queue),
-            }
-          : {}),
-      });
-    };
-
-    emitAdvisorPoolStatus(
-      formatPoolStart(plan.agentCount, workerCount, totalTasks),
-    );
-
     phase = "agent.pool";
+    const ordered = await runAgentPool(subagent, {
+      taskId,
+      plan,
+      skillBody,
+      maxSubagents,
+      experienceRecorder,
+      perConn,
+      modelOverrides,
+      resultMap,
+      emit,
+      emitStatus,
+      signal,
+    });
 
-    const runWorker = async (): Promise<void> => {
-      while (true) {
-        if (signal.aborted) {
-          throw new AbortError("Worker aborted");
-        }
-
-        const ready = available(queue);
-        if (ready.length === 0) {
-          if (queue.running.size === 0) {
-            break;
-          }
-          await workSignal.wait();
-          continue;
-        }
-
-        const subtask = ready[0];
-        if (!subtask) {
-          throw new OrchestrationError(
-            "No subtask available despite ready queue not being empty",
-          );
-        }
-        if (!take(queue, subtask.id)) {
-          workSignal.broadcast();
-          continue;
-        }
-        workSignal.broadcast();
-        emitAdvisorPoolStatus(
-          formatPoolProgress(
-            queue.completed.size,
-            totalTasks,
-            queue.running.size,
-            plan.agentCount,
-          ),
-        );
-
-        const text = await agent.run({
-          taskId,
-          subtask: subtask.text,
-          agentId: subtask.agentId,
-          agentLabel: subtask.agentLabel,
-          skillContent: skillBody,
-          sessionContext: buildSessionContext(
-            queue.completed,
-            subtask.dependsOn,
-          ),
-          commandPlan: plan.commandPlan,
-          workspace: perConn.workspace,
-          terminal: perConn.terminal,
-          recorder: experienceRecorder,
-          emit,
-          signal,
-          modelOverrides,
-          debug: modelOverrides?.debug === true,
-        });
-
-        const newlyReady = complete(queue, subtask.id, text);
-        resultMap.set(subtask.id, text);
-
-        const completedCount = queue.completed.size;
-        const runningTasks = queue.running.size;
-        emitAdvisorPoolStatus(
-          formatPoolProgress(
-            completedCount,
-            totalTasks,
-            runningTasks,
-            plan.agentCount,
-          ),
-        );
-
-        if (newlyReady.length > 0) {
-          const unlockMsg =
-            newlyReady.length === 1
-              ? `Task ${subtask.id} done → unlocked: ${newlyReady[0]?.text.slice(0, 30) ?? "unknown"}`
-              : `Task ${subtask.id} done → unlocked ${newlyReady.length} new tasks`;
-          emitAdvisorPoolStatus(unlockMsg);
-        }
-
-        workSignal.broadcast();
-      }
-    };
-
-    await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
-
-    if (queue.pending.size > 0) {
-      throw new OrchestrationError(
-        "Deadlock: cyclic or invalid dependencies in advisor plan",
-      );
-    }
-
-    emitAdvisorPoolStatus(
-      `${totalTasks}/${totalTasks} done · ${plan.agentCount} group${plan.agentCount === 1 ? "" : "s"}`,
-      "✓",
-      false,
-    );
-
-    const ordered = toOrderedResults(plan, resultMap);
-
-    if (plan.subtasks.length === 1) {
-      phase = "emit.single";
-      emitToken(ordered[0]?.content ?? "");
-    } else {
-      phase = "advisor.combine";
-      emitStatus({
-        kind: "status",
-        source: "advisor",
-        stage: "combining",
-        icon: "◌",
-        message: `Combining results from ${plan.agentCount} groups...`,
-      });
-      for await (const token of advisor.combine(
-        taskText,
-        ordered,
-        modelOverrides,
-      )) {
-        if (signal.aborted) {
-          throw new AbortError("Combine aborted");
-        }
-        emitToken(token);
-      }
-    }
+    // Single-subtask plans skip synthesis — emit result directly. Multi-subtask plans
+    // invoke agent.combine to synthesize outputs into one coherent final answer.
+    phase = plan.subtasks.length === 1 ? "emit.single" : "agent.combine";
+    // Emits final user-facing result: either the single subtask output or a synthesized answer.
+    await emitFinalResult(agent, {
+      taskText,
+      plan,
+      ordered,
+      modelOverrides,
+      emitToken,
+      emitStatus,
+      signal,
+    });
 
     emitStatus({
       kind: "status",
-      source: "advisor",
+      source: "agent",
       stage: "ready",
       icon: "✓",
       message: "All tasks done",
@@ -359,32 +253,42 @@ export const runOrchestratorPipeline = async (
     outcome = { ok: true, plan, results: ordered };
   } catch (err) {
     primaryError = err;
+    // Format error with context (phase, models used) to help downstream error handling and logging.
     const detail = formatOrchestratorFailure(err, {
       phase,
-      advisorModel,
       agentModel,
+      subagentModel,
     });
     const message = err instanceof Error ? err.message : String(err);
+    // Preserve partial results even on failure (some subtasks may have completed before the error).
     outcome = {
       ok: false,
       plan,
       results: toOrderedResults(plan, resultMap),
       error: detail,
     };
+    // Skip error emit if operation was cancelled (AbortSignal) or already reported upstream
+    // to avoid duplicate/spurious error messages to the client.
     if (!signal.aborted && message !== "Aborted") {
       emit({ kind: "error", message: detail });
+      markOrchestratorErrorReported(err);
     }
   } finally {
+    // CRITICAL: Record experience even on failure — allows learning from failed attempts,
+    // debugging, and ensures audit trail is complete. Catch and log any finish errors
+    // to prevent them from masking the primary error.
     try {
       await experienceRecorder.finish(taskId, outcome);
     } catch (finishErr) {
-      console.error(
-        "[AdvisorOrchestrator] experienceRecorder.finish failed:",
-        finishErr,
+      logger.error(
+        { taskId, err: finishErr },
+        "experienceRecorder.finish failed",
       );
     }
   }
 
+  // Rethrow after experience recording is complete — ensures audit trail is preserved
+  // even when caller's error handling stops propagation. Return outcome if no error.
   if (primaryError) {
     throw primaryError;
   }

@@ -53,7 +53,7 @@ export interface Theme {
   /** Bold emphasis CSI (usually `\x1b[1m`). */
   textBold: string;
 
-  /** Border around advisor/agent think boxes. */
+  /** Border around agent/agent think boxes. */
   thinkBorder: string;
 
   /** Body text inside think boxes. */

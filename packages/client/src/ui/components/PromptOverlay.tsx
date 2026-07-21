@@ -13,7 +13,7 @@ import { useAppContext } from "../../DataContext.js";
  * Prompts are overlay boxes that block standard execution until user feedback is received.
  * Supported prompt types:
  * - `theme`: interactive color palette picker
- * - `planEdit`: step-by-step editor for plans
+ * - `planFeedback`: free-text feedback box the agent re-plans from
  * - `choice`: numeric multiple-choice index entry
  * - default: standard single-line string prompt (with optional password masking)
  *
@@ -37,8 +37,8 @@ export const PromptOverlay: React.FC = () => {
   if (request.type === "theme") {
     return <ThemePicker />;
   }
-  if (request.type === "planEdit") {
-    return <PlanEditPrompt initial={request.initial} />;
+  if (request.type === "planFeedback") {
+    return <PlanFeedbackPrompt initial={request.initial} />;
   }
   if (request.type === "choice") {
     return <ChoicePrompt prompt={request.prompt} max={request.max} />;
@@ -119,65 +119,40 @@ const ChoicePrompt: React.FC<{ prompt: string; max: number }> = ({
 };
 
 /**
- * Renders a multi-line editing interface for updating advisor plans prior to execution.
+ * Renders a free-text feedback box for revising a proposed plan.
  *
  * @remarks
- * Displays the original plan, lists modified/new steps, and exposes a blank line
- * prompt to append more steps. Submitting an empty step commits the plan list back to IPC.
+ * Shows the proposed steps as read-only reference, then takes a single line
+ * of feedback (e.g. "add error handling for the upload step") which is sent
+ * back to the agent — the agent re-plans from this feedback; the user does
+ * not hand-edit the plan text directly.
  *
  * @param props - Component parameters.
- * @param props.initial - Array of starting plan steps.
+ * @param props.initial - Proposed plan steps shown for context.
  */
-const PlanEditPrompt: React.FC<{ initial: string[] }> = ({ initial }) => {
+const PlanFeedbackPrompt: React.FC<{ initial: string[] }> = ({ initial }) => {
   const { promptDraft, setPromptDraft } = useAppContext();
 
   return (
     <Box flexDirection="column">
-      <Text dimColor>
-        Revise plan (empty line when done). Agent grouping will be recalculated.
-      </Text>
+      <Text dimColor>What should change about this plan?</Text>
 
-      {/* Render the baseline plan steps proposed by the advisor */}
+      {/* Render the proposed plan steps for reference while typing feedback */}
       {initial.map((line, lineIndex) => (
-        <Text key={`init-${lineIndex}`}>
+        <Text key={`init-${lineIndex}`} dimColor>
           {lineIndex + 1}. {line}
         </Text>
       ))}
 
-      {/* Render user-appended step overrides */}
-      {promptDraft.planLines.map((line, lineIndex) => (
-        <Text key={`new-${lineIndex}`}>
-          {initial.length + lineIndex + 1}. {line}
-        </Text>
-      ))}
-
-      {/* Active input field allowing the user to type the next plan step */}
       <TextInput
-        value={promptDraft.planCurrent}
+        value={promptDraft.lineValue}
         onChange={(inputValue) =>
           setPromptDraft((previousDraft) => ({
             ...previousDraft,
-            planCurrent: inputValue,
+            lineValue: inputValue,
           }))
         }
-        onSubmit={(submittedValue) => {
-          // Empty string indicates completion. We submit the updated list, or fallback to the initial plan.
-          if (submittedValue.trim().length === 0) {
-            const finalPlan =
-              promptDraft.planLines.length > 0
-                ? promptDraft.planLines
-                : [...initial];
-            resolvePrompt(finalPlan);
-            return;
-          }
-
-          // Append the newly written step and clear the buffer for the next input.
-          setPromptDraft((previousDraft) => ({
-            ...previousDraft,
-            planLines: [...previousDraft.planLines, submittedValue.trim()],
-            planCurrent: "",
-          }));
-        }}
+        onSubmit={(submittedValue) => resolvePrompt(submittedValue.trim())}
       />
     </Box>
   );

@@ -21,25 +21,26 @@ export {
   buildConfigLines,
   printConfig,
   printModels,
+  printGroupedModels,
+  printProviders,
   printSkills,
   printMemory,
 } from "./commandTables.js";
 export {
-  formatAdvisorThinkForDisplay,
   formatAgentThinkForDisplay,
-} from "./advisorThink.js";
+} from "./agentThink.js";
 export { printLine, printError, printSuccess } from "./messages.js";
 export {
   printListDir,
   printRead,
   printTokenSaveOp,
+  printTokenSaveResult,
   printWrite,
   printCreate,
   printCreateDir,
   printDelete,
   printCd,
   printListDirEntries,
-  type DirEntry,
 } from "./fileOperations.js";
 export {
   printBash,
@@ -47,9 +48,15 @@ export {
   printBashApproved,
   printBashRan,
   printSkipped,
+  printReviseRequested,
   printSuccessOp,
-  type BashClass,
 } from "./shellOperations.js";
+export {
+  type BashClass,
+  type DirEntry,
+  type ModelGroup,
+  type FlatModelEntry,
+} from "./types.js";
 export {
   printInstalledModels,
   printModelFind,

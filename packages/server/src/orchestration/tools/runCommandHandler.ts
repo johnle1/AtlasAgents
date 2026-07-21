@@ -1,137 +1,218 @@
 /**
- * <Summary>
- * What it does:
- *   Handler for run_command tool execution.
+ * The `run_command` tool: executes a shell command in the workspace.
  *
- * How it does it (step by step):
- *   1. Infer command purpose if not provided.
- *   2. Check if run-project command (must be background).
- *   3. Emit running status.
- *   4. Run command with confirmation.
- *   5. Track verify command success.
- *   6. Return observation with command output.
- *
- * Parameters:
- *   @param tool - Tool call with command to run.
- *   @param ctx - Execution context.
- *
- * Returns:
- *   @returns Result with command output observation.
- * </Summary>
+ * @remarks
+ * The most complex tool handler in this module — beyond running the command,
+ * it classifies the command's purpose (setup/verify/run-project), blocks
+ * long-running project servers from running in the foreground, deduplicates
+ * setup commands that already succeeded, tracks consecutive failures to
+ * nudge the agent toward escalating instead of retrying blindly, and updates
+ * `trackers.verifyCommandPassed` when a verify command succeeds (feeding
+ * into the `finish` tool's verification check).
  */
 
-import type { AgentToolCall, CommandPurpose } from "../toolProtocol.js";
+import type { CommandPurpose } from "../toolProtocol.js";
+import type { CommandResult } from "../../workspace/execution/terminalExecutor.js";
 import type {
-  IToolHandler,
+  ToolHandler,
   ToolHandlerContext,
   ToolExecutionResult,
+  CommandExecutionSummary,
+} from "./types.js";
+import {
+  formatObservation,
+  toolExecutionErrorResult,
+  userReviseMessage,
 } from "./toolHandler.js";
-import type { TerminalExecutor } from "../../workspace/execution/terminalExecutor.js";
 import {
   inferPurpose,
+  normalizeCommand,
   RUN_PROJECT_BLOCK_MESSAGE,
 } from "../commandClassifier.js";
-import { ValidationError } from "../../errors/index.js";
+
+/** Feedback shown when a setup command is skipped because it already succeeded this task. */
+const ALREADY_COMPLETED_SETUP_MESSAGE = (command: string): string =>
+  [
+    `Already ran this exact setup command successfully earlier in this task (exit 0):`,
+    `  ${command}`,
+    "",
+    "Not re-running it. Move on to the next step — do not repeat setup commands.",
+  ].join("\n");
+
+/** Feedback appended when the same command has failed twice in a row, nudging the agent to escalate. */
+const REPEATED_FAILURE_ESCALATION_MESSAGE = (command: string): string =>
+  [
+    `This exact command has failed twice in a row in this subtask:`,
+    `  ${command}`,
+    "",
+    "Do not run it again. Try a different approach, check whether prerequisites are missing,",
+    "or call escalate with a clear reason describing the failure.",
+  ].join("\n");
+
+/** Consecutive failures of the same command before adding an escalation nudge to feedback. */
+const MAX_CONSECUTIVE_COMMAND_FAILURES = 2;
 
 /**
- * <Summary>
- * What it does:
- *   Formats a tool observation string for agent feedback.
+ * Increments and returns the consecutive-failure count for a command.
  *
- * How it does it (step by step):
- *   1. Combine tool name and JSON representation.
- *   2. Append content with newline separator.
- *
- * Parameters:
- *   @param tool - The tool call that was executed.
- *   @param content - The result or error message content.
- *
- * Returns:
- *   Formatted observation string.
- * </Summary>
+ * @param trackers - The run's tracker state (mutated in place).
+ * @param normalizedCommand - Command string normalized via {@link normalizeCommand},
+ *   so trivial whitespace/formatting differences don't count as different commands.
+ * @returns The updated failure count for this command.
  */
-const formatObservation = (tool: AgentToolCall, content: string): string => {
-  // Step 1-2: Combine tool name, JSON, and content
-  return `[${tool.tool}] ${JSON.stringify(tool)}\n${content}`;
+const recordCommandFailure = (
+  trackers: ToolHandlerContext["trackers"],
+  normalizedCommand: string,
+): number => {
+  const attempts = (trackers.failedCommandAttempts.get(normalizedCommand) ?? 0) + 1;
+  trackers.failedCommandAttempts.set(normalizedCommand, attempts);
+  return attempts;
 };
 
-export class RunCommandHandler implements IToolHandler {
-  /**
-   * <Summary>
-   * What it does:
-   *   Executes the run_command tool.
-   *
-   * How it does it (step by step):
-   *   1. Validate tool type is run_command.
-   *   2. Infer command purpose if not provided.
-   *   3. Check if run-project command (must be background).
-   *   4. If run-project without background, return error.
-   *   5. Create recorder context for logging.
-   *   6. Get trackers from context.
-   *   7. Emit running status to client.
-   *   8. Run command with confirmation.
-   *   9. Track verify command success if applicable.
-   *   10. Determine status (skipped, no output, or exit code).
-   *   11. Return observation with command output.
-   *   12. Handle errors and return error observation.
-   *
-   * Parameters:
-   *   @param tool - Tool call with command to run.
-   *   @param ctx - Execution context with dependencies.
-   *
-   * Returns:
-   *   Result with command output observation.
-   * </Summary>
-   */
+/**
+ * Resets the consecutive-failure count for a command after it succeeds.
+ *
+ * @param trackers - The run's tracker state (mutated in place).
+ * @param normalizedCommand - Command string normalized via {@link normalizeCommand}.
+ */
+const clearCommandFailure = (
+  trackers: ToolHandlerContext["trackers"],
+  normalizedCommand: string,
+): void => {
+  trackers.failedCommandAttempts.delete(normalizedCommand);
+};
+
+/**
+ * Classifies a command result into the mutually-exclusive outcomes the agent
+ * feedback message distinguishes: revised, skipped, silently succeeded, or ran.
+ */
+const summarizeCommandExecution = (
+  commandResult: CommandResult,
+): CommandExecutionSummary => {
+  const wasRevised = Boolean(commandResult.feedback);
+  const wasSkipped =
+    !wasRevised &&
+    commandResult.exitCode === -1 &&
+    commandResult.stderr.toLowerCase().includes("skipped");
+  const wasNotExecuted = wasRevised || wasSkipped;
+  const commandFailed = !wasNotExecuted && commandResult.exitCode !== 0;
+  const hasNoOutput =
+    !wasNotExecuted &&
+    commandResult.exitCode === 0 &&
+    !commandResult.stdout.trim() &&
+    !commandResult.stderr.trim();
+
+  let statusMessage: string;
+  if (wasRevised) {
+    statusMessage = "user requested changes — command was NOT executed";
+  } else if (wasSkipped) {
+    statusMessage = "user skipped — command was NOT executed";
+  } else if (hasNoOutput) {
+    statusMessage = "completed successfully (exit 0, no captured output)";
+  } else {
+    statusMessage = `exit ${commandResult.exitCode}`;
+  }
+
+  return { wasRevised, wasSkipped, wasNotExecuted, commandFailed, statusMessage };
+};
+
+/**
+ * Tool handler for `run_command`.
+ *
+ * @example
+ * Agent calls `run_command({ command: "npm test", purpose: "verify" })` —
+ * on exit 0, `trackers.verifyCommandPassed` is set, satisfying the `finish`
+ * tool's verification requirement for any files written this task.
+ */
+export const runCommandTool: ToolHandler = {
+  schema: {
+    type: "function",
+    function: {
+      name: "run_command",
+      description:
+        "Run a shell command. Long-running project servers must set background: true.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "string", description: "Shell command to run" },
+          purpose: {
+            type: "string",
+            enum: ["setup", "verify", "run-project"],
+            description: "Why the command is being run",
+          },
+          background: {
+            type: "boolean",
+            description: "Run in background (required for run-project)",
+          },
+        },
+        required: ["command"],
+      },
+    },
+  },
+
   async execute(
-    tool: AgentToolCall,
-    ctx: ToolHandlerContext,
+    runCommandArgs: Record<string, unknown>,
+    handlerContext: ToolHandlerContext,
   ): Promise<ToolExecutionResult> {
-    // Step 1: Validate tool type is run_command
-    if (tool.tool !== "run_command") {
-      throw new ValidationError(
-        `RunCommandHandler received wrong tool type: ${tool.tool}`,
-      );
-    }
-
-    // Step 2: Infer command purpose if not provided
+    const command = String(runCommandArgs.command ?? "");
+    const purposeArg = runCommandArgs.purpose;
+    // Trust an explicit purpose from the model; otherwise infer one from the
+    // command text and the task's command plan (e.g. "npm install" → setup).
     const commandPurpose: CommandPurpose =
-      tool.purpose ?? inferPurpose(tool.command, ctx.commandPlan);
+      purposeArg === "setup" ||
+      purposeArg === "verify" ||
+      purposeArg === "run-project"
+        ? purposeArg
+        : inferPurpose(command, handlerContext.commandPlan);
+    const background = runCommandArgs.background === true;
 
-    // Step 3-4: Check if run-project command (must be background)
-    if (commandPurpose === "run-project" && tool.background !== true) {
+    // GUARD: A long-running project server (dev server, watch mode, etc.)
+    // run in the foreground would block the agent loop indefinitely. Require
+    // background: true for anything classified as run-project.
+    if (commandPurpose === "run-project" && !background) {
       return {
         done: false,
         summary: "",
         feedback: formatObservation(
-          tool,
-          RUN_PROJECT_BLOCK_MESSAGE(tool.command),
+          "run_command",
+          runCommandArgs,
+          RUN_PROJECT_BLOCK_MESSAGE(command),
         ),
-        escalationCount: ctx.escalationCount,
+        escalationCount: handlerContext.escalationCount,
       };
     }
 
-    // Step 5: Create recorder context for logging
-    const recorderContext = { recorder: ctx.recorder, taskId: ctx.taskId };
-    // Step 6: Get trackers from context
-    const trackers = ctx.trackers;
+    const recorderContext = { recorder: handlerContext.recorder, taskId: handlerContext.taskId };
+    const trackers = handlerContext.trackers;
+    const normalizedCommand = normalizeCommand(command);
+
+    // DEDUPLICATION: Skip re-running a setup command that already succeeded
+    // this task (e.g. "npm install" doesn't need to run twice).
+    if (
+      commandPurpose === "setup" &&
+      trackers.completedSetupCommands.has(normalizedCommand)
+    ) {
+      return {
+        done: false,
+        summary: "",
+        feedback: formatObservation(
+          "run_command",
+          runCommandArgs,
+          ALREADY_COMPLETED_SETUP_MESSAGE(command),
+        ),
+        escalationCount: handlerContext.escalationCount,
+      };
+    }
 
     try {
-      // Step 7: Emit running status to client
-      ctx.emitAgentStatus(
-        "running",
-        "◌",
-        `Running: ${tool.command.slice(0, 38)}${tool.command.length > 38 ? "..." : ""}`,
-      );
-      // Step 8: Run command with confirmation
-      const commandResult = await ctx.terminal.runWithConfirmation(
-        tool.command,
+      const commandResult = await handlerContext.terminal.runWithConfirmation(
+        command,
         recorderContext,
-        {
-          background: tool.background === true,
-        },
+        { background },
       );
-      // Step 9: Track verify command success if applicable
+
+      // A verify command that exits 0 (and isn't secretly a background
+      // process) satisfies the finish tool's verification requirement.
       if (commandPurpose === "verify" && commandResult.exitCode === 0) {
         const startedInBackground =
           commandResult.stdout.includes("Started in background") ||
@@ -140,38 +221,44 @@ export class RunCommandHandler implements IToolHandler {
           trackers.verifyCommandPassed = true;
         }
       }
-      // Step 10: Determine status (skipped, no output, or exit code)
-      const wasSkipped =
-        commandResult.exitCode === -1 &&
-        commandResult.stderr.toLowerCase().includes("skipped");
-      const hasNoOutput =
-        !wasSkipped &&
-        commandResult.exitCode === 0 &&
-        !commandResult.stdout.trim() &&
-        !commandResult.stderr.trim();
-      const statusMessage = wasSkipped
-        ? "user skipped — command was NOT executed"
-        : hasNoOutput
-          ? "completed successfully (exit 0, no captured output)"
-          : `exit ${commandResult.exitCode}`;
-      // Step 11: Return observation with command output
-      const resultBody = `${statusMessage}\nstdout:\n${commandResult.stdout}\nstderr:\n${commandResult.stderr}`;
+
+      if (commandPurpose === "setup" && commandResult.exitCode === 0) {
+        trackers.completedSetupCommands.add(normalizedCommand);
+        clearCommandFailure(trackers, normalizedCommand);
+      }
+
+      const { wasRevised, wasNotExecuted, commandFailed, statusMessage } =
+        summarizeCommandExecution(commandResult);
+
+      // Track consecutive failures of the exact same command; after
+      // MAX_CONSECUTIVE_COMMAND_FAILURES, nudge the agent to stop retrying
+      // blindly and either change approach or escalate.
+      let repeatedFailureNote = "";
+      if (commandFailed) {
+        const failureCount = recordCommandFailure(trackers, normalizedCommand);
+        if (failureCount >= MAX_CONSECUTIVE_COMMAND_FAILURES) {
+          repeatedFailureNote = `\n\n${REPEATED_FAILURE_ESCALATION_MESSAGE(command)}`;
+        }
+      } else if (!wasNotExecuted && commandResult.exitCode === 0) {
+        clearCommandFailure(trackers, normalizedCommand);
+      }
+
+      const reviseNote = wasRevised
+        ? `\n\n${userReviseMessage(
+            "running this command",
+            "Do not run the same command again",
+            commandResult.feedback!,
+          )}`
+        : "";
+      const resultBody = `${statusMessage}\nstdout:\n${commandResult.stdout}\nstderr:\n${commandResult.stderr}${repeatedFailureNote}${reviseNote}`;
       return {
         done: false,
         summary: "",
-        feedback: formatObservation(tool, resultBody),
-        escalationCount: ctx.escalationCount,
+        feedback: formatObservation("run_command", runCommandArgs, resultBody),
+        escalationCount: handlerContext.escalationCount,
       };
     } catch (error) {
-      // Step 12: Handle errors and return error observation
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      return {
-        done: false,
-        summary: "",
-        feedback: formatObservation(tool, errorMessage),
-        escalationCount: ctx.escalationCount,
-      };
+      return toolExecutionErrorResult("run_command", runCommandArgs, error, handlerContext.escalationCount);
     }
-  }
-}
+  },
+};

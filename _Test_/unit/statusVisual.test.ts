@@ -111,10 +111,10 @@ describe("isWorkingStage — boundary / non-working stages", () => {
 });
 
 // ---------------------------------------------------------------------------
-// resolveWorkerVisual — Advisor path (isAdvisor = true)
+// resolveWorkerVisual — Advisor path (isAgent = true)
 // ---------------------------------------------------------------------------
 
-describe("resolveWorkerVisual — advisor (isAdvisor = true)", () => {
+describe("resolveWorkerVisual — agent (isAgent = true)", () => {
   it("returns green for ✓ icon (normal — done)", () => {
     const visual = resolveWorkerVisual(undefined, "✓", 0, true);
     expect(visual).toEqual({ glyph: "✓", color: "green" });
@@ -126,24 +126,24 @@ describe("resolveWorkerVisual — advisor (isAdvisor = true)", () => {
   });
 
   it("returns the raw icon with no color for ◌ (normal — in-progress)", () => {
-    // ◌ means actively thinking but the advisor visual just echoes the icon
+    // ◌ means actively thinking but the agent visual just echoes the icon
     const visual = resolveWorkerVisual("drafting", "◌", 0, true);
     expect(visual.glyph).toBe("◌");
     expect(visual.color).toBeUndefined();
   });
 
-  it("ignores the stage for advisor — only the icon matters (boundary)", () => {
-    // Even a working stage should be treated purely by icon when isAdvisor=true
+  it("ignores the stage for agent — only the icon matters (boundary)", () => {
+    // Even a working stage should be treated purely by icon when isAgent=true
     const visual = resolveWorkerVisual("running", "✓", 0, true);
     expect(visual).toEqual({ glyph: "✓", color: "green" });
   });
 });
 
 // ---------------------------------------------------------------------------
-// resolveWorkerVisual — Agent path (isAdvisor = false)
+// resolveWorkerVisual — Agent path (isAgent = false)
 // ---------------------------------------------------------------------------
 
-describe("resolveWorkerVisual — agent (isAdvisor = false)", () => {
+describe("resolveWorkerVisual — agent (isAgent = false)", () => {
   it("returns dimmed ◦ for 'waiting' stage (normal)", () => {
     const visual = resolveWorkerVisual("waiting", "◌", 0, false);
     expect(visual).toEqual({ glyph: "◦", dim: true });
@@ -195,7 +195,7 @@ describe("resolveWorkerVisual — agent (isAdvisor = false)", () => {
   });
 
   it("returns dimmed frameIcon as fallback for unknown/unhandled stage (boundary)", () => {
-    // 'retrying' is a valid AgentStage but not in the working-stage set
+    // 'retrying' is a valid SubagentStage but not in the working-stage set
     // and is not done/waiting/escalating → falls through to the default dimmed return
     const visual = resolveWorkerVisual("retrying", "◌", 0, false);
     expect(visual).toEqual({ glyph: "◌", dim: true });

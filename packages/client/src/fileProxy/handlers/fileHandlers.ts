@@ -23,7 +23,10 @@ import {
   printSuccessOp,
   printWrite,
 } from "../../renderer.js";
-import { requestApproval } from "../../ui/uiBridge.js";
+import {
+  printDeclineFeedback,
+  requestApprovalWithFeedback,
+} from "../../ui/approvalFlow.js";
 import { listStructure } from "../directoryListing.js";
 import { assertInsideRoot, requireNonEmptyPath } from "../pathUtils.js";
 import type { DispatchContext } from "../types.js";
@@ -83,7 +86,11 @@ export const handleFileWrite = async (
     previousContent = await fs.readFile(absolutePath, "utf-8");
   } catch (error) {
     // Only swallow "file does not exist yet" — other errno codes are real failures.
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+    const errnoCode =
+      error instanceof Error
+        ? (error as NodeJS.ErrnoException).code
+        : undefined;
+    if (errnoCode !== "ENOENT") {
       throw error;
     }
   }
@@ -91,14 +98,17 @@ export const handleFileWrite = async (
   const diffChunks = computeDiff(previousContent, newContent);
   await printWrite(absolutePath, diffChunks);
 
-  const userApproved = (await requestApproval({
-    type: "keepUndo",
-    contextLabel: `Apply changes to ${formatDisplayPath(absolutePath)}`,
-  })) as boolean;
+  const { approved, feedback } = await requestApprovalWithFeedback(
+    {
+      type: "keepUndo",
+      contextLabel: `Apply changes to ${formatDisplayPath(absolutePath)}`,
+    },
+    "What should change about this edit?",
+  );
 
-  if (!userApproved) {
-    printSkipped();
-    return { accepted: false };
+  if (!approved) {
+    printDeclineFeedback(feedback);
+    return { accepted: false, feedback };
   }
 
   await fs.mkdir(path.dirname(absolutePath), { recursive: true });
@@ -190,12 +200,15 @@ export const handleFileCreateDir = async (
   const absolutePath = context.resolveAbsolute(directoryPath);
   printCreateDir(absolutePath);
 
-  const userApproved = (await requestApproval({
-    type: "keepUndo",
-    contextLabel: `Create directory ${formatDisplayPath(absolutePath)}`,
-  })) as boolean;
+  const { approved } = await requestApprovalWithFeedback(
+    {
+      type: "keepUndo",
+      contextLabel: `Create directory ${formatDisplayPath(absolutePath)}`,
+    },
+    "What should change?",
+  );
 
-  if (!userApproved) {
+  if (!approved) {
     printSkipped();
     return { created: false };
   }
@@ -221,12 +234,15 @@ export const handleFileDeleteFile = async (
   const absolutePath = context.resolveAbsolute(filePath);
   printDelete(absolutePath);
 
-  const userApproved = (await requestApproval({
-    type: "keepUndo",
-    contextLabel: `Delete file ${formatDisplayPath(absolutePath)}`,
-  })) as boolean;
+  const { approved } = await requestApprovalWithFeedback(
+    {
+      type: "keepUndo",
+      contextLabel: `Delete file ${formatDisplayPath(absolutePath)}`,
+    },
+    "What should change?",
+  );
 
-  if (!userApproved) {
+  if (!approved) {
     printSkipped();
     return { deleted: false };
   }
@@ -255,12 +271,15 @@ export const handleFileDeleteDir = async (
   const absolutePath = context.resolveAbsolute(directoryPath);
   printDelete(absolutePath);
 
-  const userApproved = (await requestApproval({
-    type: "keepUndo",
-    contextLabel: `Delete directory ${formatDisplayPath(absolutePath)}`,
-  })) as boolean;
+  const { approved } = await requestApprovalWithFeedback(
+    {
+      type: "keepUndo",
+      contextLabel: `Delete directory ${formatDisplayPath(absolutePath)}`,
+    },
+    "What should change?",
+  );
 
-  if (!userApproved) {
+  if (!approved) {
     printSkipped();
     return { deleted: false };
   }

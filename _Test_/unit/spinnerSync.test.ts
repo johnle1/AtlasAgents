@@ -14,15 +14,15 @@
  *   undefined     → leave the current spinner unchanged
  *
  * Category checklist:
- *   ✅ Normal  — every ADVISOR_THINKING_STAGES member, agent working stages
- *   ✅ Boundary — frames from non-status kinds, advisor ready, activity-less agent
+ *   ✅ Normal  — every AGENT_THINKING_STAGES member, subagent working stages
+ *   ✅ Boundary — frames from non-status kinds, agent ready, activity-less agent
  *   ✅ Error   — non-status frames must NEVER accidentally clear/set the spinner
  */
 
 import { describe, expect, it } from "vitest";
 import type {
-  AdvisorStage,
   AgentStage,
+  SubagentStage,
   TaskFrame,
 } from "../../packages/client/src/frames";
 import { spinnerForStatusFrame } from "../../packages/client/src/ui/spinnerSync";
@@ -32,35 +32,35 @@ import { spinnerForStatusFrame } from "../../packages/client/src/ui/spinnerSync"
 // ---------------------------------------------------------------------------
 
 /**
- * Builds an advisor status frame.
+ * Builds an agent status frame.
  *
- * @param stage - The advisor pipeline stage.
+ * @param stage - The agent pipeline stage.
  * @param icon - The status icon (◌ = in-progress, ✓ = done, ⚠ = warning).
  * @param message - Optional human-readable status message.
  */
-const makeAdvisorFrame = (
-  stage: AdvisorStage,
+const makeAgentFrame = (
+  stage: AgentStage,
   icon: "◌" | "✓" | "⚠",
   message = "",
 ): TaskFrame => ({
   kind: "status",
-  source: "advisor",
+  source: "agent",
   stage,
   icon,
   message,
 });
 
 /**
- * Builds an agent status frame.
+ * Builds a subagent (worker) status frame.
  *
- * @param stage - The agent lifecycle stage.
+ * @param stage - The subagent lifecycle stage.
  * @param icon - Status icon.
  * @param activity - Optional in-flight activity details.
  */
-const makeAgentFrame = (
-  stage: AgentStage,
+const makeSubagentFrame = (
+  stage: SubagentStage,
   icon: "◌" | "✓" | "⚠" = "◌",
-  activity?: { stage: AgentStage; message: string },
+  activity?: { stage: SubagentStage; message: string },
 ): TaskFrame => ({
   kind: "status",
   source: { agentId: 1, agentLabel: "worker" },
@@ -71,13 +71,13 @@ const makeAgentFrame = (
 });
 
 // ---------------------------------------------------------------------------
-// Advisor — ADVISOR_THINKING_STAGES with ◌ icon → "thinking" spinner
+// Advisor — AGENT_THINKING_STAGES with ◌ icon → "thinking" spinner
 // These six stages are explicitly listed in spinnerSync.ts.
 // Each one must produce a thinking spinner when paired with the ◌ icon.
 // ---------------------------------------------------------------------------
 
-describe("spinnerForStatusFrame — advisor thinking stages (◌ icon)", () => {
-  const thinkingStages: AdvisorStage[] = [
+describe("spinnerForStatusFrame — agent thinking stages (◌ icon)", () => {
+  const thinkingStages: AgentStage[] = [
     "understanding",
     "reading-context",
     "drafting",
@@ -87,22 +87,22 @@ describe("spinnerForStatusFrame — advisor thinking stages (◌ icon)", () => {
   ];
 
   for (const stage of thinkingStages) {
-    it(`returns thinking spinner for advisor stage '${stage}' with ◌ (normal)`, () => {
-      const result = spinnerForStatusFrame(makeAdvisorFrame(stage, "◌"));
-      expect(result).toEqual({ active: true, label: "Advisor", mode: "thinking" });
+    it(`returns thinking spinner for agent stage '${stage}' with ◌ (normal)`, () => {
+      const result = spinnerForStatusFrame(makeAgentFrame(stage, "◌"));
+      expect(result).toEqual({ active: true, label: "Agent", mode: "thinking" });
     });
   }
 });
 
-describe("spinnerForStatusFrame — advisor thinking stages with non-◌ icon", () => {
+describe("spinnerForStatusFrame — agent thinking stages with non-◌ icon", () => {
   it("returns undefined for 'understanding' with ✓ icon (boundary — wrong icon)", () => {
-    // ADVISOR_THINKING_STAGES + ✓ does not match the ◌ guard → falls through to undefined
-    const result = spinnerForStatusFrame(makeAdvisorFrame("understanding", "✓"));
+    // AGENT_THINKING_STAGES + ✓ does not match the ◌ guard → falls through to undefined
+    const result = spinnerForStatusFrame(makeAgentFrame("understanding", "✓"));
     expect(result).toBeUndefined();
   });
 
   it("returns undefined for 'drafting' with ⚠ icon (boundary)", () => {
-    const result = spinnerForStatusFrame(makeAdvisorFrame("drafting", "⚠"));
+    const result = spinnerForStatusFrame(makeAgentFrame("drafting", "⚠"));
     expect(result).toBeUndefined();
   });
 });
@@ -111,19 +111,19 @@ describe("spinnerForStatusFrame — advisor thinking stages with non-◌ icon", 
 // Advisor — 'ready' stage always clears the spinner regardless of icon
 // ---------------------------------------------------------------------------
 
-describe("spinnerForStatusFrame — advisor 'ready' stage", () => {
+describe("spinnerForStatusFrame — agent 'ready' stage", () => {
   it("returns null (clear) for 'ready' with ✓ icon (normal — task complete)", () => {
-    expect(spinnerForStatusFrame(makeAdvisorFrame("ready", "✓"))).toBeNull();
+    expect(spinnerForStatusFrame(makeAgentFrame("ready", "✓"))).toBeNull();
   });
 
   it("returns null (clear) for 'ready' with ◌ icon (boundary — supervising pool)", () => {
     // The 'ready' guard runs before the ◌ thinking guard,
     // so even ◌ + ready should clear the spinner.
-    expect(spinnerForStatusFrame(makeAdvisorFrame("ready", "◌"))).toBeNull();
+    expect(spinnerForStatusFrame(makeAgentFrame("ready", "◌"))).toBeNull();
   });
 
   it("returns null (clear) for 'ready' with ⚠ icon (boundary)", () => {
-    expect(spinnerForStatusFrame(makeAdvisorFrame("ready", "⚠"))).toBeNull();
+    expect(spinnerForStatusFrame(makeAgentFrame("ready", "⚠"))).toBeNull();
   });
 });
 
@@ -131,42 +131,42 @@ describe("spinnerForStatusFrame — advisor 'ready' stage", () => {
 // Agent — activity.stage = 'thinking' takes highest priority
 // ---------------------------------------------------------------------------
 
-describe("spinnerForStatusFrame — agent with thinking activity", () => {
+describe("spinnerForStatusFrame — subagent with thinking activity", () => {
   it("returns thinking spinner when activity.stage is 'thinking' (normal)", () => {
     const result = spinnerForStatusFrame(
-      makeAgentFrame("running", "◌", { stage: "thinking", message: "Planning next step" }),
+      makeSubagentFrame("running", "◌", { stage: "thinking", message: "Planning next step" }),
     );
-    expect(result).toEqual({ active: true, label: "Agent", mode: "thinking" });
+    expect(result).toEqual({ active: true, label: "Subagent", mode: "thinking" });
   });
 
   it("returns thinking spinner even if outer stage is 'reading' but activity.stage='thinking' (boundary)", () => {
     // The activity guard fires first, so the outer stage is irrelevant here
     const result = spinnerForStatusFrame(
-      makeAgentFrame("reading", "◌", { stage: "thinking", message: "Analyzing…" }),
+      makeSubagentFrame("reading", "◌", { stage: "thinking", message: "Analyzing…" }),
     );
-    expect(result).toEqual({ active: true, label: "Agent", mode: "thinking" });
+    expect(result).toEqual({ active: true, label: "Subagent", mode: "thinking" });
   });
 });
 
 // ---------------------------------------------------------------------------
-// Agent — top-level stage = 'thinking'
+// Subagent — top-level stage = 'thinking'
 // ---------------------------------------------------------------------------
 
-describe("spinnerForStatusFrame — agent stage = 'thinking' (no activity)", () => {
+describe("spinnerForStatusFrame — subagent stage = 'thinking' (no activity)", () => {
   it("returns thinking spinner for direct 'thinking' stage (normal)", () => {
-    const result = spinnerForStatusFrame(makeAgentFrame("thinking"));
-    expect(result).toEqual({ active: true, label: "Agent", mode: "thinking" });
+    const result = spinnerForStatusFrame(makeSubagentFrame("thinking"));
+    expect(result).toEqual({ active: true, label: "Subagent", mode: "thinking" });
   });
 });
 
 // ---------------------------------------------------------------------------
-// Agent — working activity (non-thinking) → "working" spinner with message
+// Subagent — working activity (non-thinking) → "working" spinner with message
 // ---------------------------------------------------------------------------
 
-describe("spinnerForStatusFrame — agent with working activity", () => {
+describe("spinnerForStatusFrame — subagent with working activity", () => {
   it("returns working spinner for 'reading' activity with a file path message (normal)", () => {
     const result = spinnerForStatusFrame(
-      makeAgentFrame("reading", "◌", { stage: "reading", message: "Reading src/App.tsx…" }),
+      makeSubagentFrame("reading", "◌", { stage: "reading", message: "Reading src/App.tsx…" }),
     );
     expect(result).toEqual({
       active: true,
@@ -177,7 +177,7 @@ describe("spinnerForStatusFrame — agent with working activity", () => {
 
   it("returns working spinner for 'writing' activity (normal)", () => {
     const result = spinnerForStatusFrame(
-      makeAgentFrame("writing", "◌", { stage: "writing", message: "Writing tests/unit.ts" }),
+      makeSubagentFrame("writing", "◌", { stage: "writing", message: "Writing tests/unit.ts" }),
     );
     expect(result).toEqual({
       active: true,
@@ -188,7 +188,7 @@ describe("spinnerForStatusFrame — agent with working activity", () => {
 
   it("returns working spinner for 'running' activity (shell execution) (normal)", () => {
     const result = spinnerForStatusFrame(
-      makeAgentFrame("running", "◌", { stage: "running", message: "npm run build" }),
+      makeSubagentFrame("running", "◌", { stage: "running", message: "npm run build" }),
     );
     expect(result).toEqual({
       active: true,
@@ -199,9 +199,9 @@ describe("spinnerForStatusFrame — agent with working activity", () => {
 
   it("does not show a spinner for escalating activity (normal)", () => {
     const result = spinnerForStatusFrame(
-      makeAgentFrame("escalating", "⚠", {
+      makeSubagentFrame("escalating", "⚠", {
         stage: "escalating",
-        message: "Escalating to advisor...",
+        message: "Escalating to agent...",
       }),
     );
     expect(result).toBeNull();
@@ -209,21 +209,21 @@ describe("spinnerForStatusFrame — agent with working activity", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Agent — no activity present → clear the spinner
+// Subagent — no activity present → clear the spinner
 // ---------------------------------------------------------------------------
 
-describe("spinnerForStatusFrame — agent with no activity", () => {
-  it("returns null (clear) for agent 'running' stage with no activity (normal)", () => {
-    // No activity object means the agent has finished all granular steps
-    expect(spinnerForStatusFrame(makeAgentFrame("running"))).toBeNull();
+describe("spinnerForStatusFrame — subagent with no activity", () => {
+  it("returns null (clear) for subagent 'running' stage with no activity (normal)", () => {
+    // No activity object means the subagent has finished all granular steps
+    expect(spinnerForStatusFrame(makeSubagentFrame("running"))).toBeNull();
   });
 
-  it("returns null (clear) for agent 'done' stage (boundary)", () => {
-    expect(spinnerForStatusFrame(makeAgentFrame("done", "✓"))).toBeNull();
+  it("returns null (clear) for subagent 'done' stage (boundary)", () => {
+    expect(spinnerForStatusFrame(makeSubagentFrame("done", "✓"))).toBeNull();
   });
 
-  it("returns null (clear) for agent 'waiting' stage (boundary)", () => {
-    expect(spinnerForStatusFrame(makeAgentFrame("waiting"))).toBeNull();
+  it("returns null (clear) for subagent 'waiting' stage (boundary)", () => {
+    expect(spinnerForStatusFrame(makeSubagentFrame("waiting"))).toBeNull();
   });
 });
 
@@ -238,7 +238,7 @@ describe("spinnerForStatusFrame — non-status frames (boundary)", () => {
   });
 
   it("returns undefined for a 'think' frame (boundary)", () => {
-    const frame: TaskFrame = { kind: "think", text: "reasoning…", advisor: true };
+    const frame: TaskFrame = { kind: "think", text: "reasoning…", agent: true };
     expect(spinnerForStatusFrame(frame)).toBeUndefined();
   });
 

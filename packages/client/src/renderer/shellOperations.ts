@@ -10,17 +10,7 @@
 import { beginBlockOutput } from "../agentStatus.js";
 import { getTheme } from "../theme/themeManager.js";
 import { appendBlock } from "./sink.js";
-
-/**
- * Safety / mode class for a shell command shown in scrollback.
- *
- * @remarks
- * - `safe` — auto-approved read-only style commands
- * - `cautious` — unknown; requires confirm
- * - `dangerous` — destructive tokens; confirm + warning
- * - `background` — detached long-running spawn
- */
-export type BashClass = "safe" | "cautious" | "dangerous" | "background";
+import type { BashClass } from "./types.js";
 
 /** Shell-prompt glyph used by {@link printBash}. */
 const BASH_OPERATION_ICON = "$";
@@ -77,6 +67,17 @@ export const printSkipped = (): void => {
   const theme = getTheme();
   appendBlock([
     `  ${theme.error}✗${theme.reset}  Skipped — command was not run.`,
+  ]);
+};
+
+/**
+ * Prints that the user asked for changes instead of approving (run/skip or
+ * keep/undo prompts) — the action was not taken and feedback was sent back.
+ */
+export const printReviseRequested = (): void => {
+  const theme = getTheme();
+  appendBlock([
+    `  ${theme.textSecondary}↺${theme.reset}  Revise requested — not applied. Sending feedback...`,
   ]);
 };
 

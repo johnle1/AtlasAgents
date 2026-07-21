@@ -25,6 +25,7 @@ describe("modelSupportsNativeTools", () => {
 });
 
 describe("syncAgentToolSupport", () => {
+  // role "agent" → persists/reads the `agentModelSupportsTools` config key.
   it("persists true when showModel reports tools capability", async () => {
     const sets: Array<[string, unknown]> = [];
     const supports = await syncAgentToolSupport(
@@ -56,6 +57,7 @@ describe("syncAgentToolSupport", () => {
         set: async (key, value) => {
           sets.push([key, value]);
         },
+        // On probe failure the existing agent flag is read and returned unchanged.
         getAgentModelSupportsTools: async () => true,
       },
       "gemma3:4b",
@@ -66,7 +68,9 @@ describe("syncAgentToolSupport", () => {
   });
 });
 
-describe("syncAdvisorToolSupport", () => {
+describe("syncAdvisorToolSupport (deprecated alias for syncSubagentToolSupport)", () => {
+  // Alias of syncSubagentToolSupport → role "subagent" → the
+  // `subagentModelSupportsTools` config key.
   it("persists true when showModel reports tools capability", async () => {
     const sets: Array<[string, unknown]> = [];
     const supports = await syncAdvisorToolSupport(
@@ -77,13 +81,13 @@ describe("syncAdvisorToolSupport", () => {
         set: async (key, value) => {
           sets.push([key, value]);
         },
-        getAdvisorModelSupportsTools: async () => false,
+        getSubagentModelSupportsTools: async () => false,
       },
       "qwen2.5:7b",
     );
 
     expect(supports).toBe(true);
-    expect(sets).toEqual([["advisorModelSupportsTools", true]]);
+    expect(sets).toEqual([["subagentModelSupportsTools", true]]);
   });
 
   it("keeps existing flag when showModel fails", async () => {
@@ -98,7 +102,8 @@ describe("syncAdvisorToolSupport", () => {
         set: async (key, value) => {
           sets.push([key, value]);
         },
-        getAdvisorModelSupportsTools: async () => false,
+        // On probe failure the existing subagent flag is read and returned unchanged.
+        getSubagentModelSupportsTools: async () => false,
       },
       "gemma4:12b",
     );

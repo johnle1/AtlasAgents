@@ -1,13 +1,11 @@
 /**
- * <Summary>
- * What it does:
- *   Helper functions for pattern extraction including JSON parsing, text truncation,
- *   diff formatting, keyword extraction, and confidence parsing.
+ * Helper functions for pattern extraction and rule learning.
  *
- * How it fits in the system:
- *   Provides utility functions for processing experience records and extracting
- *   preference rules.
- * </Summary>
+ * @remarks
+ * This module provides utilities used by {@link PatternExtractor} to process
+ * experience records and extract preference rules. Functions handle JSON parsing
+ * from LLM responses, text truncation for token budgeting, diff formatting,
+ * keyword extraction for topic categorization, and confidence normalization.
  */
 
 import * as path from "node:path";
@@ -21,61 +19,44 @@ import {
 } from "./patternConstants.js";
 
 /**
- * <Summary>
- * What it does:
- *   Extracts a JSON array string from a raw advisor/LLM response. The
- *   assistant may return the array either raw or wrapped inside a Markdown
- *   code fence (optionally labeled "json"). This helper returns the
- *   substring that looks like a JSON array (including brackets) so callers
- *   can safely `JSON.parse()` it.
+ * Extracts a JSON array string from a raw LLM response.
  *
- * How it does it (step by step):
- *   1. Trim surrounding whitespace from the raw response.
- *   2. Attempt to capture the first fenced code block using a regex that
- *      accepts an optional "json" language label.
- *   3. If a fenced block is found, use its inner contents as the body;
- *      otherwise use the trimmed raw text.
- *   4. Find the first `[` and the last `]` in the body.
- *   5. If both brackets exist and the end index is after the start index,
- *      return the substring from `[` to `]` inclusive (the JSON array).
- *   6. If a plausible array can't be located, return the full body so the
- *      caller can still attempt to parse or log the raw response.
+ * @remarks
+ * LLMs often return JSON wrapped in markdown code blocks (with or without
+ * a "json" language label) or embedded in conversational text. This function
+ * handles both formats by first extracting code block content, then locating
+ * the outermost JSON array brackets to return a parseable string.
  *
- * Parameters:
- *   @param raw - Raw text returned by the advisor/LLM.
+ * If no well-formed array boundaries are found, returns the full body so
+ * callers can log the raw response or attempt alternative parsing strategies.
  *
- * Returns:
- *   {string} — The extracted JSON array text (or the original body if no
- *   well-formed array boundaries were found).
- * </Summary>
+ * @param raw - Raw text returned by the agent/LLM.
+ * @returns The extracted JSON array text, or the original body if no array boundaries were found.
+ *
+ * @example
+ * ```ts
+ * Extract from markdown-wrapped JSON
+ * extractJsonArray('```json\n[{"text": "rule"}]\n```'); // "[{\"text\": \"rule\"}]"
+ *
+ * Extract from plain JSON
+ * extractJsonArray('[{"text": "rule"}]'); // "[{\"text\": \"rule\"}]"
+ *
+ * Handle conversational text
+ * extractJsonArray('Here are the rules: [{"text": "rule"}]'); // "[{\"text\": \"rule\"}]"
+ * ```
  */
 export const extractJsonArray = (raw: string): string => {
-  // Step 1: Trim surrounding whitespace/newlines
-  // LLM responses often have leading/trailing whitespace that interferes with parsing
   const trimmedResponse = raw.trim();
-
-  // Step 2: Try to capture a fenced code block. Supports both ```json and ```
-  // The regex is non-greedy and captures content between fences
-  // Handles both ```json and ``` formats, case-insensitive
   const codeFenceMatch = /^```(?:json)?\s*\r?\n?([\s\S]*?)\r?\n?```/i.exec(
     trimmedResponse,
   );
-
-  // Step 3: Prefer the fenced block content when present, otherwise use raw
-  // LLMs often wrap JSON in code blocks for formatting, so we extract the inner content
   const extractedBody = codeFenceMatch
     ? codeFenceMatch[1].trim()
     : trimmedResponse;
 
-  // Step 4: Locate the first opening bracket and the last closing bracket.
-  // This is a pragmatic way to extract the outermost JSON array in the body.
-  // We use first/last to handle cases where the array contains nested arrays
   const arrayStartIndex = extractedBody.indexOf("[");
   const arrayEndIndex = extractedBody.lastIndexOf("]");
 
-  // Step 5: If a matching pair of brackets exists and the end comes after
-  // the start, slice out that range (include the closing bracket). This
-  // returns a string like "[ {...}, {...} ]" which callers can parse.
   if (
     arrayStartIndex !== -1 &&
     arrayEndIndex !== -1 &&
@@ -84,63 +65,55 @@ export const extractJsonArray = (raw: string): string => {
     return extractedBody.slice(arrayStartIndex, arrayEndIndex + 1);
   }
 
-  // Step 6: Fallback — return the full body so caller can decide how to
-  // handle malformed or unexpected responses (logging, retries, etc.).
-  // This is safer than throwing an error - let the caller decide how to handle it
   return extractedBody;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Truncates a string to a maximum length and appends an ellipsis when
- *   the text is longer than the allowed maximum.
+ * Truncates a string to a maximum length with an ellipsis suffix.
  *
- * How it does it (step by step):
- *   1. Check if `text.length` is less than or equal to `max`.
- *   2. If yes, return the original `text` untouched.
- *   3. Otherwise, take the first `max` characters and append `…`.
+ * @remarks
+ * Used to manage token budgets when sending experience data to the subagent model.
+ * If the text fits within the limit, returns it unchanged. Otherwise returns
+ * the first `max` characters with a Unicode ellipsis (…) appended to indicate
+ * truncation.
  *
- * Parameters:
- *   @param text - Input string to trim.
- *   @param max - Maximum allowed length before truncation.
+ * @param text - Input string to truncate.
+ * @param max - Maximum allowed length before truncation.
+ * @returns Either the original text (if short) or a truncated version with a trailing ellipsis.
  *
- * Returns:
- *   {string} — Either the original text (if short) or a truncated version
- *   with a trailing ellipsis.
- * </Summary>
+ * @example
+ * ```ts
+ * truncate("short text", 20); // "short text"
+ * truncate("this is a very long string that exceeds the limit", 20); // "this is a very lo…"
+ * ```
  */
 export const truncate = (text: string, max: number): string => {
-  // Step 1: If the text already fits, return it directly.
-  // No truncation needed, avoid unnecessary processing
   if (text.length <= max) {
     return text;
   }
-
-  // Step 2: Otherwise return the prefix + ellipsis to indicate truncation.
-  // We use a single unicode ellipsis character (…) rather than "..." for cleaner output
   return `${text.slice(0, max)}…`;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Builds a plain-text line diff from before/after file contents for prompts.
+ * Builds a plain-text line diff from before/after file contents.
  *
- * How it does it (step by step):
- *   1. Run computeDiff on before and after strings.
- *   2. Format with formatDiffPlain (no ANSI colors).
- *   3. Truncate to max length when provided.
+ * @remarks
+ * Computes the diff between two file contents, formats it without ANSI colors
+ * (suitable for LLM prompts), and optionally truncates to a character budget.
+ * Used by {@link formatUserEditForPrompt} to show user corrections in agent prompts.
  *
- * Parameters:
- *   @param before - Content before edit.
- *   @param after - Content after edit.
- *   @param filePath - Path for optional header in diff output.
- *   @param {number} [maxLen] — Optional character budget; omit for full diff.
+ * @param before - Content before the edit.
+ * @param after - Content after the edit.
+ * @param filePath - File path for the diff header.
+ * @param maxLen - Optional character budget; if omitted, returns the full diff.
+ * @returns Plain diff text with +/- line prefixes.
  *
+ * @example
+ * ```ts
+ * plainDiffFromEdit("old line", "new line", "file.ts", 100);
  * Returns:
- *   @returns Plain diff text.
- * </Summary>
+ * "--- a/file.ts\n+++ b/file.ts\n-old line\n+new line"
+ * ```
  */
 export const plainDiffFromEdit = (
   before: string,
@@ -148,52 +121,45 @@ export const plainDiffFromEdit = (
   filePath: string,
   maxLen?: number,
 ): string => {
-  // Step 1: Compute diff chunks between before and after content
-  // computeDiff returns an array of diff operations (insertions, deletions, unchanged)
   const diffChunks = computeDiff(before, after);
-
-  // Step 2: Format the diff chunks as plain text (no ANSI colors)
-  // formatDiffPlain adds the file path header and uses +/- prefixes for changes
   const plainDiffText = formatDiffPlain(diffChunks, filePath);
-
-  // Step 3: Truncate to max length when provided
-  // If no maxLen is specified, return the full diff
   if (maxLen === undefined) {
     return plainDiffText;
   }
-  // Otherwise truncate to fit within the character budget
   return truncate(plainDiffText, maxLen);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Formats one user edit as a prompt line with a plain diff (not before/after slices).
+ * Formats a user edit as a prompt block with a plain diff.
  *
- * How it does it (step by step):
- *   1. Generate a plain diff from the edit's before/after content.
- *   2. Format as a bullet point with the file path and indented diff lines.
+ * @remarks
+ * Converts a user edit record into a readable format for agent prompts.
+ * Shows the file path followed by an indented diff (truncated to
+ * {@link USER_EDIT_DIFF_BUDGET}). Used by {@link PatternExtractor} to
+ * demonstrate user corrections when extracting style preferences.
  *
- * Parameters:
- *   @param edit - User edit row from the experience record.
+ * @param edit - User edit entry from the experience record.
+ * @returns Multi-line string formatted as a bullet point with indented diff lines.
  *
+ * @example
+ * ```ts
+ * formatUserEditForPrompt({
+ *   path: "file.ts",
+ *   before: "old",
+ *   after: "new",
+ *   timestamp: "2024-01-01T00:00:00.000Z"
+ * });
  * Returns:
- *   @returns Multi-line block for the advisor prompt.
- * </Summary>
+ * "- file.ts\n  Diff:\n    --- a/file.ts\n    +++ b/file.ts\n    -old\n    +new"
+ * ```
  */
 export const formatUserEditForPrompt = (edit: UserEditEntry): string => {
-  // Step 1: Generate a plain diff from the edit's before/after content
-  // We use USER_EDIT_DIFF_BUDGET to keep each edit's diff concise
   const diffText = plainDiffFromEdit(
     edit.before,
     edit.after,
     edit.path,
     USER_EDIT_DIFF_BUDGET,
   );
-
-  // Step 2: Format as a bullet point with the file path and indented diff lines
-  // The format is: "- filepath\n  Diff:\n    line 1\n    line 2\n    ..."
-  // This creates a clean, readable structure for the advisor prompt
   return `- ${edit.path}\n  Diff:\n${diffText
     .split("\n")
     .map((line) => `    ${line}`)
@@ -201,34 +167,33 @@ export const formatUserEditForPrompt = (edit: UserEditEntry): string => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Limits user edits included in the advisor prompt to avoid huge prompts.
+ * Samples user edits to avoid overwhelming the agent prompt.
  *
- * How it does it (step by step):
- *   1. If total edits fit within the limit, return all edits.
- *   2. Otherwise, return only the first MAX_USER_EDITS_IN_PROMPT edits
- *      and report how many were omitted.
+ * @remarks
+ * If the total number of edits exceeds {@link MAX_USER_EDITS_IN_PROMPT},
+ * returns only the first N edits and reports how many were omitted.
+ * This prevents token budget overruns while providing transparency about
+ * the sampling. When the total fits within the limit, returns all edits.
  *
- * Parameters:
- *   @param edits - All user edits on the record.
+ * @param edits - All user edits from the experience record.
+ * @returns An object containing the sampled edits and the count of omitted edits.
  *
- * Returns:
- *   @returns Sample and omit count.
- * </Summary>
+ * @example
+ * ```ts
+ * When edits fit within the limit
+ * sampleUserEdits([edit1, edit2]); // { edits: [edit1, edit2], omitted: 0 }
+ *
+ * When edits exceed the limit (assuming MAX_USER_EDITS_IN_PROMPT = 5)
+ * sampleUserEdits([edit1, edit2, edit3, edit4, edit5, edit6, edit7]);
+ * { edits: [edit1, edit2, edit3, edit4, edit5], omitted: 2 }
+ * ```
  */
 export const sampleUserEdits = (
   edits: UserEditEntry[],
 ): { edits: UserEditEntry[]; omitted: number } => {
-  // Step 1: If total edits fit within the limit, return all edits
-  // No sampling needed when the total is manageable
   if (edits.length <= MAX_USER_EDITS_IN_PROMPT) {
     return { edits, omitted: 0 };
   }
-
-  // Step 2: Otherwise, return only the first MAX_USER_EDITS_IN_PROMPT edits
-  // and report how many were omitted for transparency
-  // We take the first N edits as a representative sample
   return {
     edits: edits.slice(0, MAX_USER_EDITS_IN_PROMPT),
     omitted: edits.length - MAX_USER_EDITS_IN_PROMPT,
@@ -236,36 +201,27 @@ export const sampleUserEdits = (
 };
 
 /**
- * <Summary>
- * What it does:
- *   Determines a language scope string from a file path's extension. This
- *   maps common file extensions to higher-level language identifiers used
- *   for scoping preference rules.
+ * Determines a language scope identifier from a file path's extension.
  *
- * How it does it (step by step):
- *   1. Extract the file extension using `path.extname` and normalize to
- *      lower-case.
- *   2. Look up the extension in a predefined `map` from extensions to
- *      language scope strings.
- *   3. If the extension is unknown, return the fallback scope `all`.
+ * @remarks
+ * Maps common file extensions to language scope strings used for scoping
+ * preference rules. For example, `.ts` and `.tsx` map to `"typescript"`,
+ * `.py` maps to `"python"`. Unknown extensions fall back to `"all"` to
+ * indicate the rule applies globally. Used by {@link PatternExtractor} to
+ * scope style rules to specific languages.
  *
- * Parameters:
- *   @param filePath - The path to the file whose language should
- *   be determined.
+ * @param filePath - The file path whose language should be determined.
+ * @returns A scope identifier such as `"typescript"`, `"python"`, or `"all"`.
  *
- * Returns:
- *   {string} — A scope identifier such as `typescript`, `python`, or `all`.
- * </Summary>
+ * @example
+ * ```ts
+ * scopeFromPath("src/index.ts"); // "typescript"
+ * scopeFromPath("app.py"); // "python"
+ * scopeFromPath("README.md"); // "all"
+ * ```
  */
 export const scopeFromPath = (filePath: string): string => {
-  // Step 1: Extract the extension and normalize to lower-case
-  // path.extname returns the extension including the dot (e.g., ".ts")
-  // Normalizing to lower-case ensures case-insensitive matching
   const fileExtension = path.extname(filePath).toLowerCase();
-
-  // Step 2: Map common extensions to language scopes
-  // This map covers the most common programming languages and frameworks
-  // Extensions that map to the same language are grouped (e.g., .ts and .tsx both map to typescript)
   const extensionToScopeMap: Record<string, string> = {
     ".ts": "typescript",
     ".tsx": "typescript",
@@ -283,107 +239,87 @@ export const scopeFromPath = (filePath: string): string => {
     ".swift": "swift",
     ".kt": "kotlin",
   };
-
-  // Step 3: Return mapped scope or fallback to 'all'
-  // If the extension is not in our map, we return 'all' to indicate the rule applies globally
-  // This is a safe default that ensures rules don't get lost for unknown file types
   return extensionToScopeMap[fileExtension] ?? "all";
 };
 
 /**
- * <Summary>
- * What it does:
- *   Produces a list of topic strings derived from a file path. For now this
- *   is a thin wrapper that returns the language scope (unless it's `all`).
+ * Derives topic tags from a file path.
  *
- * How it does it (step by step):
- *   1. Call `scopeFromPath` to determine the language scope for `filePath`.
- *   2. If the scope is `all`, return an empty array (no specific topics).
- *   3. Otherwise return an array containing the single scope string.
+ * @remarks
+ * Currently a thin wrapper around {@link scopeFromPath} that returns the
+ * language scope as a topic array. If the scope is `"all"`, returns an empty
+ * array since `"all"` is not a useful topic tag. Topics are used to categorize
+ * preference rules for matching (e.g., `"typescript"`, `"react"`, `"testing"`).
  *
- * Parameters:
- *   @param filePath - File path used to derive topics.
+ * @param filePath - File path used to derive topics.
+ * @returns Array of topic strings, commonly a single language scope or empty.
  *
- * Returns:
- *   {string[]} — Array of topic strings (commonly a single language scope).
- * </Summary>
+ * @example
+ * ```ts
+ * topicsFromPath("src/index.ts"); // ["typescript"]
+ * topicsFromPath("app.py"); // ["python"]
+ * topicsFromPath("README.md"); // []
+ * ```
  */
 export const topicsFromPath = (filePath: string): string[] => {
-  // Step 1: Get the language scope
-  // scopeFromPath returns a language identifier like "typescript" or "all"
   const languageScope = scopeFromPath(filePath);
-
-  // Step 2: Return either an empty list for 'all' or the single-topic array
-  // If the scope is "all", we return an empty array because "all" isn't a useful topic tag
-  // Topics are meant to be specific categories like "typescript", "react", "testing", etc.
   return languageScope === "all" ? [] : [languageScope];
 };
 
 /**
- * <Summary>
- * What it does:
- *   Extracts up to eight short, lower-cased keyword tokens from an error
- *   reason string. These keywords are used as `topics` for fix rules so
- *   that errors can be matched by common words.
+ * Extracts keyword tokens from an error reason for topic categorization.
  *
- * How it does it (step by step):
- *   1. Normalize the input to lower-case.
- *   2. Split on any character that is not a letter, digit, `+`, or `#`.
- *   3. Filter out tokens shorter than 3 characters to avoid noise.
- *   4. Deduplicate while preserving first-seen order using `Set` and then
- *      limit the result to the first 8 tokens.
+ * @remarks
+ * Splits an error message into meaningful keywords (3+ characters) used
+ * as topic tags for fix rules. Preserves `+` and `#` symbols (e.g., "C++",
+ * "C#", "HTTP 404"). Returns up to 8 deduplicated tokens in first-seen order.
+ * Used by {@link PatternExtractor} to categorize escalation-based fix rules.
  *
- * Parameters:
- *   @param reason - Human-readable error reason or message.
+ * @param reason - Human-readable error reason or message.
+ * @returns Up to eight deduplicated keyword tokens.
  *
- * Returns:
- *   {string[]} — Up to eight deduplicated keyword tokens.
- * </Summary>
+ * @example
+ * ```ts
+ * errorKeywords("TypeError: Cannot read property 'x' of undefined");
+ * ["typeerror", "cannot", "read", "property", "undefined"]
+ *
+ * errorKeywords("C++ compilation error in module");
+ * ["c++", "compilation", "error", "module"]
+ * ```
  */
 export const errorKeywords = (reason: string): string[] => {
-  // Step 1 & 2: Normalize and split on non-alphanumeric/+/# characters
-  // We preserve + and # as they are meaningful in error messages (e.g., C++, C#, HTTP 404)
-  // Lower-casing ensures case-insensitive matching
   const keywordTokens = reason
     .toLowerCase()
     .split(/[^a-z0-9+#]+/g)
-    .filter((keyword) => keyword.length >= 3); // Step 3: Remove very short tokens
-
-  // Step 4: Deduplicate and limit to 8 entries
-  // Using Set removes duplicates while preserving insertion order
-  // We limit to 8 tokens to avoid overwhelming the topic system
+    .filter((keyword) => keyword.length >= 3);
   return [...new Set(keywordTokens)].slice(0, 8);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Normalizes an untrusted `confidence` value from the advisor output into
- *   the `PreferenceConfidence` union type expected by the preference store.
+ * Normalizes an untrusted confidence value to the PreferenceConfidence type.
  *
- * How it does it (step by step):
- *   1. Check whether `raw` strictly equals one of the accepted strings
- *      `'high'`, `'medium'`, or `'low'`.
- *   2. If so, return it unchanged (typed to `PreferenceConfidence`).
- *   3. Otherwise, fall back to the safe default `'medium'`.
+ * @remarks
+ * Validates that the input is exactly one of the accepted confidence
+ * strings (`"high"`, `"medium"`, `"low"`). If the value is missing, malformed,
+ * or not one of the three accepted strings, falls back to the safe default
+ * `"medium"`. Used by {@link PatternExtractor} to sanitize subagent output before
+ * storing rules.
  *
- * Parameters:
- *   @param raw - The untrusted value produced by the advisor.
+ * @param raw - The untrusted value produced by the agent.
+ * @returns One of `"high"`, `"medium"`, or `"low"`.
  *
- * Returns:
- *   {PreferenceConfidence} — One of `'high'|'medium'|'low'`.
- * </Summary>
+ * @example
+ * ```ts
+ * parseConfidence("high"); // "high"
+ * parseConfidence("medium"); // "medium"
+ * parseConfidence("low"); // "low"
+ * parseConfidence("invalid"); // "medium" (fallback)
+ * parseConfidence(null); // "medium" (fallback)
+ * ```
  */
 export const parseConfidence = (raw: unknown): PreferenceConfidence => {
-  // Step 1: Accept only the three explicit string values
-  // We use strict equality to ensure type safety - only exact string matches are accepted
-  // This prevents accidental acceptance of similar-looking values
   if (raw === "high" || raw === "medium" || raw === "low") {
     return raw;
   }
-
-  // Step 2: Default to 'medium' for anything else (missing or malformed)
-  // 'medium' is a safe default when we can't determine the intended confidence level
-  // It's neither overly confident nor dismissive of the rule's validity
   return "medium";
 };

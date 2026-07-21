@@ -5,272 +5,256 @@
  * client and server stay aligned without extra aliases.
  */
 
-/**
- * <Summary>
- * What it does:
- *   Identifies one authenticated TCP/RSocket session for routing and cleanup.
- *
- * Used by:
- *   - Router.routeCommand, Router.routeTask — passed to downstream handlers.
- *
- * Produced by:
- *   - RSocketServer — builds a Session after AuthMiddleware.validate succeeds.
- * </Summary>
- */
-export interface Session {
-  /** Resolved user id from token validation (or "anonymous" for empty token). */
-  userId: string
+import type { TaskFrame } from "../transport/frames.js";
+import type {
+  Session,
+  TaskRequest,
+  RouteId,
+  ROUTE_IDS,
+  StreamKind,
+  STREAM_KINDS,
+  CommandHandler,
+  StreamHandler,
+  TaskHandler,
+  RouterDeps,
+} from "./types.js";
+import { isRouteId, isStreamKind } from "./types.js";
 
-  /** Stable id for this RSocket connection used to abort in-flight streams. */
-  requesterId: string
-}
-
-/**
- * <Summary>
- * What it does:
- *   Describes the JSON body of a streamed `kind: "task"` request from the client.
- *
- * Used by:
- *   - Router.routeTask — forwarded to the task handler.
- *
- * Produced by:
- *   - RSocketServer — parses the initial requestStream payload.
- * </Summary>
- */
-export interface TaskRequest {
-  /** User task text. */
-  text: string
-
-  /** Advisor role model name. */
-  advisorModel: string
-
-  /** Agent role model name. */
-  agentModel: string
-
-  /** Advisor sampling temperature. */
-  advisorTemp: number
-
-  /** Agent sampling temperature. */
-  agentTemp: number
-}
+export {
+  Session,
+  TaskRequest,
+  RouteId,
+  ROUTE_IDS,
+  StreamKind,
+  STREAM_KINDS,
+  CommandHandler,
+  StreamHandler,
+  TaskHandler,
+  RouterDeps,
+  isRouteId,
+  isStreamKind,
+};
 
 /**
- * <Summary>
- * What it does:
- *   Command route strings the server recognises for requestResponse traffic.
+ * Pure routing layer that dispatches authenticated commands and streams to injectable handlers.
  *
- * Used by:
- *   - Router.routeCommand — validates incoming `type` fields.
+ * @remarks
+ * The Router sits between the RSocket transport layer (which handles authentication
+ * and connection management) and the domain services (which implement actual business
+ * logic). It holds no mutable state beyond the injected dependencies, making it
+ * stateless and thread-safe.
  *
- * Produced by:
- *   - None (fixed protocol surface).
- * </Summary>
- */
-export type RouteId =
-  | 'models.list'
-  | 'config.get'
-  | 'config.set'
-  | 'skills.sync'
-  | 'memory.get'
-  | 'memory.forget'
-  | 'memory.clear'
-
-/**
- * <Summary>
- * What it does:
- *   Fixed list of all RouteId values for runtime validation.
+ * The Router validates incoming route strings, looks up the appropriate handler,
+ * and delegates execution. It supports both request/response patterns (for commands)
+ * and streaming patterns (for long-running operations like task execution).
  *
- * Used by:
- *   - isRouteId — membership checks.
+ * **Error handling:** The Router throws descriptive errors for unknown routes
+ * or unimplemented handlers, allowing the transport layer to return appropriate
+ * error responses to clients.
  *
- * Produced by:
- *   - None (static list).
- * </Summary>
- */
-export const ROUTE_IDS: readonly RouteId[] = [
-  'models.list',
-  'config.get',
-  'config.set',
-  'skills.sync',
-  'memory.get',
-  'memory.forget',
-  'memory.clear',
-] as const
-
-const ROUTE_ID_SET = new Set<string>(ROUTE_IDS)
-
-/**
- * <Summary>
- * What it does:
- *   Narrows an arbitrary string to RouteId when it matches the known set.
+ * **Extensibility:** New routes can be added by providing additional handlers in
+ * the `RouterDeps` object without modifying the Router class itself.
  *
- * Parameters:
- *   @param {string} value — Raw route string from the client envelope.
+ * @example
+ * ```ts
+ * const deps: RouterDeps = {
+ *   commands: {
+ *     "models.list": async () => ({ models: await ollama.listModels() }),
+ *     "config.get": async () => await config.getAll()
+ *   },
+ *   streams: {
+ *     "task": taskHandler
+ *   }
+ * };
+ * const router = new Router(deps);
  *
- * Returns:
- *   @returns {value is RouteId} — true when value is a supported route.
+ * // Handle a command
+ * const result = await router.routeCommand(session, "models.list", {});
  *
- * Dependencies:
- *   - ROUTE_ID_SET — O(1) lookup table.
- *
- * Dependants:
- *   - Router.routeCommand — rejects unknown routes early.
- * </Summary>
- */
-export const isRouteId = (value: string): value is RouteId => {
-  return ROUTE_ID_SET.has(value)
-}
-
-/**
- * <Summary>
- * What it does:
- *   Async function signature for one command route implementation.
- *
- * Used by:
- *   - RouterDeps.commands — handler map values.
- *
- * Produced by:
- *   - Future collaborator wiring (OllamaClient, ConfigManager, etc.).
- * </Summary>
- */
-export type CommandHandler = (
-  session: Session,
-  payload: unknown,
-) => Promise<unknown>
-
-/**
- * <Summary>
- * What it does:
- *   Async function signature for streaming task execution on the server.
- *
- * Used by:
- *   - RouterDeps.task — optional single task pipeline.
- *
- * Produced by:
- *   - Future AdvisorOrchestrator wiring.
- * </Summary>
- */
-export type TaskHandler = (
-  session: Session,
-  req: TaskRequest,
-  emit: (token: string) => void,
-  signal: AbortSignal,
-) => Promise<void>
-
-/**
- * <Summary>
- * What it does:
- *   Injectable collaborators the Router delegates to without owning state.
- *
- * Used by:
- *   - Router constructor — stores references for dispatch.
- *
- * Produced by:
- *   - Server bootstrap in packages/server/src/index.ts.
- * </Summary>
- */
-export interface RouterDeps {
-  /** Partial map: missing entries throw "Route not implemented yet". */
-  commands?: Partial<Record<RouteId, CommandHandler>>
-
-  /** Optional streaming task handler for AdvisorOrchestrator. */
-  task?: TaskHandler
-}
-
-/**
- * <Summary>
- * What it does:
- *   Pure routing layer that dispatches authenticated commands and tasks to
- *   injectable handlers based on route strings and payload shapes.
- *
- * How it fits in the system:
- *   Sits between RSocketServer (transport + auth) and domain services; holds
- *   no mutable state beyond injected deps.
- *
- * Dependencies:
- *   - RouterDeps — command handler map and optional task handler.
- *
- * Dependants:
- *   - RSocketServer — calls routeCommand and routeTask after auth.
- * </Summary>
+ * // Handle a stream
+ * await router.routeStream(session, "task", payload, emit, signal);
+ * ```
  */
 export class Router {
   /**
-   * @param {RouterDeps} deps — Collaborator references for dispatch.
+   * Creates a new Router instance with the provided dependencies.
+   *
+   * @param deps - Collaborator references for dispatch, including command and stream handlers.
    */
   constructor(private readonly deps: RouterDeps) {}
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Dispatches one JSON command envelope to the correct CommandHandler.
+   * Dispatches a JSON command envelope to the correct CommandHandler.
    *
-   * How it does it (step by step):
-   *   1. Verifies `type` is a known RouteId — throws on unknown strings.
-   *   2. Looks up deps.commands[type] — throws when handler not wired yet.
-   *   3. Awaits the handler(session, payload) and returns its JSON-serialisable result.
+   * @remarks
+   * This method handles request/response patterns where the client expects a
+   * single JSON response. It validates the route string, looks up the appropriate
+   * handler, and returns the handler's result.
    *
-   * Parameters:
-   *   @param {Session} session — Authenticated user + connection id.
-   *   @param {string} type — Route id e.g. "models.list".
-   *   @param {unknown} payload — Parsed JSON payload from the client envelope.
+   * The method performs three steps:
+   * 1. Validates that `type` is a known `RouteId` using `isRouteId`
+   * 2. Looks up the handler in `deps.commands[type]`
+   * 3. Invokes the handler with the session and payload
    *
-   * Returns:
-   *   @returns {Promise<unknown>} — Handler result for the RSocket ok envelope.
+   * If the route is unknown or the handler is not implemented, the method throws
+   * a descriptive error that the transport layer can convert to an appropriate
+   * error response.
    *
-   * @throws {Error} — Unknown route or missing handler wiring.
+   * @param session - Authenticated session containing user ID and connection ID.
+   * @param type - Route identifier (e.g., "models.list", "config.get").
+   * @param payload - Parsed JSON payload from the client envelope. Shape varies by route.
+   * @returns The handler's result, which must be JSON-serializable for the response.
+   * @throws {@link Error} When the route is unknown or the handler is not implemented.
    *
-   * Dependencies:
-   *   - isRouteId — validates the route string.
-   *   - RouterDeps.commands — handler lookup table.
-   *
-   * Dependants:
-   *   - RSocketServer.requestResponse path.
-   * </Summary>
+   * @example
+   * ```ts
+   * try {
+   *   const result = await router.routeCommand(
+   *     session,
+   *     "models.list",
+   *     {}
+   *   );
+   *   console.log(result.models); // [{ name: "gemma3:27b", ... }]
+   * } catch (err) {
+   *   if (err.message.includes("Unknown route")) {
+   *     // Handle client error
+   *   }
+   * }
+   * ```
    */
   routeCommand = async (
     session: Session,
     type: string,
     payload: unknown,
   ): Promise<unknown> => {
+    // Validate the route string before attempting handler lookup
     if (!isRouteId(type)) {
-      throw new Error(`Unknown route: ${type}`)
+      throw new Error(`Unknown route: ${type}`);
     }
-    const handler = this.deps.commands?.[type]
+
+    // Look up the handler - this may be undefined if not implemented
+    const handler = this.deps.commands?.[type];
     if (!handler) {
-      throw new Error(`Route not implemented yet: ${type}`)
+      throw new Error(`Route not implemented yet: ${type}`);
     }
-    return handler(session, payload)
-  }
+
+    // Delegate to the handler and return its result
+    return handler(session, payload);
+  };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Delegates a parsed task request to the configured TaskHandler when present.
+   * Dispatches a stream request to the correct StreamHandler.
    *
-   * How it does it (step by step):
-   *   1. Reads deps.task — throws when undefined.
-   *   2. Awaits deps.task(session, req, emit, signal) for streaming work.
+   * @remarks
+   * This method handles streaming patterns where the client expects multiple
+   * incremental responses over time. It validates the stream kind, looks up the
+   * appropriate handler, and provides it with an `emit` callback for sending
+   * frames to the client.
    *
-   * Parameters:
-   *   @param {Session} session — Authenticated user + connection id.
-   *   @param {TaskRequest} req — Parsed task JSON from the client.
-   *   @param {(token: string) => void} emit — Callback for one streamed text chunk.
-   *   @param {AbortSignal} signal — Aborts when the client disconnects or cancels.
+   * The method performs three steps:
+   * 1. Validates that `kind` is a known `StreamKind` using `isStreamKind`
+   * 2. Looks up the handler in `deps.streams[kind]`
+   * 3. Invokes the handler with session, payload, emit callback, and abort signal
    *
-   * Returns:
-   *   @returns {Promise<void>} — Resolves when the task handler finishes.
+   * The `emit` callback allows handlers to send incremental updates to the client.
+   * The `signal` parameter becomes signaled when the client disconnects, allowing
+   * handlers to abort work promptly and avoid resource leaks.
    *
-   * @throws {Error} — When no task handler is configured.
+   * @param session - Authenticated session containing user ID and connection ID.
+   * @param kind - Stream kind identifier (e.g., "task", "models.pull", "explore").
+   * @param payload - Parsed JSON payload from the client envelope. Shape varies by stream kind.
+   * @param emit - Callback for sending individual frames to the client over the stream.
+   * @param signal - AbortSignal that becomes signaled when the client disconnects.
+   * @returns A promise that resolves when the stream handler completes normally.
+   * @throws {@link Error} When the stream kind is unknown or the handler is not implemented.
    *
-   * Dependencies:
-   *   - RouterDeps.task — optional AdvisorOrchestrator entry point.
+   * @example
+   * ```ts
+   * try {
+   *   await router.routeStream(
+   *     session,
+   *     "task",
+   *     { text: "Add authentication" },
+   *     (frame) => console.log("Sending:", frame),
+   *     abortSignal
+   *   );
+   * } catch (err) {
+   *   if (err.message.includes("Unknown stream kind")) {
+   *     // Handle client error
+   *   }
+   * }
+   * ```
+   */
+  routeStream = async (
+    session: Session,
+    kind: string,
+    payload: unknown,
+    emit: (frame: TaskFrame) => void,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    // Validate the stream kind before attempting handler lookup
+    if (!isStreamKind(kind)) {
+      throw new Error(`Unknown stream kind: ${kind}`);
+    }
+
+    // Look up the handler - this may be undefined if not implemented
+    const handler = this.deps.streams?.[kind];
+    if (!handler) {
+      throw new Error(`Stream handler not implemented yet: ${kind}`);
+    }
+
+    // Delegate to the handler with streaming callbacks
+    return handler(session, payload, emit, signal);
+  };
+
+  /**
+   * Delegates a parsed task request to the configured TaskHandler.
    *
-   * Dependants:
-   *   - RSocketServer.requestStream path.
-   * </Summary>
+   * @remarks
+   * This method is a specialized entry point for task execution streams.
+   * Unlike `routeStream`, which handles general streaming operations, this
+   * method is specifically designed for the task execution workflow.
+   *
+   * The method validates that a task handler is configured and then delegates
+   * to it. The task handler is responsible for coordinating with the
+   * AgentOrchestrator to plan and execute the task, streaming results back
+   * through the `emit` callback.
+   *
+   * This method exists because task execution has special requirements:
+   - It uses a specific payload format (`TaskRequest`)
+   - It emits raw text tokens rather than structured frames
+   - It requires tight integration with the orchestrator
+   *
+   * @param session - Authenticated session containing user ID and connection ID.
+   * @param req - Parsed task request containing text, models, and temperature settings.
+   * @param emit - Callback for sending individual text tokens to the client.
+   * @param signal - AbortSignal that becomes signaled when the client disconnects.
+   * @returns A promise that resolves when task execution completes.
+   * @throws {@link Error} When no task handler is configured in the dependencies.
+   *
+   * @example
+   * ```ts
+   * const taskRequest: TaskRequest = {
+   *   text: "Add authentication to the API",
+   *   subagentModel: "gemma3:27b",
+   *   subsubagentModel: "gemma3:9b",
+   *   agentTemp: 0.7,
+   *   subagentTemp: 0.5
+   * };
+   *
+   * try {
+   *   await router.routeTask(
+   *     session,
+   *     taskRequest,
+   *     (token) => process.stdout.write(token),
+   *     abortSignal
+   *   );
+   * } catch (err) {
+   *   if (err.message.includes("not configured")) {
+   *     // Task execution not available in this configuration
+   *   }
+   * }
+   * ```
    */
   routeTask = async (
     session: Session,
@@ -278,10 +262,13 @@ export class Router {
     emit: (token: string) => void,
     signal: AbortSignal,
   ): Promise<void> => {
-    const task = this.deps.task
+    // Check if a task handler is configured
+    const task = this.deps.task;
     if (!task) {
-      throw new Error('Task handler not configured')
+      throw new Error("Task handler not configured");
     }
-    await task(session, req, emit, signal)
-  }
+
+    // Delegate to the task handler for execution
+    await task(session, req, emit, signal);
+  };
 }

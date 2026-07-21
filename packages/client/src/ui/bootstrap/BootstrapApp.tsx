@@ -208,27 +208,8 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
         return;
       }
 
+      // Skills are synced manually via /skills sync — no automatic sync on connect.
       const skillManager = new SkillManager(rsocketConnection);
-
-      // Skill sync is best-effort — a failure should not block the main UI.
-      // Users can still interact with the server even if skills fail to sync,
-      // and they can retry manually with /skills sync.
-      try {
-        const syncedSkillCount = await skillManager.autoSync();
-        if (syncedSkillCount > 0) {
-          sessionInitializationMessages.push(
-            `Synced ${syncedSkillCount} skill(s) to server.`,
-          );
-        }
-      } catch (skillSyncError) {
-        sessionInitializationMessages.push(
-          `Skill sync failed: ${
-            skillSyncError instanceof Error
-              ? skillSyncError.message
-              : String(skillSyncError)
-          }`,
-        );
-      }
 
       try {
         const syncedToolCount = await syncTokenSaveTools(
@@ -253,7 +234,7 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
       }
 
       // Inform the user if a server session already exists; ignore RPC errors.
-      // This is advisory only — startup continues without the hint if the RPC fails.
+      // This is agenty only — startup continues without the hint if the RPC fails.
       // The hint helps users avoid confusing state where two clients share one session.
       try {
         const sessionExists = await rsocketConnection.sendCommand<boolean>(

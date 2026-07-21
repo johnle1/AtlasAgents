@@ -6,10 +6,10 @@
  * It handles three types of input:
  *
  * 1. **Slash commands** (e.g., `/help`, `/exit`, `/set`) - Executed locally via CommandHandler
- * 2. **Raw tasks** (e.g., "write a hello world function") - Sent to the server for agent execution
+ * 2. **Raw tasks** (e.g., "write a hello world function") - Sent to the server for subagent execution
  * 3. **Empty input** - Ignored
  *
- * Before executing a raw task, the hook validates that the advisor and agent models
+ * Before executing a raw task, the hook validates that the agent and subsubagent models
  * are configured. If not, it shows an error message instead of attempting to connect.
  *
  * The hook includes a submission lock to prevent double-execution from rapid Enter presses,
@@ -111,19 +111,19 @@ export const useSubmitLine = ({
           // Without these models configured, the server cannot execute the task, so we
           // fail fast with a helpful error message instead of attempting to connect.
           if (
-            !(taskConfiguration.advisorModel ?? "").trim() ||
-            !(taskConfiguration.agentModel ?? "").trim()
+            !(taskConfiguration.subagentModel ?? "").trim() ||
+            !(taskConfiguration.subsubagentModel ?? "").trim()
           ) {
             setHistory((previousHistory) => [
               ...previousHistory,
               {
                 kind: "text",
-                text: "Advisor and agent models must be set. Use /set advisor and /set agent.",
+                text: "Agent and subsubsubagent models must be set. Use /set agent and /set subagent.",
                 variant: "error",
               },
             ]);
           } else {
-            // Models are configured, so send the task to the server for agent execution.
+            // Models are configured, so send the task to the server for subagent execution.
             // runTaskStream handles the full workflow: sending the task, streaming
             // the response, and updating the UI with progress and results.
             await runTaskStream(connection, trimmedInputLine);

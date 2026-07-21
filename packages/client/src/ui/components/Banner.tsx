@@ -65,20 +65,20 @@ const BorderedBlank: React.FC<{ border: (s: string) => React.ReactNode }> = ({
  * import React from "react";
  * import { render } from "ink";
  * import { Banner } from "./Banner.js";
- * 
- * render(<Banner version="1.0.0" advisorModel="gpt-4o" agentModel="gpt-4o-mini" />);
+ *
+ * render(<Banner version="1.0.0" subagentModel="gpt-4o" subagentModel="gpt-4o-mini" />);
  * ```
  */
 export const Banner: React.FC<BannerProps> = ({
-  advisorModel,
   agentModel,
+  subagentModel,
   version,
 }) => {
-  // Clean up advisor model name, falling back to a "not set" placeholder if empty.
-  const advisor = advisorModel.trim() || "not set";
+  // Clean up subagent model name, falling back to a "not set" placeholder if empty.
+  const agent = agentModel.trim() || "not set";
 
-  // Clean up agent model name, falling back to a "not set" placeholder if empty.
-  const agent = (agentModel ?? "").trim() || "not set";
+  // Clean up subsubagent model name, falling back to a "not set" placeholder if empty.
+  const subagent = (subagentModel ?? "").trim() || "not set";
 
   // Compute borders based on the static banner inner width configuration.
   const title = ` LoopyCode CLI v${version} `;
@@ -131,21 +131,21 @@ export const Banner: React.FC<BannerProps> = ({
       {/* Spacer dividing logo and telemetry specs */}
       <BorderedBlank border={border} />
 
-      {/* Active Advisor model information row */}
-      <Text>
-        {border("│")}
-        {"  Advisor: "}
-        <Text color="cyan">{advisor}</Text>
-        {" ".repeat(Math.max(0, BANNER_INNER - `  Advisor: ${advisor}`.length))}
-        {border("│")}
-      </Text>
-
-      {/* Active Sub-agent model information row */}
+      {/* Active Agent model information row */}
       <Text>
         {border("│")}
         {"  Agent: "}
         <Text color="cyan">{agent}</Text>
         {" ".repeat(Math.max(0, BANNER_INNER - `  Agent: ${agent}`.length))}
+        {border("│")}
+      </Text>
+
+      {/* Active Subsubagent model information row */}
+      <Text>
+        {border("│")}
+        {"  Subagent: "}
+        <Text color="cyan">{subagent}</Text>
+        {" ".repeat(Math.max(0, BANNER_INNER - `  Subagent: ${subagent}`.length))}
         {border("│")}
       </Text>
 

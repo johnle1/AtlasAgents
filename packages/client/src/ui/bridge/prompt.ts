@@ -12,6 +12,20 @@ import { getInkUIActive, getBridgeHooks } from "./state.js";
 import { getPendingPromptEntry, setPendingPromptEntry } from "./state.js";
 
 /**
+ * Fallback result for a prompt type when no user is available to answer it
+ * (Ink UI inactive, or a pending prompt is being force-cancelled).
+ *
+ * @param promptType - The `type` field of the {@link PromptRequest}.
+ * @returns The default {@link PromptResult} for that type.
+ */
+const defaultPromptResult = (promptType: PromptRequest["type"]): PromptResult => {
+  if (promptType === "choice") return 0;
+  if (promptType === "planFeedback") return "";
+  if (promptType === "theme") return undefined;
+  return "";
+};
+
+/**
  * Retrieves the currently pending prompt request from the state registry.
  *
  * @returns The pending prompt request details, or `null` if no prompt is active.
@@ -35,12 +49,7 @@ export const requestPrompt = (
 ): Promise<PromptResult> => {
   const isUIActive = getInkUIActive();
   if (!isUIActive) {
-    if (promptRequest.type === "choice") return Promise.resolve(0);
-    if (promptRequest.type === "planEdit") {
-      return Promise.resolve(promptRequest.initial);
-    }
-    if (promptRequest.type === "theme") return Promise.resolve(undefined);
-    return Promise.resolve("");
+    return Promise.resolve(defaultPromptResult(promptRequest.type));
   }
 
   const existingPendingPrompt = getPendingPromptEntry();
@@ -85,15 +94,7 @@ export const cancelPendingPrompts = (): void => {
   setPendingPromptEntry(null);
   getBridgeHooks().onPromptChange?.(null);
 
-  const { req } = currentPendingPrompt;
-  const promptResult: PromptResult =
-    req.type === "choice"
-      ? 0
-      : req.type === "planEdit"
-        ? req.initial
-        : req.type === "theme"
-          ? undefined
-          : "";
+  const promptResult = defaultPromptResult(currentPendingPrompt.req.type);
   currentPendingPrompt.resolve(promptResult);
 };
 

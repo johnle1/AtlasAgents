@@ -13,6 +13,7 @@ import { renderDiffFromChunks } from "../diff/diffRenderer.js";
 import { formatDisplayPath } from "../pathDisplay.js";
 import { getTheme } from "../theme/themeManager.js";
 import { appendBlock, appendDiff } from "./sink.js";
+import type { DirEntry } from "./types.js";
 
 /**
  * Glyphs that prefix operation lines in scrollback.
@@ -115,6 +116,46 @@ export const printTokenSaveOp = (label: string, target: string): void => {
   appendBlock([operationLineDim(OPERATION_ICONS.search, label, target)]);
 };
 
+/** Cap on how many result lines print before truncating, same as printBashRan's stdout cap. */
+const MAX_TOKENSAVE_RESULT_LINES = 8;
+
+/**
+ * Prints the real result body a TokenSave search/lookup call found, indented
+ * beneath its query line from {@link printTokenSaveOp}.
+ *
+ * @remarks
+ * Shows whatever the tool actually returned (file paths, symbol locations,
+ * etc.) — there is no fixed schema, so this just echoes the tool's raw text
+ * output the way {@link printBashRan} echoes command stdout. A blank/empty
+ * result prints nothing.
+ *
+ * @param resultText - Raw text content returned by the TokenSave tool call.
+ *
+ * @example
+ * ```ts
+ * printTokenSaveResult("src/auth/login.ts:42\nsrc/auth/session.ts:18");
+ * ```
+ */
+export const printTokenSaveResult = (resultText: string): void => {
+  const trimmed = resultText.trim();
+  if (trimmed.length === 0) {
+    return;
+  }
+
+  const theme = getTheme();
+  const resultLines = trimmed.split("\n");
+  const shown = resultLines.slice(0, MAX_TOKENSAVE_RESULT_LINES);
+  const omittedCount = resultLines.length - shown.length;
+
+  const indentedLines = shown.map((line) => `    ${line}`).join("\n");
+  const truncationNote =
+    omittedCount > 0 ? `\n    … (${omittedCount} more line(s))` : "";
+
+  appendBlock([
+    `${theme.textSecondary}${indentedLines}${truncationNote}${theme.reset}`,
+  ]);
+};
+
 /**
  * Prints an upcoming file write as a syntax-highlighted diff for approval.
  *
@@ -199,23 +240,6 @@ export const printDelete = (path: string): void => {
  */
 export const printCd = (path: string): void => {
   appendBlock([operationLineDim(OPERATION_ICONS.cd, "cd", path)]);
-};
-
-/**
- * One row in an interactive directory expand listing.
- */
-export type DirEntry = {
-  /** Basename of the file or directory. */
-  name: string;
-
-  /** `true` when this entry is a directory (gets expand hint). */
-  isDirectory: boolean;
-
-  /**
-   * When `true`, show an error `!` icon instead of the normal glyph
-   * (unreadable entry).
-   */
-  noRead?: boolean;
 };
 
 /**

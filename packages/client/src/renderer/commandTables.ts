@@ -11,6 +11,7 @@ import type { MemoryEntry } from "../connection/index.js";
 import { getTheme } from "../theme/themeManager.js";
 import { THEMES } from "../theme/themes.js";
 import { appendStyledLines } from "./sink.js";
+import type { ModelGroup, FlatModelEntry } from "./types.js";
 
 /**
  * Masks a secret for config display (password / tokens).
@@ -66,9 +67,9 @@ export const buildConfigLines = (config: Config): string[] => {
     `  ${theme.textAccent}server${theme.reset}         ${config.server}`,
     `  ${theme.textAccent}port${theme.reset}           ${config.port}`,
     `  ${theme.textAccent}password${theme.reset}       ${formatSecretDisplay(config.password)}`,
-    `  ${theme.textAccent}advisor model${theme.reset}  ${config.advisorModel || theme.textSecondary + "(not set)" + theme.reset}`,
-    `  ${theme.textAccent}agent model${theme.reset}    ${config.agentModel || theme.textSecondary + "(not set)" + theme.reset}`,
-    `  ${theme.textAccent}agent cap${theme.reset}      ${config.agentCap} (/agent cap, ::max for no cap)`,
+    `  ${theme.textAccent}agent model${theme.reset}      ${config.subagentModel || theme.textSecondary + "(not set)" + theme.reset}`,
+    `  ${theme.textAccent}subagent model${theme.reset}   ${config.subsubagentModel || theme.textSecondary + "(not set)" + theme.reset}`,
+    `  ${theme.textAccent}subagent cap${theme.reset}    ${config.subagentCap} (/subagent cap, ::max for no cap)`,
     `  ${theme.textAccent}ui.theme${theme.reset}       ${resolvedThemeName} (${config.ui.theme})`,
     `  ${theme.textAccent}show think${theme.reset}     ${config.showThinkOutput ? "on" : "off"} (/think on|off)`,
     `  ${theme.textAccent}show spinner${theme.reset}   ${spinnerState}`,
@@ -76,10 +77,10 @@ export const buildConfigLines = (config: Config): string[] => {
 };
 
 /**
- * Builds a 1-based numbered model list for advisor/agent picking.
+ * Builds a 1-based numbered model list for agent/subagent picking.
  *
  * @param models - Model name strings from the server.
- * @param label - Role label in the header (`"advisor"` / `"agent"`).
+ * @param label - Role label in the header (`"agent"` / `"subagent"`).
  * @returns Styled lines including trailing blank.
  */
 const buildModelsLines = (models: string[], label: string): string[] => {
@@ -98,6 +99,65 @@ const buildModelsLines = (models: string[], label: string): string[] => {
 
   modelLines.push("");
   return modelLines;
+};
+
+/**
+ * Builds a provider-grouped, continuously-numbered model list for agent/subagent
+ * picking, plus the flat entries the picker maps a chosen number back onto.
+ *
+ * @remarks
+ * Numbering runs continuously across groups (1..N) so the existing numbered
+ * {@link appendStyledLines} / choice prompt keeps working unchanged — only the
+ * list layout is new. Groups with zero models (including provider errors) are
+ * skipped so unreachable providers don't clutter the list; their `error` (if
+ * any) is not otherwise surfaced here.
+ *
+ * @param groups - Per-provider model lists from `providers.listModels`.
+ * @param label - Role label in the header (`"agent"` / `"subagent"`).
+ * @returns Styled lines plus the flat (provider, model) list indexed 0..N-1.
+ */
+export const buildGroupedModelsLines = (
+  groups: ModelGroup[],
+  label: string,
+): { lines: string[]; entries: FlatModelEntry[] } => {
+  const theme = getTheme();
+  const lines = [
+    `${theme.textBold}  Available models for ${label}:${theme.reset}`,
+    "",
+  ];
+  const entries: FlatModelEntry[] = [];
+
+  for (const group of groups) {
+    if (group.models.length === 0) continue;
+
+    lines.push(`  ${theme.textAccent}${group.provider}${theme.reset}`);
+    for (const model of group.models) {
+      entries.push({ provider: group.provider, model });
+      lines.push(
+        `  ${theme.warning}${String(entries.length).padStart(3)}${theme.reset}  ${model}`,
+      );
+    }
+  }
+
+  lines.push("");
+  return { lines, entries };
+};
+
+/**
+ * Prints a provider-grouped numbered model picker list for `/set agent|subagent`.
+ *
+ * @param groups - Per-provider model lists from `providers.listModels`.
+ * @param label - Role label in the header.
+ * @returns Flat (provider, model) entries in display order, for mapping a
+ *   chosen number back to a selection.
+ */
+export const printGroupedModels = (
+  groups: ModelGroup[],
+  label: string,
+): FlatModelEntry[] => {
+  const { lines, entries } = buildGroupedModelsLines(groups, label);
+  appendStyledLines(lines, { leadingBlank: true, trailingBlank: true });
+  return entries;
 };
 
 /**
@@ -127,6 +187,76 @@ const buildSkillsLines = (names: string[]): string[] => {
 
   skillLines.push("");
   return skillLines;
+};
+
+/**
+ * Builds themed lines listing configured providers and which role (if any)
+ * each one currently serves.
+ *
+ * @param providers - Provider map from `providers.list` (name → connection info).
+ * @param agentProvider - Provider name currently serving the agent role.
+ * @param subagentProvider - Provider name currently serving the subagent role.
+ * @returns Styled lines (empty-state when no providers configured).
+ */
+const buildProvidersLines = (
+  providers: Record<string, { baseUrl?: string }>,
+  agentProvider: string,
+  subagentProvider: string,
+): string[] => {
+  const theme = getTheme();
+  const names = Object.keys(providers);
+
+  if (names.length === 0) {
+    return [
+      `${theme.textSecondary}  No providers configured.${theme.reset}`,
+      "",
+    ];
+  }
+
+  const lines = [`${theme.textBold}  Providers:${theme.reset}`, ""];
+
+  for (const name of names) {
+    const roles = [
+      name === agentProvider ? "agent" : null,
+      name === subagentProvider ? "subagent" : null,
+    ]
+      .filter((role): role is string => role !== null)
+      .join(", ");
+
+    const baseUrl = providers[name]?.baseUrl;
+    const baseUrlSuffix = baseUrl
+      ? ` ${theme.textSecondary}(${baseUrl})${theme.reset}`
+      : "";
+    const roleSuffix = roles
+      ? ` ${theme.textAccent}[${roles}]${theme.reset}`
+      : "";
+
+    lines.push(
+      `  ${theme.textAccent}•${theme.reset} ${name}${baseUrlSuffix}${roleSuffix}`,
+    );
+  }
+
+  lines.push("");
+  return lines;
+};
+
+/**
+ * Prints configured providers and their current agent/subagent assignment
+ * for `/providers list`.
+ *
+ * @param providers - Provider map from `providers.list`.
+ * @param agentProvider - Provider name currently serving the agent role.
+ * @param subagentProvider - Provider name currently serving the subagent role.
+ */
+export const printProviders = (
+  providers: Record<string, { baseUrl?: string }>,
+  agentProvider: string,
+  subagentProvider: string,
+): void => {
+  appendStyledLines(
+    buildProvidersLines(providers, agentProvider, subagentProvider),
+    { leadingBlank: true, trailingBlank: true },
+  );
 };
 
 /**
@@ -173,7 +303,7 @@ export const printConfig = (config: Config): void => {
 };
 
 /**
- * Prints a numbered model picker list for `/set advisor|agent`.
+ * Prints a numbered model picker list for `/set agent|subagent`.
  *
  * @param models - Available model names.
  * @param label - Role label in the header.

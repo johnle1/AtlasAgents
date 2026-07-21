@@ -8,8 +8,8 @@
  *
  * **Main types:**
  * - `TaskFrame` — Individual frames in the task execution stream
- * - `AgentBoardSnapshot` — Current state of agent boards
- * - `AgentPlan` — Plan information from the advisor
+ * - `SubagentBoardSnapshot` — Current state of agent boards
+ * - `SubagentPlan` — Plan information from the agent
  * - `PullProgress` — Progress updates for model pulling
  * - Other shared types for agent status and lifecycle
  *
@@ -74,12 +74,12 @@ export type InstalledModel = {
 
 // Re-export shared types from @loopycode/shared for use in the client
 export type {
-  AgentBoardSnapshot,
-  AgentPlan,
+  SubagentBoardSnapshot,
+  SubagentPlan,
+  SubagentStage,
+  SubagentStatusSource,
+  SubagentTaskSnapshot,
   AgentStage,
-  AgentStatusSource,
-  AgentTaskSnapshot,
-  AdvisorStage,
   PlanExecution,
   PullProgress,
   QueuedTaskSnapshot,

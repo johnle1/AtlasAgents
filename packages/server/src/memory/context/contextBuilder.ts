@@ -1,23 +1,40 @@
 /**
- * <Summary>
- * What it does:
- *   Builds a bounded plain-English memory header from preference rules and
- *   markdown pattern files for injection ahead of advisor system prompts.
+ * Builds bounded memory headers from preferences and patterns for LLM context.
  *
- * How it fits in the system:
- *   Implements IContextBuilder for AdvisorOrchestrator.runTask.
- *   Constructs context-aware memory headers that provide relevant project
- *   information, user preferences, and known fixes to improve agent performance.
- *   Uses token budgeting to ensure headers fit within model context windows.
- * </Summary>
+ * @remarks
+ * Implements the {@link IContextBuilder} interface used by {@link SubagentOrchestrator.runTask}.
+ * Constructs intelligent context headers that inject relevant user preferences,
+ * project patterns, and task-specific fixes into LLM prompts.
+ *
+ * **Header Structure:**
+ * 1. **[Prior session]** — Codebase snapshot and recent task summaries
+ * 2. **[User preferences]** — Rules matched to current task keywords
+ * 3. **[Known fixes]** — Task-type-specific fixes and workarounds
+ * 4. **[Project context]** — Markdown patterns with smart truncation
+ *
+ * **Token Budgeting:**
+ * - Reserves 20% of model context window for memory header
+ * - Greedily fills budget: preferences first, then fixes, then patterns
+ * - Smart truncation for large patterns (removes 16 chars at a time)
+ * - Caches model context windows to avoid repeated Ollama queries
+ *
+ * @example
+ * ```ts
+ * const builder = new ContextBuilder({
+ *   prefs: preferenceStore,
+ *   ollama: ollamaClient,
+ *   config: configManager,
+ *   session: sessionManager
+ * });
+ *
+ * const header = await builder.build("Refactor login component in React");
+ * // Returns formatted string with user preferences, fixes, and patterns
+ * ```
  */
 
 // ===== FILESYSTEM IMPORTS =====
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-
-// ===== OLLAMA TYPE IMPORTS =====
-import type { ModelInfo } from "../../ollama/types.js";
 
 // ===== ORCHESTRATION INTERFACE IMPORTS =====
 import type {
@@ -26,17 +43,14 @@ import type {
   IOllamaAdminClient,
   IPreferenceStore,
   ISessionManager,
-  LanguageHint,
-  PreferenceRule,
 } from "../../orchestration/interfaces.js";
+
+// ===== TYPE IMPORTS =====
+import type { PatternFile } from "../types.js";
 
 // ===== CONTEXT BUILDING IMPORTS =====
 import { loadLanguageHints } from "./languageHints.js";
-import {
-  DEFAULT_CONTEXT_WINDOW,
-  HIGHLIGHT_WORDS,
-  TASK_TYPE_WORDS,
-} from "./contextConstants.js";
+import { DEFAULT_CONTEXT_WINDOW, TASK_TYPE_WORDS } from "./contextConstants.js";
 import {
   approxTokens,
   extractKeywords,
@@ -44,29 +58,6 @@ import {
   sortRules,
 } from "./contextHelpers.js";
 
-// ===== LOCAL TYPE DEFINITIONS =====
-/**
- * Represents a markdown pattern file loaded from the patterns directory.
- * Contains the filename and the file content for inclusion in context headers.
- */
-type PatternFile = { name: string; body: string };
-
-/**
- * <Summary>
- * What it does:
- *   Builds context-aware memory headers for LLM prompts using preference rules,
- *   project patterns, and session history within token budget constraints.
- *
- * How it fits in the system:
- *   Implements IContextBuilder interface for the orchestration layer. Provides
- *   intelligent context construction that:
- *   - Extracts relevant preferences based on task keywords
- *   - Includes project-specific patterns from markdown files
- *   - Respects model context window limits with smart token budgeting
- *   - Caches model context windows to avoid repeated API calls
- *   - Supports model-specific context optimization
- * </Summary>
- */
 export class ContextBuilder implements IContextBuilder {
   /**
    * Preference store for retrieving user rules and preferences.
@@ -81,8 +72,8 @@ export class ContextBuilder implements IContextBuilder {
   private readonly ollamaClient: IOllamaAdminClient;
 
   /**
-   * Configuration manager for accessing advisor model settings.
-   * Provides the active advisor model and configuration parameters.
+   * Configuration manager for accessing subsubagent model settings.
+   * Provides the active subsubagent model and configuration parameters.
    */
   private readonly configManager: IConfigManager;
 
@@ -113,21 +104,14 @@ export class ContextBuilder implements IContextBuilder {
   private readonly contextWindowCache = new Map<string, number>();
 
   /**
-   * <Summary>
-   * What it does:
-   *   Initializes ContextBuilder with required service dependencies.
+   * Initializes the context builder with required service dependencies.
    *
-   * How it does it (step by step):
-   *   1. Extract dependencies from the deps object.
-   *   2. Store preference store for rule retrieval.
-   *   3. Store Ollama client for model metadata queries.
-   *   4. Store config manager for advisor model access.
-   *   5. Set root directory with fallback to current working directory.
-   *   6. Store optional session manager for session history.
-   *
-   * Parameters:
-   *   @param dependencies - Collaborators for rules, model metadata, and active advisor model.
-   * </Summary>
+   * @param dependencies - Services for rules, model metadata, and configuration
+   * @param dependencies.prefs - Preference store for user rules
+   * @param dependencies.ollama - Ollama client for model metadata
+   * @param dependencies.config - Configuration manager for model settings
+   * @param dependencies.rootDir - Optional root directory (defaults to cwd)
+   * @param dependencies.session - Optional session manager for context history
    */
   constructor(
     readonly dependencies: {
@@ -138,101 +122,50 @@ export class ContextBuilder implements IContextBuilder {
       session?: ISessionManager;
     },
   ) {
-    // Step 1: Extract and store preference store
     this.preferenceStore = dependencies.prefs;
-
-    // Step 2: Extract and store Ollama client
     this.ollamaClient = dependencies.ollama;
-
-    // Step 3: Extract and store config manager
     this.configManager = dependencies.config;
-
-    // Step 4: Set root directory with fallback to current working directory
     this.rootDirectory = dependencies.rootDir ?? process.cwd();
-
-    // Step 5: Store optional session manager
     this.sessionManager = dependencies.session;
   }
 
   /**
-   * <Summary>
-   * What it does:
-   *   Invalidates cached context window sizes so the next build() re-queries Ollama.
+   * Invalidates cached context window sizes.
    *
-   * How it does it (step by step):
-   *   1. Check if model parameter is provided or omitted (clear mode).
-   *   2a. If model is omitted (undefined), clear the entire cache map.
-   *   2b. If model is provided, delete only that specific model's cached entry.
+   * @param modelTag - Optional model tag to invalidate. Omit to clear entire cache.
    *
-   * Parameters:
-   *   @param {string} [modelTag] — Optional Ollama model tag to invalidate; omit to clear all.
+   * @remarks
+   * When called without argument, clears all cached context windows so the next
+   * `build()` call re-queries Ollama for all models. Useful after switching subsubagent models.
    *
-   * Returns:
-   *   void — mutates internal contextWindowCache map only.
-   *
-   * Example Scenarios:
-   *   - clearContextWindowCache() → clears all cached windows (e.g., after /set advisor)
-   *   - clearContextWindowCache("llama2") → removes only llama2's entry; others remain cached
-   *   - Useful when model context changes or advisor model switches
-   * </Summary>
+   * When called with a model tag, only that model's cache entry is removed,
+   * allowing selective invalidation if model context changes.
    */
   clearContextWindowCache = (modelTag?: string): void => {
-    // Step 1: Check if model parameter is provided
-    // If modelTag is undefined, we're in "clear all" mode
     if (modelTag === undefined) {
-      // Step 2a: Clear entire cache when no specific model provided
-      // this.contextWindowCache.clear() removes all cached entries
-      // Next call to getContextWindow will re-query Ollama for any model
-      // Example: After switching advisor models, clears stale cached values
       this.contextWindowCache.clear();
       return;
     }
-
-    // Step 2b: Delete only the specified model's cached entry
-    // When modelTag is provided, selectively remove just that model's window
-    // Other models' cached values remain available
-    // Example: If llama2 context changed, clear just its cache entry
     this.contextWindowCache.delete(modelTag);
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Returns the advisor model's context window in tokens with caching to avoid repeated Ollama queries.
+   * Gets the model's context window size with caching.
    *
-   * How it does it (step by step):
-   *   1. Check if the model's context window is already cached locally.
-   *   2. If cached, return the stored value immediately (fast path).
-   *   3. If not cached, query Ollama API via /api/show endpoint for model metadata.
-   *   4. Extract context window tokens from the response using resolveContextLength.
-   *   5. Store the extracted window size in cache for future calls.
-   *   6. Return the resolved context window to caller.
+   * @param modelTag - Ollama model tag (e.g., "llama2", "gemma3:27b")
+   * @returns Context window size in tokens (always positive)
    *
-   * Parameters:
-   *   @param modelTag - Ollama model tag (e.g., "llama2", "neural-chat") from IConfigManager.getAdvisorModel.
-   *
-   * Returns:
-   *   @returns Context length in tokens (always positive).
-   *
-   * Performance Note:
-   *   - First call: async (queries Ollama), ~100-500ms depending on network
-   *   - Subsequent calls: sync cached lookup, microseconds
-   *   - Cache invalidated by clearContextWindowCache() when needed
-   * </Summary>
+   * @remarks
+   * First call queries Ollama (~100-500ms), subsequent calls use cached value (microseconds).
+   * Caching prevents expensive repeated queries for the same model.
+   * Falls back to DEFAULT_CONTEXT_WINDOW if query fails or metadata incomplete.
+   * Cache can be invalidated via `clearContextWindowCache()`.
    */
   private getContextWindow = async (modelTag: string): Promise<number> => {
-    // Step 1: Check if the model's context window is already cached locally
-    // contextWindowCache is a Map<string, number> storing model → window entries
-    // Fast lookup prevents unnecessary Ollama queries for same model
     if (this.contextWindowCache.has(modelTag)) {
-      // Step 2: If cached, return the stored value immediately (fast path)
-      // Non-null assertion (!) is safe because we just checked .has()
-      // Example: getContextWindow("llama2") when llama2:8192 already cached → return 8192 instantly
       return this.contextWindowCache.get(modelTag)!;
     }
 
-    // Step 3: If not cached, query Ollama API for model metadata
     let ollamaModelMetadata;
     try {
       ollamaModelMetadata = await this.ollamaClient.showModel(modelTag);
@@ -241,49 +174,29 @@ export class ContextBuilder implements IContextBuilder {
       return DEFAULT_CONTEXT_WINDOW;
     }
 
-    // Step 4: Extract context window tokens from the response
-    // resolveContextLength implements fallback chain (top-level → nested → 128k default)
-    // Always returns a positive number; never throws
-    // Example: resolveContextLength({ context_length: 4096 }) → 4096
     const resolvedContextWindow = resolveContextLength(ollamaModelMetadata);
-
-    // Step 5: Store the extracted window size in cache for future calls
-    // contextWindowCache.set(modelTag, window) avoids re-querying for this model
-    // Subsequent calls will hit the fast path (Step 2)
-    // Example: cache now contains { "llama2": 4096 }
     this.contextWindowCache.set(modelTag, resolvedContextWindow);
-
-    // Step 6: Return the resolved context window to caller
-    // ContextBuilder.build() uses this to calculate token budget
-    // Example: ContextBuilder.build() → gets 4096 tokens total → 20% = 819 token budget
     return resolvedContextWindow;
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Loads rules and pattern markdown, filters by task keywords, sorts, budgets
-   *   estimated tokens, and returns a three-section English header string.
+   * Builds a context header from preferences, fixes, and patterns.
    *
-   * How it does it (step by step):
-   *   1. Determine token budget as 20% of active advisor model's context window.
-   *   2. Load all data: preference rules, pattern files, language hints.
-   *   3. Extract keywords (language and task-type aware) from task text.
-   *   4. Identify relevant rules: task-matched rules, or universal fallback.
-   *   5. Identify task-type-specific fix rules.
-   *   6. Sort all rule candidates by usage frequency then creation date.
-   *   7. Greedily fill token budget: add preference rules first (with tracking).
-   *   8. Add fix rules second (skip already-used rules).
-   *   9. Add project pattern files third (with smart truncation if needed).
-   *   10. Format three sections: [User preferences], [Known fixes], [Project context].
-   *   11. Return formatted header or empty string if nothing fits.
+   * @param taskText - Original user task description
+   * @param subagentModelOverride - Optional model override (default: configured subsubagent model)
+   * @returns Header text with preferences, fixes, and patterns; empty string if nothing fits
    *
-   * Parameters:
-   *   @param taskText - Original user task string.
+   * @remarks
+   * Constructs a bounded memory header by:
+   * 1. Reserving 20% of model context window for the header
+   * 2. Loading preferences, patterns, and language hints
+   * 3. Extracting task keywords (language and task-type aware)
+   * 4. Matching relevant rules and fixes by keywords
+   * 5. Greedily filling token budget: preferences → fixes → patterns
+   * 6. Formatting four sections: [Prior session], [User preferences], [Known fixes], [Project context]
    *
-   * Returns:
-   *   @returns Header text or empty string when nothing fits.
+   * Token budgeting is greedy: highest-value content (most-used rules) is prioritized.
+   * Large patterns are smart-truncated (16 chars at a time) to fit within budget.
    *
    * Token Budget Strategy:
    *   - Greedy first-fit allocation: prioritizes high-value (frequently-used) rules
@@ -294,17 +207,17 @@ export class ContextBuilder implements IContextBuilder {
    */
   build = async (
     taskText: string,
-    advisorModelOverride?: string,
+    subagentModelOverride?: string,
   ): Promise<string> => {
     // ===== STEP 1: Setup & Budget Calculation =====
-    // Step 1a: Use task advisor model when provided, else server config
-    const advisorModelTag =
-      advisorModelOverride?.trim() ||
-      (await this.configManager.getAdvisorModel());
+    // Step 1a: Use task subsubagent model when provided, else server config
+    const subagentModelTag =
+      subagentModelOverride?.trim() ||
+      (await this.configManager.getSubagentModel());
 
     // Step 1b: Query Ollama for this model's context window (cached)
     // Example: llama2 → 4096 tokens
-    const totalContextTokens = await this.getContextWindow(advisorModelTag);
+    const totalContextTokens = await this.getContextWindow(subagentModelTag);
 
     // Step 1c: Reserve 20% of context for memory header (80% stays for response)
     // Example: 4096 tokens total → 819 token budget for memory header
@@ -562,140 +475,52 @@ export class ContextBuilder implements IContextBuilder {
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Reads every *.md file from user-data/patterns directory relative to rootDir.
+   * Loads markdown pattern files from the patterns directory.
    *
-   * How it does it (step by step):
-   *   1. Construct absolute path to patterns directory from rootDir.
-   *   2. Attempt to read directory entries with defensive error handling.
-   *   3. If directory not found (ENOENT), return empty array (graceful fallback).
-   *   4. If other error occurs, re-throw to propagate unexpected failures.
-   *   5. Filter directory entries to only markdown (.md) files.
-   *   6. For each markdown file: construct absolute path and read UTF-8 content.
-   *   7. Accumulate results as { name, body } objects in output array.
-   *   8. Return array of pattern files or empty array if directory missing.
+   * @returns Array of pattern files with name and body, or empty array if directory not found
+   * @throws Filesystem errors other than ENOENT (directory missing)
    *
-   * Parameters:
-   *   None.
+   * @remarks
+   * Reads all `*.md` files from `user-data/patterns/` (case-insensitive).
+   * Returns empty array if directory doesn't exist (graceful fallback for new setups).
+   * Re-throws permission errors and other serious I/O errors to surface problems.
    *
-   * Returns:
-   *   @returns File name and UTF-8 body pairs.
-   * </Summary>
-   */
-  /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Reads every *.md file from user-data/patterns directory relative to rootDir.
-   *
-   * How it does it (step by step):
-   *   1. Construct absolute path to patterns directory from rootDir.
-   *   2. Attempt to read directory entries with defensive error handling.
-   *   3. If directory not found (ENOENT), return empty array (graceful fallback).
-   *   4. If other error occurs, re-throw to propagate unexpected failures.
-   *   5. Filter directory entries to only markdown (.md) files.
-   *   6. For each markdown file: construct absolute path and read UTF-8 content.
-   *   7. Accumulate results as { name, body } objects in output array.
-   *   8. Return array of pattern files or empty array if directory missing.
-   *
-   * Parameters:
-   *   None.
-   *
-   * Returns:
-   *   @returns File name and UTF-8 body pairs.
-   *
-   * Error Handling Strategy:
-   *   - ENOENT (directory missing): Expected case when patterns not yet created. Returns []
-   *     to allow system to work without errors. User can create directory later.
-   *   - Other errors (permission denied, I/O error): Re-thrown immediately to surface
-   *     serious problems that prevent system functioning.
-   *
-   * Example Paths:
-   *   - this.rootDir = "/Users/john/project"
-   *   - patternDirectoryPath = "/Users/john/project/user-data/patterns"
-   *   - markdownFilename = "architecture.md"
-   *   - absoluteFilePath = "/Users/john/project/user-data/patterns/architecture.md"
-   *   - Return: [{ name: "architecture.md", body: "# Architecture...\n..." }]
-   * </Summary>
+   * Each pattern file becomes a separate context section entry with smart truncation
+   * to fit within the token budget.
    */
   private loadPatterns = async (): Promise<PatternFile[]> => {
-    // Step 1: Construct absolute path to patterns directory from rootDirectory
-    // path.join() ensures correct path separators for the OS (/ on Unix, \ on Windows)
-    // Example: /Users/john/project + "user-data" + "patterns"
-    //          → /Users/john/project/user-data/patterns
     const patternDirectoryPath = path.join(
       this.rootDirectory,
       "user-data",
       "patterns",
     );
 
-    // Step 2a: Attempt to read directory entries with defensive error handling
-    // fs.readdir() lists all files and folders in the directory
-    // Example return: ["architecture.md", "api-design.md", "testing.md", ".gitkeep"]
     let directoryEntries: string[] = [];
     try {
       directoryEntries = await fs.readdir(patternDirectoryPath);
     } catch (err) {
-      // Step 3: If directory not found (ENOENT), return empty array (graceful fallback)
-      // ENOENT error code means "Error NO ENTry"—directory or file doesn't exist
-      // This is expected when user hasn't created patterns directory yet
-      // Returning [] allows build() to continue without patterns (less optimal but functional)
       const errorCode = (err as NodeJS.ErrnoException).code;
       if (errorCode === "ENOENT") {
-        // Directory not found; gracefully return empty array
-        // User can create user-data/patterns directory later and it will be picked up
         return [];
       }
-
-      // Step 4: If other error occurs, re-throw to propagate unexpected failures
-      // Other error codes (EACCES=permission denied, EIO=I/O error, etc.) are serious
-      // These should surface immediately rather than fail silently
-      // Example: If /user-data/patterns exists but isn't readable, we want to know
       throw err;
     }
 
-    // Step 5: Filter directory entries to only markdown (.md) files
-    // Ignores non-markdown files (config files, node_modules, .DS_Store, etc.)
-    // Uses .toLowerCase() to handle "Architecture.MD" and "NOTES.MD" case-insensitively
-    // Example: ["architecture.md", "api-design.md", ".gitkeep"]
-    //          → ["architecture.md", "api-design.md"]
+    // Filter to markdown files only (case-insensitive)
     const markdownFilenames = directoryEntries.filter((markdownFilename) =>
       markdownFilename.toLowerCase().endsWith(".md"),
     );
 
-    // Step 6a: For each markdown file: construct absolute path and read UTF-8 content
-    // Create output array to accumulate all loaded pattern files
     const loadedPatternFiles: PatternFile[] = [];
-
-    // Step 6b: Loop through each markdown filename and load its content
     for (const markdownFilename of markdownFilenames) {
-      // Step 6c: Construct absolute file path by joining directory with filename
-      // Example: /Users/john/project/user-data/patterns + architecture.md
-      //          → /Users/john/project/user-data/patterns/architecture.md
       const absoluteFilePath = path.join(
         patternDirectoryPath,
         markdownFilename,
       );
-
-      // Step 6d: Read file content as UTF-8 string
-      // fs.readFile returns Buffer; "utf-8" encoding converts to string automatically
-      // Throws if file cannot be read (permission denied, deleted between readdir and here, etc.)
       const fileContent = await fs.readFile(absoluteFilePath, "utf-8");
-
-      // Step 7: Accumulate results as { name, body } objects in output array
-      // Push new PatternFile object with original filename and loaded content
-      // Example: { name: "architecture.md", body: "# Architecture\n\nSystem overview..." }
       loadedPatternFiles.push({ name: markdownFilename, body: fileContent });
     }
 
-    // Step 8: Return array of pattern files or empty array if directory missing
-    // Return value is used by build() to populate [Project context] section
-    // Example return: [
-    //   { name: "architecture.md", body: "# Architecture\n..." },
-    //   { name: "api-design.md", body: "# API Design\n..." }
-    // ]
     return loadedPatternFiles;
   };
 }

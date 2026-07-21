@@ -12,7 +12,7 @@ import type { ApprovalMenuOption as Option } from "./types.js";
  * Maps the incoming `ApprovalRequest` type (e.g., `planReview`, `runSkip`) to the correct list of
  * available actions, colorizing high-stakes items to draw attention.
  *
- * @param request - The active verification or approval payload received from the advisor.
+ * @param request - The active verification or approval payload received from the agent.
  * @returns A list of configuration options detailing menu text, selection value, and styling.
  */
 const buildOptions = (
@@ -21,17 +21,19 @@ const buildOptions = (
   request.type === "planReview"
     ? [
         { label: "Implement", value: "implement", color: "green" },
-        { label: "Edit plan", value: "edit", color: "cyan" },
         { label: "Skip task", value: "skip" },
+        { label: "Revise", value: "edit", color: "cyan" },
       ]
     : request.type === "runSkip"
       ? [
           { label: "Run", value: true, color: "green" },
           { label: "Skip", value: false, color: "red" },
+          { label: "Revise", value: "edit", color: "cyan" },
         ]
       : [
           { label: "Keep", value: true, color: "cyan" },
           { label: "Undo", value: false },
+          { label: "Revise", value: "edit", color: "cyan" },
         ];
 
 /**
@@ -46,8 +48,8 @@ const buildOptions = (
  * import React from "react";
  * import { render } from "ink";
  * import { ApprovalMenu } from "./ApprovalMenu.js";
- * 
- * // Note: Requires DataContext wrapper configured with an active approval request.
+ *
+ * Note: Requires DataContext wrapper configured with an active approval request.
  * ```
  */
 export const ApprovalMenu: React.FC = () => {
@@ -85,7 +87,7 @@ export const ApprovalMenu: React.FC = () => {
     }
   });
 
-  // Short-circuit render cycle if no confirmation dialog is pending from advisor.
+  // Short-circuit render cycle if no confirmation dialog is pending from agent.
   if (!approval) return null;
   const request = approval;
 

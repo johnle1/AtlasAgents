@@ -13,7 +13,7 @@ import { promisify } from "node:util";
 import type { Connection } from "../connection/index.js";
 import type { LocalFileProxy } from "../localFileProxy.js";
 import { printError, printLine, printSuccess } from "../renderer.js";
-import { requestApproval } from "../ui/uiBridge.js";
+import { requestApprovalWithFeedback } from "../ui/approvalFlow.js";
 import { callTokenSaveTool } from "../mcp/mcpBridge.js";
 import {
   enqueueTokenSaveOperation,
@@ -25,6 +25,21 @@ import {
 import { formatErrorMessage } from "./utils.js";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Runs `tokensave init` in the given workspace.
+ *
+ * @remarks
+ * Isolated as its own function (rather than an inline `execFileAsync` call in
+ * {@link handleTokenSave}) so the actual process spawn is a single, swappable
+ * seam — e.g. for a future test double — instead of buried inside a large
+ * switch-case handler. Uses `execFile` (not a shell) so `init` is not
+ * re-parsed by `/bin/sh`.
+ *
+ * @param workspaceRoot - Absolute path to run `tokensave init` in.
+ */
+const runTokenSaveInit = (workspaceRoot: string): Promise<unknown> =>
+  execFileAsync("tokensave", ["init"], { cwd: workspaceRoot });
 
 /**
  * Pretty-prints MCP / TokenSave tool payloads for the terminal.
@@ -146,11 +161,14 @@ export const handleTokenSave = async (
         return;
       }
 
-      const approved = (await requestApproval({
-        type: "keepUndo",
-        contextLabel:
-          "Initialize TokenSave index (.tokensave/ folder will be created)",
-      })) as boolean;
+      const { approved } = await requestApprovalWithFeedback(
+        {
+          type: "keepUndo",
+          contextLabel:
+            "Initialize TokenSave index (.tokensave/ folder will be created)",
+        },
+        "What should change?",
+      );
 
       if (!approved) {
         printLine("TokenSave init cancelled.");
@@ -158,8 +176,7 @@ export const handleTokenSave = async (
       }
 
       try {
-        // Prefer execFile over shell spawn so arguments are not re-parsed by /bin/sh.
-        await execFileAsync("tokensave", ["init"], { cwd: workspaceRoot });
+        await runTokenSaveInit(workspaceRoot);
         printSuccess("TokenSave initialized. Syncing tools to server...");
         const synced = await syncTokenSaveTools(conn, workspaceRoot);
         if (synced > 0) {

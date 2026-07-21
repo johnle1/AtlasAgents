@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
   available,
-  buildAgentBoardSnapshots,
+  buildSubagentBoardSnapshots,
   buildQueueSnapshot,
   complete,
   createReadyQueue,
@@ -140,7 +140,7 @@ describe("buildQueueSnapshot", () => {
   });
 });
 
-describe("buildAgentBoardSnapshots", () => {
+describe("buildSubagentBoardSnapshots", () => {
   it("groups tasks by agent", () => {
     const tasks = [
       subtask(1, "a1", [], 0, "Agent A"),
@@ -149,7 +149,7 @@ describe("buildAgentBoardSnapshots", () => {
     ];
     const queue = createReadyQueue(tasks);
     take(queue, 1);
-    const boards = buildAgentBoardSnapshots(tasks, queue);
+    const boards = buildSubagentBoardSnapshots(tasks, queue);
     expect(boards).toHaveLength(2);
     expect(boards[0]?.tasks).toHaveLength(2);
     expect(boards[1]?.tasks).toHaveLength(1);
@@ -161,7 +161,7 @@ describe("buildAgentBoardSnapshots", () => {
     const queue = createReadyQueue(tasks);
     take(queue, 1);
     complete(queue, 1, sampleResult("gave up", false));
-    const boards = buildAgentBoardSnapshots(tasks, queue);
+    const boards = buildSubagentBoardSnapshots(tasks, queue);
     expect(boards[0]?.tasks[0]?.state).toBe("failed");
   });
 });
@@ -205,19 +205,19 @@ describe("workerCountFor", () => {
     expect(workerCountFor(3, plan([]))).toBe(0);
   });
 
-  it("returns 1 for maxAgents=1", () => {
+  it("returns 1 for maxSubagents=1", () => {
     expect(
       workerCountFor(1, plan([subtask(1, "a"), subtask(2, "b")])),
     ).toBe(1);
   });
 
-  it("returns 2 for maxAgents=2", () => {
+  it("returns 2 for maxSubagents=2", () => {
     expect(
       workerCountFor(2, plan([subtask(1, "a"), subtask(2, "b")])),
     ).toBe(2);
   });
 
-  it("returns dag width for maxAgents=max", () => {
+  it("returns dag width for maxSubagents=max", () => {
     expect(
       workerCountFor(
         "max",
@@ -232,7 +232,7 @@ describe("workerCountFor", () => {
     ).toBe(2);
   });
 
-  it("defaults to min(3, dagWidth) when maxAgents is undefined", () => {
+  it("defaults to min(3, dagWidth) when maxSubagents is undefined", () => {
     expect(
       workerCountFor(
         undefined as unknown as 3,

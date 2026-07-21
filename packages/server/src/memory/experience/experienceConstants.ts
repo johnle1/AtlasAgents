@@ -1,11 +1,9 @@
 /**
- * <Summary>
- * What it does:
- *   Constants for experience recorder configuration and directory paths.
+ * Configuration constants for experience recording and persistence.
  *
- * How it fits in the system:
- *   Provides configuration values for experience and snapshot directory paths.
- * </Summary>
+ * @remarks
+ * Defines directory paths for persisting experiences and temporary snapshots.
+ * Used by {@link ExperienceRecorder} to organize files under `user-data/`.
  */
 
 /** Relative path under rootDir for persisted experience JSON files. */

@@ -1,175 +1,373 @@
 /**
- * <Summary>
- * What it does:
- *   Interface for configuration management in the orchestration layer.
+ * Manages model selection, provider configuration, and sampling parameters for the orchestration layer.
  *
- * How it fits in the system:
- *   Provides read-only and write access to persisted or session server configuration for models,
- *   temperatures, and agent retry limits. This abstraction allows the orchestration layer
- *   to operate without depending on concrete configuration implementations, enabling
- *   easier testing and configuration management.
- * </Summary>
- */
-
-/**
- * <Summary>
- * What it does:
- *   Read-only and write access to persisted or session server configuration for models,
- *   temperatures, and agent retry limits.
+ * @remarks
+ * This interface abstracts read/write access to persisted configuration and session-level overrides.
+ * Configuration covers model names, sampling temperatures, retry limits, provider connections,
+ * and context budgets. The implementation handles both file-based persistence and in-session overrides,
+ * enabling flexible model and provider switching without server restart.
  *
- * How it fits in the system:
- *   Provides methods to retrieve and update various configuration values used by the orchestration
- *   layer. The configuration is managed by the ConfigManager implementation which handles
- *   persisting and loading values from config files or session overrides.
+ * **Primary consumers:**
+ * - **Agent** — retrieves model names and temperatures for planning.
+ * - **Subagent** — retrieves model names and temperatures for task execution.
+ * - **Router** — exposes config via `/config` endpoints for user querying and mutation.
  *
- * Used by:
- *   - Advisor — model names and sampling settings per call site.
- *   - Agent — model names and sampling settings per call site.
- *
- * Produced by:
- *   - Future packages/server/src/config/configManager.ts implementation.
- * </Summary>
+ * @example
+ * ```ts
+ * const agentModel = await configManager.getAgentModel();
+ * const agentTemp = await configManager.getAgentTemperature();
+ * await configManager.setModel("agent", "llama3.1");
+ * ```
  */
 export interface IConfigManager {
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Returns the Ollama model name used for planning, advising, and combine.
+   * Returns the model name configured for the agent (planning) role.
    *
-   * How it does it (step by step):
-   *   1. Read configuration from config file or session overrides.
-   *   2. Apply any session-level model override if present.
-   *   3. Return the advisor model name string.
+   * @remarks
+   * Checks session-level overrides first, then falls back to persisted config.
+   * The agent model is used for planning, reasoning, and combining task results.
    *
-   * Returns:
-   *   @returns Advisor model id string (e.g., "llama3.1").
-   * </Summary>
-   */
-  getAdvisorModel(): Promise<string>;
-
-  /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Returns the Ollama model name used for subtask execution.
+   * @returns Model identifier string (e.g., `"llama3.1"`, `"gemma3:27b"`).
    *
-   * How it does it (step by step):
-   *   1. Read configuration from config file or session overrides.
-   *   2. Apply any session-level model override if present.
-   *   3. Return the agent model name string.
-   *
-   * Returns:
-   *   @returns Agent model id string (e.g., "llama3.1").
-   * </Summary>
+   * @example
+   * ```ts
+   * const model = await config.getAgentModel();
+   * Returns the current agent model, respecting session overrides
+   * ```
    */
   getAgentModel(): Promise<string>;
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Returns advisor sampling temperature (planning and advise use this).
+   * Returns the model name configured for the subagent (execution) role.
    *
-   * How it does it (step by step):
-   *   1. Read configuration from config file or session overrides.
-   *   2. Apply any session-level temperature override if present.
-   *   3. Return the temperature value (typically low for consistency).
+   * @remarks
+   * Checks session-level overrides first, then falls back to persisted config.
+   * The subagent model is used for running individual tasks and subtasks.
    *
-   * Returns:
-   *   @returns Temperature, typically low (e.g., 0.1-0.3 for consistent planning).
-   * </Summary>
+   * @returns Model identifier string (e.g., `"llama3.1"`, `"gemma3:27b"`).
+   *
+   * @example
+   * ```ts
+   * const model = await config.getSubagentModel();
+   * ```
    */
-  getAdvisorTemperature(): Promise<number>;
+  getSubagentModel(): Promise<string>;
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Returns agent sampling temperature for subtask runs.
+   * Returns whether the agent model supports native tool calling.
    *
-   * How it does it (step by step):
-   *   1. Read configuration from config file or session overrides.
-   *   2. Apply any session-level temperature override if present.
-   *   3. Return the temperature value for agent execution.
+   * @remarks
+   * Some models have native tool/function calling support built in, which enables structured
+   * output and tool invocation without fallback parsing. Returns `false` for models requiring
+   * manual tool schema injection and output parsing.
    *
-   * Returns:
-   *   @returns Temperature for execution (typically 0.5-0.7 for creativity).
-   * </Summary>
+   * @returns `true` if the model supports native tool calling; `false` otherwise.
+   */
+  getAgentModelSupportsTools(): Promise<boolean>;
+
+  /**
+   * Returns whether the subagent model supports native tool calling.
+   *
+   * @returns `true` if the model supports native tool calling; `false` otherwise.
+   */
+  getSubagentModelSupportsTools(): Promise<boolean>;
+
+  /**
+   * Returns the sampling temperature for the agent (planning) role.
+   *
+   * @remarks
+   * Checks session-level overrides first, then falls back to persisted config.
+   * Temperature controls output randomness: `0.0` is deterministic (consistent planning),
+   * higher values increase creativity. Typically low (0.1-0.3) to ensure reliable planning.
+   *
+   * @returns Temperature value. Common range: 0.0 (deterministic) to 1.0 (creative).
+   *
+   * @example
+   * ```ts
+   * const temp = await config.getAgentTemperature();
+   *  Returns ~0.1-0.3 for consistent, predictable planning
+   * ```
    */
   getAgentTemperature(): Promise<number>;
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Returns maximum advisor-assisted retries after an ESCALATE response.
+   * Returns the sampling temperature for the subagent (execution) role.
    *
-   * How it does it (step by step):
-   *   1. Read configuration from config file or session overrides.
-   *   2. Apply any session-level retry override if present.
-   *   3. Ensure minimum value of 1 (at least one retry allowed).
-   *   4. Return the maximum retry count.
+   * @remarks
+   * Checks session-level overrides first, then falls back to persisted config.
+   * Typically higher than agent temperature (0.5-0.7) to allow task creativity while
+   * remaining coherent.
    *
-   * Returns:
-   *   @returns Max retry attempts (>= 1).
-   * </Summary>
+   * @returns Temperature value. Common range: 0.0 (deterministic) to 1.0 (creative).
+   *
+   * @example
+   * ```ts
+   * const temp = await config.getSubagentTemperature();
+   * // Returns ~0.5-0.7 for balanced creativity and reliability
+   * ```
+   */
+  getSubagentTemperature(): Promise<number>;
+
+  /**
+   * Returns the maximum number of retry attempts after an escalation response.
+   *
+   * @remarks
+   * Checks session-level overrides first, then falls back to persisted config.
+   * Enforces a minimum of 1 (at least one retry is always permitted).
+   * When a model responds with an escalation signal, the orchestrator may retry up to this limit.
+   *
+   * @returns Maximum retry attempts (≥ 1).
+   *
+   * @example
+   * ```ts
+   * const maxRetries = await config.getMaxRetries();
+   * Retry up to this many times before giving up
+   * ```
    */
   getMaxRetries(): Promise<number>;
 
   /**
-   * <Summary>
-   * What it does:
-   *   Returns advisorTemp or agentTemp based on role.
-   * </Summary>
+   * Returns the sampling temperature for a given role.
+   *
+   * @remarks
+   * Convenience method that delegates to `getAgentTemperature()` or `getSubagentTemperature()`
+   * based on the role parameter.
+   *
+   * @param role - Either `"agent"` (planning) or `"subagent"` (execution).
+   * @returns Temperature value for the specified role.
    */
-  getTemperature(role: "advisor" | "agent"): Promise<number>;
+  getTemperature(role: "agent" | "subagent"): Promise<number>;
 
   /**
-   * <Summary>
-   * What it does:
-   *   Returns configured retry count (alias for getMaxRetries).
-   * </Summary>
+   * Returns the configured maximum retry attempts.
+   *
+   * @remarks
+   * Convenience alias for `getMaxRetries()`. Used when the retry limit is needed without
+   * specifying a role.
+   *
+   * @returns Maximum retry count (≥ 1).
    */
   getRetries(): Promise<number>;
 
   /**
-   * <Summary>
-   * What it does:
-   *   Returns orchestration timeout in milliseconds.
-   * </Summary>
+   * Returns the maximum milliseconds allowed for a complete orchestration task.
+   *
+   * @remarks
+   * Defines the timeout for the entire task execution, including planning, execution,
+   * and retries. Exceeding this timeout should cancel remaining work.
+   *
+   * @returns Timeout in milliseconds.
    */
   getTimeout(): Promise<number>;
 
   /**
-   * <Summary>
-   * What it does:
-   *   Returns fraction of model context reserved for memory header.
-   * </Summary>
+   * Returns the fraction of the model's context window reserved for memory injection.
+   *
+   * @remarks
+   * Memory snippets are injected as a header in the system prompt. This budget ensures
+   * memory doesn't crowd out the actual task prompt or response space. Expressed as a
+   * decimal (e.g., 0.15 = 15% of available context).
+   *
+   * @returns Fraction of context window (typically 0.1–0.2).
    */
   getMaxContextBudget(): Promise<number>;
 
   /**
-   * <Summary>
-   * What it does:
-   *   Returns full merged config — used by Router config.get.
-   * </Summary>
+   * Returns the complete merged configuration object.
+   *
+   * @remarks
+   * Combines defaults, persisted configuration, and session-level overrides into a single
+   * object. Primarily used by the Router `/config` endpoint for exposing the full config state.
+   *
+   * @returns Configuration object with all keys and values.
    */
   getAll(): Promise<Record<string, unknown>>;
 
   /**
-   * <Summary>
-   * What it does:
-   *   Updates one config key and persists — used by Router config.set.
-   * </Summary>
+   * Updates one configuration key and persists the change.
+   *
+   * @remarks
+   * Used by the Router `/config` endpoint to allow users to mutate config values.
+   * Changes are immediately persisted to storage.
+   *
+   * @param key - Configuration key name.
+   * @param value - New value for the key.
+   *
+   * @example
+   * ```ts
+   * await config.set("maxRetries", 5);
+   * ```
    */
   set(key: string, value: unknown): Promise<void>;
 
   /**
-   * <Summary>
-   * What it does:
-   *   Updates advisor or agent model and triggers cache invalidation callback.
-   * </Summary>
+   * Updates the model for a given role and triggers cache invalidation.
+   *
+   * @remarks
+   * Switches the active model for either the agent (planning) or subagent (execution) role.
+   * Persists the change and notifies any listeners that model-dependent caches should be invalidated.
+   *
+   * @param role - Either `"agent"` (planning) or `"subagent"` (execution).
+   * @param modelName - Model identifier to switch to (e.g., `"llama3.1"`, `"gemma3:27b"`).
+   *
+   * @example
+   * ```ts
+   * await config.setModel("agent", "llama3.1");
+   * Agent now uses llama3.1 for planning
+   * ```
    */
-  setModel(role: "advisor" | "agent", modelName: string): Promise<void>;
+  setModel(role: "agent" | "subagent", modelName: string): Promise<void>;
+
+  /**
+   * Returns the provider name configured for the agent (planning) role.
+   *
+   * @remarks
+   * Defaults to `"ollama"` if no other provider is configured. Allows switching between
+   * Ollama (local) and external providers (OpenAI-compatible APIs, etc.).
+   *
+   * @returns Provider name string (e.g., `"ollama"`, `"openai"`, custom provider names).
+   *
+   * @example
+   * ```ts
+   * const provider = await config.getAgentProvider();
+   * console.log(provider); // "ollama" or name of external provider
+   * ```
+   */
+  getAgentProvider(): Promise<string>;
+
+  /**
+   * Returns the provider name configured for the subagent (execution) role.
+   *
+   * @remarks
+   * Defaults to `"ollama"` if no other provider is configured.
+   *
+   * @returns Provider name string (e.g., `"ollama"`, `"openai"`, custom provider names).
+   */
+  getSubagentProvider(): Promise<string>;
+
+  /**
+   * Looks up connection details for a specific provider by name.
+   *
+   * @remarks
+   * The built-in Ollama provider is not configurable via this interface (it's always available).
+   * This method retrieves configuration for external providers only.
+   *
+   * @param name - Provider name (never `"ollama"`). For example, `"openai"` or a custom provider name.
+   * @returns Connection details (`{ baseUrl, apiKey? }`) or `undefined` if the provider is not configured.
+   *
+   * @example
+   * ```ts
+   * const provider = await config.getProvider("openai");
+   * if (provider) {
+   *   console.log(provider.baseUrl); // "https://api.openai.com/v1"
+   * }
+   * ```
+   */
+  getProvider(
+    name: string,
+  ): Promise<{ baseUrl: string; apiKey?: string } | undefined>;
+
+  /**
+   * Returns all configured external providers and their connection details.
+   *
+   * @remarks
+   * Does not include the built-in Ollama provider. Returns an empty object if no
+   * external providers are configured.
+   *
+   * @returns Map of provider name → connection details.
+   *
+   * @example
+   * ```ts
+   * const providers = await config.getProviders();
+   * { "openai": { baseUrl: "...", apiKey: "..." }, ... }
+   * ```
+   */
+  getProviders(): Promise<Record<string, { baseUrl: string; apiKey?: string }>>;
+
+  /**
+   * Registers or updates an external provider's connection details.
+   *
+   * @remarks
+   * The provider name must not be empty and cannot be `"ollama"` (reserved for local Ollama).
+   * Updates are persisted immediately. If a provider with this name already exists, it is updated.
+   *
+   * @param name - Provider name (e.g., `"openai"`, `"anthropic"`). Must not be empty or `"ollama"`.
+   * @param providerConfig - Connection details: `baseUrl` (required) and optional `apiKey`.
+   * @throws When `name` is empty, `"ollama"`, or invalid.
+   *
+   * @example
+   * ```ts
+   * await config.addProvider("openai", {
+   *   baseUrl: "https://api.openai.com/v1",
+   *   apiKey: process.env.OPENAI_API_KEY
+   * });
+   * ```
+   */
+  addProvider(
+    name: string,
+    providerConfig: { baseUrl: string; apiKey?: string },
+  ): Promise<void>;
+
+  /**
+   * Removes a provider from configuration.
+   *
+   * @remarks
+   * Cannot remove a provider that is currently in use by the agent or subagent role.
+   * This prevents orphaning a role without a provider.
+   *
+   * @param name - Provider name to remove (e.g., `"openai"`).
+   * @throws When the provider is in use by an active role.
+   *
+   * @example
+   * ```ts
+   * await config.removeProvider("openai");
+   * Provider is no longer available for role assignment
+   * ```
+   */
+  removeProvider(name: string): Promise<void>;
+
+  /**
+   * Switches a role to use a different provider, keeping the current model.
+   *
+   * @remarks
+   * The new provider must be either `"ollama"` (always available) or a previously registered
+   * external provider. This operation does not change the model name, so you may need to call
+   * `setModel` afterward if the model name is not available on the new provider.
+   *
+   * @param role - Role to update: `"agent"` (planning) or `"subagent"` (execution).
+   * @param providerName - Target provider name (must be `"ollama"` or already configured).
+   * @throws When the provider name is not found or available.
+   *
+   * @example
+   * ```ts
+   * await config.setProvider("agent", "openai");
+   * Agent planning now uses the configured OpenAI provider
+   * ```
+   */
+  setProvider(role: "agent" | "subagent", providerName: string): Promise<void>;
+
+  /**
+   * Atomically switches both the provider and model for a role.
+   *
+   * @remarks
+   * Combines `setProvider` and `setModel` into a single operation. Triggers cache invalidation
+   * callbacks after both changes are persisted. Use this when switching to an entirely different
+   * provider+model pair to avoid intermediate inconsistent state.
+   *
+   * @param role - Role to update: `"agent"` (planning) or `"subagent"` (execution).
+   * @param providerName - Target provider name (must be `"ollama"` or already configured).
+   * @param modelName - Model name available on the target provider (e.g., `"gpt-4"`, `"llama3.1"`).
+   * @throws When the provider is not found or the model is invalid for the provider.
+   *
+   * @example
+   * ```ts
+   * await config.setRoleModel("agent", "openai", "gpt-4");
+   * Agent planning now uses OpenAI's gpt-4 model
+   * ```
+   */
+  setRoleModel(
+    role: "agent" | "subagent",
+    providerName: string,
+    modelName: string,
+  ): Promise<void>;
 }

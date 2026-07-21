@@ -1,12 +1,35 @@
 /**
- * <Summary>
- * What it does:
- *   Manages user-data/session/current.md so agents know what was built in prior
- *   tasks during the same working session (multi-task continuity).
+ * Manages session continuity across multiple tasks in a working session.
  *
- * How it fits in the system:
- *   Implements ISessionManager for ContextBuilder, ExperienceRecorder, and Router.
- * </Summary>
+ * @remarks
+ * Implements {@link ISessionManager} to provide agents with context about
+ * prior work in the same session, enabling multi-task continuity and smarter
+ * decision-making across sequential tasks.
+ *
+ * **Session File:**
+ * - Persisted to `user-data/session/current.md` (markdown format for readability)
+ * - Contains numbered task blocks with descriptions, files, commands, outcomes
+ * - Read by {@link ContextBuilder} to populate "[Prior session]" context section
+ * - Updated by {@link ExperienceRecorder.finish} after each task completes
+ *
+ * **Workflow:**
+ * 1. `saveSnapshot(codebaseExploration)` — Initialize session with codebase snapshot
+ * 2. `append(taskSummary)` — Add task record after execution (called by ExperienceRecorder)
+ * 3. `read()` — Retrieve full session content for context building
+ * 4. `clear()` — Delete session (reset between sessions)
+ *
+ * **Multi-Task Continuity:**
+ * - Task 1 output → becomes input context for Task 2
+ * - Agents see what was built, modified, and tested
+ * - Reduces redundant exploration and rework
+ * - Improves coherence across sequential improvements
+ *
+ * **Atomic Writes:**
+ * - Uses temp file + rename pattern for crash safety
+ * - Session never corrupted mid-append
+ *
+ * @see {@link ExperienceRecorder.finish} for how tasks are appended
+ * @see {@link ContextBuilder.build} for how session is used in context
  */
 
 import { randomUUID } from "node:crypto";
@@ -23,97 +46,51 @@ const SESSION_REL_PATH = "user-data/session/current.md";
 const TASK_HEADER_RE = /^Task \d+/gm;
 
 /**
- * <Summary>
- * What it does:
- *   Ensures a directory exists, creating it and any parent directories if needed.
+ * Ensures a directory exists, creating parent directories as needed.
  *
- * How it does it (step by step):
- *   1. Call fs.mkdir with the recursive option set to true.
- *   2. The recursive option creates parent directories as needed.
- *
- * Parameters:
- *   @param directoryPath - The directory path to ensure exists.
- *
- * Returns:
- *   @returns Resolves when directory is guaranteed to exist.
- * </Summary>
+ * @param directoryPath - Directory path to ensure exists
+ * @returns Promise that resolves when directory is guaranteed to exist
  */
 const ensureDir = async (directoryPath: string): Promise<void> => {
-  // Step 1: Create directory with recursive option to create parent directories as needed
-  // The recursive option ensures we don't fail if parent directories don't exist
+  // Uses recursive option to create parent directories automatically
   await fs.mkdir(directoryPath, { recursive: true });
 };
 
 /**
- * <Summary>
- * What it does:
- *   Formats an array of items as a comma-separated string or returns "(none)" if empty.
+ * Formats an array of items as a comma-separated string.
  *
- * How it does it (step by step):
- *   1. Check if items array is undefined or empty.
- *   2. If so, return "(none)" as a placeholder.
- *   3. Otherwise, join the items with ", " separator.
+ * Returns "(none)" placeholder when array is empty or undefined.
  *
- * Parameters:
- *   @param items - Array of strings to format, or undefined.
- *
- * Returns:
- *   {string} — Comma-separated string or "(none)" if empty/undefined.
- * </Summary>
+ * @param items - Array of strings to format
+ * @returns Comma-separated string or "(none)" if empty/undefined
  */
 const formatList = (items: string[] | undefined): string => {
-  // Step 1: Check if items array is undefined or empty
   if (!items || items.length === 0) {
-    // Step 2: Return "(none)" as a placeholder for empty/undefined arrays
     return "(none)";
   }
-  // Step 3: Join the items with ", " separator for readable list format
   return items.join(", ");
 };
 
 /**
- * <Summary>
- * What it does:
- *   Counts the number of task blocks in the session content by matching task headers.
+ * Counts task blocks in session content by matching task headers.
  *
- * How it does it (step by step):
- *   1. Use regex to find all matches of task header pattern.
- *   2. Return the count of matches, or 0 if none found.
- *
- * Parameters:
- *   @param content - The session file content to analyze.
- *
- * Returns:
- *   {number} — Number of task blocks found in the content.
- * </Summary>
+ * @param content - Session file content to analyze
+ * @returns Number of task blocks found
  */
 const countTasks = (content: string): number => {
-  // Step 1: Use regex to find all matches of task header pattern
-  // The global flag (g) finds all occurrences, not just the first
+  // Uses regex with global flag to find all task headers
   const taskHeaderMatches = content.match(TASK_HEADER_RE);
-  // Step 2: Return the count of matches, or 0 if none found
   return taskHeaderMatches?.length ?? 0;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Formats a session summary as a markdown task block with task number, description, files, commands, and outcome.
+ * Formats a task summary as a markdown task block.
  *
- * How it does it (step by step):
- *   1. Extract and validate the task description from the summary.
- *   2. Extract and validate the files written array from the summary.
- *   3. Extract and validate the commands run array from the summary.
- *   4. Extract and validate the outcome from the summary.
- *   5. Format these into a markdown block with the task number.
+ * Creates a structured markdown record showing task number, description, files, commands, and outcome.
  *
- * Parameters:
- *   @param taskNumber - The sequential task number (1-indexed).
- *   @param summary - The task summary object to format.
- *
- * Returns:
- *   {string} — Formatted markdown task block.
- * </Summary>
+ * @param taskNumber - Sequential task number (1-indexed)
+ * @param summary - Task summary object to format
+ * @returns Formatted markdown task block
  */
 const formatBlock = (taskNumber: number, summary: SessionSummary): string => {
   // Step 1: Extract and validate the task description from the summary
@@ -156,277 +133,129 @@ const formatBlock = (taskNumber: number, summary: SessionSummary): string => {
   ].join("\n");
 };
 
-/**
- * <Summary>
- * What it does:
- *   Reads, appends to, and clears the session markdown file to maintain
- *   continuity across multiple tasks in the same working session.
- *
- * How it fits in the system:
- *   Implements ISessionManager interface for ContextBuilder, ExperienceRecorder,
- *   and Router to provide a shared session state that persists across tasks.
- *   The session file contains a chronological record of what was built in prior
- *   tasks, allowing agents to understand context without re-exploring the codebase.
- * </Summary>
- */
 export class SessionManager implements ISessionManager {
-  /** Full path to the session markdown file. */
+  /** Absolute path to the session markdown file. */
   private readonly sessionPath: string;
 
   /**
-   * Constructor
+   * Initializes the session manager with data root path.
    *
-   * How it does it (step by step):
-   *   1. Extract the root directory from deps or default to current working directory.
-   *   2. Join the root directory with the relative session path to get the full path.
-   *
-   * Parameters:
-   *   @param deps - Dependency object with optional configuration.
-   *     @param {string} [deps.rootDir] — Optional data root directory. Defaults to process.cwd().
-   *
-   * Returns:
-   *   void — Constructor does not return a value.
+   * @param deps - Configuration dependencies
+   * @param deps.rootDir - Optional data root directory (defaults to `process.cwd()`)
    */
   constructor(readonly deps: { rootDir?: string } = {}) {
-    // Step 1: Extract the root directory from deps or default to current working directory
-    // This allows flexibility in where session data is stored
     const rootDirectory = deps.rootDir ?? process.cwd();
-
-    // Step 2: Join the root directory with the relative session path to get the full path
-    // This creates the absolute path to the session markdown file
     this.sessionPath = path.join(rootDirectory, SESSION_REL_PATH);
   }
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Returns full session file contents or empty string when missing.
+   * Reads the session file contents.
    *
-   * How it does it (step by step):
-   *   1. Attempt to read the session file as UTF-8 text.
-   *   2. If the file doesn't exist (ENOENT), return empty string.
-   *   3. If another error occurs, re-throw it for the caller to handle.
-   *
-   * Returns:
-   *   @returns The session file contents, or empty string if file doesn't exist.
-   *
-   * Throws:
-   *   @throws {Error} — Re-throws filesystem errors other than ENOENT.
-   * </Summary>
+   * @returns Full session file contents, or empty string if file doesn't exist
+   * @throws Filesystem errors other than ENOENT
    */
   read = async (): Promise<string> => {
     try {
-      // Step 1: Attempt to read the session file as UTF-8 text
-      // This returns the full content of the session markdown file
       return await fs.readFile(this.sessionPath, "utf-8");
     } catch (error) {
-      // Extract the error code to determine what went wrong
       const errorCode = (error as NodeJS.ErrnoException).code;
-
-      // Step 2: If the file doesn't exist (ENOENT), return empty string
-      // This is expected behavior for new sessions or after clearing
       if (errorCode === "ENOENT") {
         return "";
       }
-
-      // Step 3: If another error occurs, re-throw it for the caller to handle
-      // This includes permission errors, disk errors, etc.
       throw error;
     }
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Returns whether user-data/session/current.md exists and has content.
+   * Checks whether a non-empty session file exists.
    *
-   * How it does it (step by step):
-   *   1. Attempt to read the session file as UTF-8 text.
-   *   2. If the file doesn't exist (ENOENT), return false.
-   *   3. If the file exists but is empty, return false.
-   *   4. If the file has content, return true.
-   *   5. If another error occurs, re-throw it.
-   *
-   * Returns:
-   *   @returns True if session file exists with content, false otherwise.
-   *
-   * Throws:
-   *   @throws {Error} — Re-throws filesystem errors other than ENOENT.
-   * </Summary>
+   * @returns True if session file exists and has content, false otherwise
+   * @throws Filesystem errors other than ENOENT
    */
   exists = async (): Promise<boolean> => {
     try {
-      // Step 1: Attempt to read the session file as UTF-8 text
       const fileContent = await fs.readFile(this.sessionPath, "utf-8");
-
-      // Step 3: If the file exists but is empty, return false
-      // An empty session file is treated as non-existent for practical purposes
       return fileContent.length > 0;
     } catch (error) {
-      // Extract the error code to determine what went wrong
       const errorCode = (error as NodeJS.ErrnoException).code;
-
-      // Step 2: If the file doesn't exist (ENOENT), return false
       if (errorCode === "ENOENT") {
         return false;
       }
-
-      // Step 5: If another error occurs, re-throw it
       throw error;
     }
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Overwrites the session file with a codebase exploration snapshot.
+   * Overwrites the session file with a codebase exploration snapshot.
    *
-   * How it does it (step by step):
-   *   1. Add a timestamp header to the snapshot content.
-   *   2. Ensure the session directory exists.
-   *   3. Write the content to a temporary file with a unique name.
-   *   4. Atomically rename the temp file to the actual session path.
+   * @param snapshot - Codebase exploration snapshot content to save
+   * @throws Filesystem errors if directory creation or write fails
    *
-   * Parameters:
-   *   @param snapshot - The codebase exploration snapshot content to save.
-   *
-   * Returns:
-   *   @returns Resolves when the snapshot is saved.
-   *
-   * Throws:
-   *   @throws {Error} — Throws filesystem errors if directory creation or write fails.
-   * </Summary>
+   * @remarks
+   * Uses atomic write pattern (temp file + rename) for crash safety.
+   * Adds timestamp header for snapshot identification.
    */
   saveSnapshot = async (snapshot: string): Promise<void> => {
-    // Step 1: Add a timestamp header to the snapshot content
-    // This helps identify when the snapshot was taken and provides context
     const timestampedContent = `[Codebase snapshot — ${new Date().toISOString()}]\n\n${snapshot}\n`;
 
-    // Step 2: Ensure the session directory exists
-    // We get the directory path from the session file path
     const sessionDirectory = path.dirname(this.sessionPath);
     await ensureDir(sessionDirectory);
 
-    // Step 3: Write the content to a temporary file with a unique name
-    // Using a temp file ensures atomic writes and prevents corruption
-    // If the process crashes during write, the original file remains intact
     const tempFilePath = path.join(
       sessionDirectory,
       `.session-${randomUUID()}.tmp`,
     );
     await fs.writeFile(tempFilePath, timestampedContent, "utf-8");
-
-    // Step 4: Atomically rename the temp file to the actual session path
-    // rename is atomic on most filesystems, ensuring no partial writes
     await fs.rename(tempFilePath, this.sessionPath);
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Appends one formatted task block to the session file with atomic write.
+   * Appends a formatted task block to the session file.
    *
-   * How it does it (step by step):
-   *   1. Read the existing session content.
-   *   2. Count existing tasks to determine the next task number.
-   *   3. Format the new task summary as a markdown block.
-   *   4. Determine the appropriate separator (blank line or empty string).
-   *   5. Concatenate existing content, separator, and new block.
-   *   6. Ensure the session directory exists.
-   *   7. Write the new content to a temporary file.
-   *   8. Atomically rename the temp file to the session path.
+   * @param summary - Task summary to append to the session
+   * @throws Filesystem errors if directory creation or write fails
    *
-   * Parameters:
-   *   @param summary - The task summary to append to the session.
-   *
-   * Returns:
-   *   @returns Resolves when the task summary is appended.
-   *
-   * Throws:
-   *   @throws {Error} — Throws filesystem errors if directory creation or write fails.
-   * </Summary>
+   * @remarks
+   * Uses atomic write pattern (temp file + rename) for crash safety.
+   * Auto-numbers tasks based on existing task count.
+   * Adds blank line separator between tasks.
    */
   append = async (summary: SessionSummary): Promise<void> => {
-    // Step 1: Read the existing session content
-    // We need to preserve existing tasks when appending the new one
     const existingContent = await this.read();
-
-    // Step 2: Count existing tasks to determine the next task number
-    // Tasks are 1-indexed, so we add 1 to the count of existing tasks
     const nextTaskNumber = countTasks(existingContent) + 1;
-
-    // Step 3: Format the new task summary as a markdown block
-    // This creates a standardized, readable format for the task record
     const taskBlock = formatBlock(nextTaskNumber, summary);
-
-    // Step 4: Determine the appropriate separator (blank line or empty string)
-    // If there's existing content, add a blank line for separation
-    // If the file is empty, no separator is needed
     const separator = existingContent.trim().length > 0 ? "\n\n" : "";
-
-    // Step 5: Concatenate existing content, separator, and new block
-    // This creates the new complete session content
     const newSessionContent = `${existingContent}${separator}${taskBlock}\n`;
 
-    // Step 6: Ensure the session directory exists
     const sessionDirectory = path.dirname(this.sessionPath);
     await ensureDir(sessionDirectory);
 
-    // Step 7: Write the new content to a temporary file
-    // Using a temp file ensures atomic writes and prevents corruption
     const tempFilePath = path.join(
       sessionDirectory,
       `.session-${randomUUID()}.tmp`,
     );
     await fs.writeFile(tempFilePath, newSessionContent, "utf-8");
-
-    // Step 8: Atomically rename the temp file to the session path
-    // rename is atomic on most filesystems, ensuring no partial writes
     await fs.rename(tempFilePath, this.sessionPath);
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Deletes the session file when present and returns a confirmation string.
+   * Deletes the session file and returns a confirmation message.
    *
-   * How it does it (step by step):
-   *   1. Attempt to delete the session file using fs.unlink.
-   *   2. If the file doesn't exist (ENOENT), ignore the error (already cleared).
-   *   3. If another error occurs, re-throw it for the caller to handle.
-   *   4. Return a confirmation message regardless of whether file existed.
+   * @returns Confirmation message "Session cleared"
+   * @throws Filesystem errors other than ENOENT (file not found)
    *
-   * Returns:
-   *   @returns Confirmation message "Session cleared".
-   *
-   * Throws:
-   *   @throws {Error} — Re-throws filesystem errors other than ENOENT.
-   * </Summary>
+   * @remarks
+   * Silently succeeds if session file doesn't exist (already cleared).
    */
   clear = async (): Promise<string> => {
     try {
-      // Step 1: Attempt to delete the session file using fs.unlink
-      // This removes the file from the filesystem
       await fs.unlink(this.sessionPath);
     } catch (error) {
-      // Extract the error code to determine what went wrong
       const errorCode = (error as NodeJS.ErrnoException).code;
-
-      // Step 2: If the file doesn't exist (ENOENT), ignore the error
-      // The session is already cleared, which is the desired state
       if (errorCode !== "ENOENT") {
-        // Step 3: If another error occurs, re-throw it
-        // This includes permission errors, disk errors, etc.
         throw error;
       }
     }
-    // Step 4: Return a confirmation message regardless of whether file existed
-    // This provides consistent user feedback
     return "Session cleared";
   };
 }

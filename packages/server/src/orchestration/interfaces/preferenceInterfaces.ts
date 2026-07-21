@@ -1,30 +1,39 @@
 /**
- * <Summary>
- * What it does:
- *   Interfaces and types for preference rule storage and management.
+ * Preference rules and pattern storage for learning agent behavior from user feedback.
  *
- * How it fits in the system:
- *   Defines the contract for storing, retrieving, and managing user preference rules.
- * </Summary>
+ * @remarks
+ * Captures user preferences (coding style, language choice, patterns) extracted from
+ * successful tasks, user edits, and explicit direction. These rules are ranked by
+ * confidence and applied as context hints during task planning and execution.
  */
 
-/** Confidence level for a learned or explicit preference rule. */
+/**
+ * Confidence level for a learned or explicit preference rule.
+ *
+ * @remarks
+ * - `high` — User-facing explicit preference or proven by repeated successful outcomes
+ * - `medium` — Learned from user fixes or edits with moderate consistency
+ * - `low` — Inferred from single outcome or needs validation
+ */
 export type PreferenceConfidence = "high" | "medium" | "low";
 
-/** Provenance of a preference rule. */
+/**
+ * Provenance of a preference rule (where it came from).
+ *
+ * @remarks
+ * - `explicit` — Directly entered by the user (highest trust)
+ * - `outcome` — Extracted from successful task completions
+ * - `fix` — Learned from user corrections or edits to agent output
+ * - `style` — Pattern extracted from code style in user edits
+ */
 export type PreferenceSource = "explicit" | "outcome" | "fix" | "style";
 
 /**
- * <Summary>
- * What it does:
- *   One substring match that adds a topic tag when found in the task text.
+ * One substring match that adds a topic tag when found in the task text.
  *
- * Used by:
- *   - extractKeywords in contextBuilder.ts.
- *
- * Produced by:
- *   - user-data/language-hints.json or packaged default-data copy.
- * </Summary>
+ * @remarks
+ * Used by extractKeywords in contextBuilder.ts.
+ * Produced by user-data/language-hints.json or packaged default-data copy.
  */
 export interface LanguageHint {
   /** Lowercase-friendly substring to search for in the task text. */
@@ -35,48 +44,54 @@ export interface LanguageHint {
 }
 
 /**
- * <Summary>
- * What it does:
- *   One persisted user preference rule used by ContextBuilder and memory routes.
+ * A persisted user preference rule.
  *
- * Used by:
- *   - IPreferenceStore.getAll — returns rule rows.
+ * @remarks
+ * Represents one learnable or explicit user preference that guides agent behavior.
+ * Rules are ranked by confidence and times applied, and matched to tasks by topic overlap.
  *
- * Produced by:
- *   - PreferenceStore.add — creates new ids and timestamps.
- * </Summary>
+ * @example
+ * ```ts
+ * {
+ *   id: "pref-abc123",
+ *   text: "Always use async/await, never return Promises directly",
+ *   topics: ["javascript", "async"],
+ *   scope: "javascript",
+ *   confidence: "high",
+ *   source: "explicit",
+ *   timestamp: "2024-01-15T10:30:00Z",
+ *   timesApplied: 12
+ * }
+ * ```
  */
 export interface PreferenceRule {
-  /** Stable unique id for this rule. */
+  /** Stable unique identifier for this rule. */
   id: string;
 
-  /** Human-readable rule text. */
+  /** Human-readable text describing the preference (e.g., `"Use Tailwind CSS over Bootstrap"`). */
   text: string;
 
-  /** Topic tags for overlap filtering against task keywords. */
+  /** Topic tags for matching against task keywords (e.g., `["styling", "frontend"]`). */
   topics: string[];
 
-  /** Language or domain scope (e.g. "all", "javascript", "python"). */
+  /** Language or domain scope (e.g., `"all"`, `"javascript"`, `"python"`, `"react"`). */
   scope: string;
 
-  /** How strongly to weight this rule. */
+  /** How much to trust this rule (`"high"`, `"medium"`, or `"low"`). */
   confidence: PreferenceConfidence;
 
-  /** Where the rule came from (explicit user vs learned). */
+  /** Origin of the rule (`"explicit"` from user, `"outcome"` from success, `"fix"` from edits, `"style"` from patterns). */
   source: PreferenceSource;
 
-  /** ISO-8601 last update or creation time. */
+  /** ISO-8601 timestamp of creation or last update. */
   timestamp: string;
 
-  /** How often this rule was applied (higher sorts first). */
+  /** Count of how many times this rule has been applied (higher = more useful). */
   timesApplied: number;
 }
 
 /**
- * <Summary>
- * What it does:
- *   Input shape for PreferenceStore.add before id and timestamp are assigned.
- * </Summary>
+ * Input shape for PreferenceStore.add before id and timestamp are assigned.
  */
 export type NewPreferenceRule = Omit<
   PreferenceRule,
@@ -85,77 +100,111 @@ export type NewPreferenceRule = Omit<
   Partial<Pick<PreferenceRule, "timestamp" | "timesApplied">>;
 
 /**
- * <Summary>
- * What it does:
- *   File-backed preference storage for long-lived user rules.
+ * Persistent storage for user preference rules and learned patterns.
  *
- * Used by:
- *   - ContextBuilder — reads all rules at task start.
- *   - Future memory command handlers — mutate rules.
+ * @remarks
+ * Manages file-backed rule storage with deduplication, topic-based retrieval,
+ * and consolidation. Rules are matched to tasks by topic overlap and ranked by
+ * confidence and application frequency.
  *
- * Produced by:
- *   - packages/server/src/memory/preferenceStore.ts.
- * </Summary>
+ * **Primary consumers:**
+ * - **ContextBuilder** — queries rules matching task keywords.
+ * - **Router memory endpoints** — CRUD operations for user rule management.
+ * - **ExperienceRecorder** — adds learned rules from completed tasks.
+ *
+ * @example
+ * ```ts
+ * const store = createPreferenceStore();
+ * await store.add({
+ *   text: "Use TypeScript strict mode",
+ *   topics: ["typescript"],
+ *   scope: "typescript",
+ *   confidence: "high",
+ *   source: "explicit"
+ * });
+ * const rules = await store.getForTask(["typescript", "react"]);
+ * ```
  */
 export interface IPreferenceStore {
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Returns every stored preference rule (empty array when file missing).
+   * Returns all stored preference rules.
    *
-   * Parameters:
-   *   None.
+   * @remarks
+   * Returns an empty array if the storage file doesn't exist yet.
+   * Rules are returned in stable storage order (typically sorted by creation).
    *
-   * Returns:
-   *   @returns All rules in stable storage order.
-   * </Summary>
+   * @returns Array of all preference rules.
+   *
+   * @example
+   * ```ts
+   * const allRules = await store.getAll();
+   * console.log(`Loaded ${allRules.length} preference rules`);
+   * ```
    */
   getAll(): Promise<PreferenceRule[]>;
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Adds or merges a rule (dedup by text similarity >= 0.8).
+   * Adds a new preference rule or merges it with an existing similar rule.
    *
-   * Parameters:
-   *   @param rule - Rule fields without id/timesApplied (timestamp optional).
+   * @remarks
+   * Checks for similar existing rules using Levenshtein similarity (threshold 0.8).
+   * If a match is found, merges topics and updates confidence/source rather than
+   * creating a duplicate. If the rule is new, assigns a unique ID and timestamp.
+   * All changes are persisted immediately.
    *
-   * Returns:
-   *   @returns Persisted or merged row.
-   * </Summary>
+   * @param rule - Rule fields (omit `id` and `timesApplied`; `timestamp` is auto-assigned if omitted).
+   * @returns The persisted rule with all fields (id, timestamp, timesApplied) assigned.
+   *
+   * @example
+   * ```ts
+   * const rule = await store.add({
+   *   text: "Always use const, never let or var",
+   *   topics: ["javascript"],
+   *   scope: "javascript",
+   *   confidence: "high",
+   *   source: "explicit"
+   * });
+   * console.log(`Added rule ${rule.id}`);
+   * ```
    */
   add(rule: NewPreferenceRule): Promise<PreferenceRule>;
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Returns rules whose topics overlap task keywords, sorted by timesApplied desc.
+   * Retrieves rules whose topics overlap the given keywords, ranked by frequency.
    *
-   * Parameters:
-   *   @param taskKeywords - Keyword set from task text.
+   * @remarks
+   * Used during context building to inject relevant preferences into the agent's
+   * system prompt. Results are sorted by `timesApplied` descending (most useful first).
    *
-   * Returns:
-   *   @returns Matching rules.
-   * </Summary>
+   * @param taskKeywords - Keywords extracted from the task text (e.g., `["typescript", "react"]`).
+   * @returns Matching rules sorted by `timesApplied` descending (empty if no matches).
+   *
+   * @example
+   * ```ts
+   * const keywords = ["frontend", "react"];
+   * const relevant = await store.getForTask(keywords);
+   * Returns rules tagged with "frontend" or "react"
+   * ```
    */
   getForTask(taskKeywords: Iterable<string>): Promise<PreferenceRule[]>;
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Replaces fields on one rule by id.
+   * Updates one rule by ID with partial fields.
    *
-   * Parameters:
-   *   @param ruleId - Rule id.
-   *   @param newRule - Fields to merge.
+   * @remarks
+   * Only specified fields are updated; omitted fields retain their current value.
+   * Persists immediately and updates the timestamp if provided. Returns `null` if
+   * the rule ID is not found.
    *
-   * Returns:
-   *   @returns Updated row or null if id missing.
-   * </Summary>
+   * @param ruleId - ID of the rule to update.
+   * @param newRule - Fields to merge/replace.
+   * @returns Updated rule with all fields, or `null` if not found.
+   *
+   * @example
+   * ```ts
+   * const updated = await store.update("pref-123", { confidence: "high" });
+   * if (updated) console.log("Updated confidence");
+   * ```
    */
   update(
     ruleId: string,
@@ -163,79 +212,88 @@ export interface IPreferenceStore {
   ): Promise<PreferenceRule | null>;
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Removes all rules whose topics array contains the given topic.
+   * Deletes all rules tagged with a given topic.
    *
-   * Parameters:
-   *   @param topic - Topic tag to remove.
+   * @remarks
+   * Bulk delete by topic — useful for removing domain-specific rules
+   * when a language or framework is no longer in use.
    *
-   * Returns:
-   *   @returns Count of rules removed.
-   * </Summary>
+   * @param topic - Topic tag to remove (e.g., `"python"`).
+   * @returns Count of rules deleted.
+   *
+   * @example
+   * ```ts
+   * const deleted = await store.deleteByTopic("deprecated-framework");
+   * console.log(`Removed ${deleted} rules`);
+   * ```
    */
   deleteByTopic(topic: string): Promise<number>;
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Merges duplicate rules via advisor model when rule count >= 20.
+   * Consolidates duplicate rules using the language model for similarity detection.
    *
-   * Parameters:
-   *   None.
+   * @remarks
+   * Called when rule count exceeds ~20 to reduce redundancy. Uses the configured
+   * model to identify semantically similar rules and merge them. This is a best-effort
+   * cleanup — exact behavior depends on model capability.
    *
-   * Returns:
-   *   @returns Completes after optional rewrite.
+   * @throws When the Ollama client or config manager was not injected at construction.
    *
-   * @throws {Error} — When Ollama/config deps were not injected at construction.
-   * </Summary>
+   * @example
+   * ```ts
+   * const count = await store.getAll();
+   * if (count.length >= 20) {
+   *   await store.consolidate();
+   * }
+   * ```
    */
   consolidate(): Promise<void>;
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Removes one rule by id when present.
+   * Deletes one rule by ID.
    *
-   * Parameters:
-   *   @param id - Rule id to delete.
+   * @remarks
+   * Idempotent — calling with a non-existent ID simply returns `false`.
+   * Changes are persisted immediately.
    *
-   * Returns:
-   *   @returns True when a row was removed.
-   * </Summary>
+   * @param id - Rule ID to delete.
+   * @returns `true` if a rule was removed; `false` if ID not found.
+   *
+   * @example
+   * ```ts
+   * const wasRemoved = await store.remove("pref-abc123");
+   * ```
    */
   remove(id: string): Promise<boolean>;
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Deletes all rules from storage.
+   * Deletes all stored preference rules.
    *
-   * Parameters:
-   *   None.
+   * @remarks
+   * Irreversible bulk delete. Use with caution. Completes after atomic write.
    *
-   * Returns:
-   *   @returns Completes after atomic write.
-   * </Summary>
+   * @example
+   * ```ts
+   * await store.clear();
+   * const remaining = await store.getAll(); // empty array
+   * ```
    */
   clear(): Promise<void>;
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Increments timesApplied for one rule (no-op when id missing).
+   * Increments the `timesApplied` counter for a rule.
    *
-   * Parameters:
-   *   @param id - Rule id to bump.
+   * @remarks
+   * Called when a rule is used during task planning or execution to track
+   * how often it's applied (used for ranking). No-op if the rule ID is not found.
    *
-   * Returns:
-   *   @returns Completes after persistence.
-   * </Summary>
+   * @param id - Rule ID to update.
+   *
+   * @example
+   * ```ts
+   * await store.markApplied("pref-abc123");
+   * Rule is now ranked higher for future task planning
+   * ```
    */
   markApplied(id: string): Promise<void>;
 }

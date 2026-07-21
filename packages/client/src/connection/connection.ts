@@ -70,7 +70,7 @@ export type { PullProgress, TaskFrame } from "../frames.js";
  * const models = await connection.fetchModels();
  * await connection.sendTask({
  *   task: "Explain this code",
- *   maxAgents: 2,
+ *   maxSubagents: 2,
  *   onFrame: (frame) => console.log(frame.kind),
  *   onToken: (token) => process.stdout.write(token),
  * });
@@ -429,11 +429,11 @@ export class Connection {
    *
    * @example
    * ```ts
-   * // Host changed → reconnect
+   * Host changed → reconnect
    * await connection.reload({ ...config, server: "new-host", port: 8080 });
    *
-   * // Models only → no reconnect
-   * await connection.reload({ ...config, advisorModel: "gemma3:27b" });
+   * Models only → no reconnect
+   * await connection.reload({ ...config, subagentModel: "gemma3:27b" });
    * ```
    */
   reload = async (config: Config): Promise<void> => {
@@ -556,7 +556,7 @@ export class Connection {
   listModels = async (): Promise<string[]> => this.fetchModels();
 
   /**
-   * Uploads local skill markdown files for advisor/agent use.
+   * Uploads local skill markdown files for agent/agent use.
    *
    * @param skills - Skill name + content payloads to sync.
    * @throws {@link Error} On connect or command failure.
@@ -605,7 +605,7 @@ export class Connection {
    * Uses models and temperatures from the current config. `onToken` enables
    * token-by-token CLI output; `onFrame` receives the full task event stream.
    *
-   * @param taskOptions - Task text, optional `maxAgents`, and stream callbacks.
+   * @param taskOptions - Task text, optional `maxSubagents`, and stream callbacks.
    * @returns Resolves when the server completes the task stream.
    * @throws {@link Error} On connect failure or mid-stream RSocket / handler errors.
    *
@@ -613,7 +613,7 @@ export class Connection {
    * ```ts
    * await connection.sendTask({
    *   task: "Explain this code",
-   *   maxAgents: 2,
+   *   maxSubagents: 2,
    *   onFrame: (frame) => console.log(frame.kind),
    *   onToken: (token) => process.stdout.write(token),
    * });
@@ -621,7 +621,7 @@ export class Connection {
    */
   sendTask = async (taskOptions: {
     task: string;
-    maxAgents?: 1 | 2 | "max" | number;
+    maxSubagents?: 1 | 2 | "max" | number;
     onFrame: (frame: TaskFrame) => void | Promise<void>;
     onToken?: (token: string) => void;
   }): Promise<void> => {
@@ -633,7 +633,7 @@ export class Connection {
       this.socket(),
       taskOptions.onFrame,
       taskOptions.onToken,
-      taskOptions.maxAgents,
+      taskOptions.maxSubagents,
     );
   };
 
@@ -675,22 +675,23 @@ export class Connection {
    *
    * @param id - Plan id from the server’s plan frame.
    * @param decision - `"implement"`, `"skip"`, or `"edit"`.
-   * @param steps - Replacement steps when `decision` is `"edit"`.
+   * @param feedback - Free-text feedback when `decision` is `"edit"`; the
+   *   agent re-plans using this feedback.
    * @returns Resolves when the server acknowledges the decision.
    * @throws {@link Error} On connect or command failure.
    *
    * @example
    * ```ts
    * await connection.respondPlan(planId, "implement");
-   * await connection.respondPlan(planId, "edit", ["Run tests", "Ship docs"]);
+   * await connection.respondPlan(planId, "edit", "Add tests for the edge cases");
    * ```
    */
   respondPlan = async (
     id: string,
     decision: "implement" | "skip" | "edit",
-    steps?: string[],
+    feedback?: string,
   ): Promise<void> => {
     await this.waitUntilConnected();
-    await respondPlanFn(this.socket(), this.meta(), id, decision, steps);
+    await respondPlanFn(this.socket(), this.meta(), id, decision, feedback);
   };
 }

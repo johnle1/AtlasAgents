@@ -13,9 +13,9 @@ All tests use **Vitest** and are structured as a three-layer pyramid.
 ```
 _Test_/
 ├── unit/                              ← Layer 1: isolated module tests
-│   ├── advisor.test.ts                — Advisor.plan search-then-plan loop, budget
-│   ├── advisorConstants.test.ts       — MAX_ADVISOR_LOOPS, MAX_ADVISOR_SEARCH_CALLS
-│   ├── advisorTools.test.ts           — hasAdvisorSearchTools, ADVISOR_RETRIEVAL_RULES
+│   ├── agent.test.ts                — Advisor.plan search-then-plan loop, budget
+│   ├── agentConstants.test.ts       — MAX_ADVISOR_LOOPS, MAX_ADVISOR_SEARCH_CALLS
+│   ├── agentTools.test.ts           — hasAdvisorSearchTools, ADVISOR_RETRIEVAL_RULES
 │   ├── bootstrapAbortSignal.test.ts   — wireSessionAbortSignal wiring
 │   ├── commandCatalog.test.ts         — getCommandSuggestions, requiresArgs, label, desc
 │   ├── connectionHealthCheck.test.ts  — runHealthCheck timer cleanup (Bugbot fix)
@@ -59,7 +59,7 @@ These files were deleted after their cases moved here:
 | `packages/client/src/mcp/tokenSaveClient.test.ts` | `unit/tokenSaveClient.test.ts` |
 | `packages/client/src/ui/spinnerSync.test.ts` | `unit/spinnerSync.test.ts` |
 | `packages/client/src/ui/taskBoardLayout.test.ts` | `unit/taskBoardLayout.test.ts` |
-| `packages/server/src/orchestration/advisor/advisor.test.ts` | `unit/advisor.test.ts` |
+| `packages/server/src/orchestration/agent/agent.test.ts` | `unit/agent.test.ts` |
 | `packages/server/src/orchestration/mcp/mcpToolSchema.test.ts` | `unit/mcpToolSchema.test.ts` |
 | `packages/server/src/orchestration/readyQueue.test.ts` | `unit/readyQueue.test.ts` |
 | `packages/server/src/orchestration/orchestrator/orchestratorPipelineTypes.test.ts` | `unit/orchestratorPipelineTypes.test.ts` |

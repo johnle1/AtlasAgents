@@ -18,8 +18,8 @@ import { loadConfig, type Config } from "./config.js";
 import { buildPromptLabel } from "./pathDisplay.js";
 import { buildBannerLines } from "./renderer/banner.js";
 import type {
-  AgentBoardState,
-  AgentStatusState,
+  SubagentBoardState,
+  SubagentStatusState,
   AppProps,
   ApprovalRequest,
   HistoryItem,
@@ -39,8 +39,6 @@ import { getPendingApproval, getPendingPrompt } from "./ui/uiBridge.js";
 export type PromptDraft = {
   lineValue: string;
   choiceValue: string;
-  planLines: string[];
-  planCurrent: string;
   themeSelected: number;
 };
 
@@ -48,8 +46,6 @@ export type PromptDraft = {
 export const emptyPromptDraft = (): PromptDraft => ({
   lineValue: "",
   choiceValue: "",
-  planLines: [],
-  planCurrent: "",
   themeSelected: 0,
 });
 
@@ -120,13 +116,13 @@ export type AppContextValue = {
   promptDraft: PromptDraft;
   setPromptDraft: React.Dispatch<React.SetStateAction<PromptDraft>>;
 
-  agentStatuses: Map<number | "advisor", AgentStatusState>;
-  setAgentStatuses: React.Dispatch<
-    React.SetStateAction<Map<number | "advisor", AgentStatusState>>
+  subagentStatuses: Map<number | "agent", SubagentStatusState>;
+  setSubagentStatuses: React.Dispatch<
+    React.SetStateAction<Map<number | "agent", SubagentStatusState>>
   >;
 
-  agentBoards: AgentBoardState[];
-  setAgentBoards: React.Dispatch<React.SetStateAction<AgentBoardState[]>>;
+  subagentBoards: SubagentBoardState[];
+  setSubagentBoards: React.Dispatch<React.SetStateAction<SubagentBoardState[]>>;
 
   /** First Ctrl+C during `busy` increments this; second press exits. */
   sigintBusy: number;
@@ -225,6 +221,9 @@ export const AppProvider: React.FC<AppProviderProps> = ({
     try {
       return buildPromptLabel(fileProxy.getCwd());
     } catch {
+      // Safe to ignore: fileProxy may not be initialized yet on first render
+      // (workspace root not resolved) — the generic "$ " prompt is a fine
+      // placeholder until the next cwd change re-renders it correctly.
       return "$ ";
     }
   });
@@ -234,6 +233,9 @@ export const AppProvider: React.FC<AppProviderProps> = ({
     try {
       return getPendingApproval();
     } catch {
+      // Safe to ignore: the bridge module may not be wired up yet on first
+      // render — no approval can be pending before the bridge exists, so
+      // `null` (no pending approval) is the correct value, not a fallback.
       return null;
     }
   });
@@ -242,6 +244,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({
     try {
       return getPendingPrompt();
     } catch {
+      // Safe to ignore: same bridge-not-yet-wired case as `approval` above —
+      // `null` (no pending prompt) is correct, not a fallback default.
       return null;
     }
   });
@@ -249,10 +253,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({
   const [approvalSelected, setApprovalSelected] = useState(0);
   const [promptDraft, setPromptDraft] = useState<PromptDraft>(emptyPromptDraft);
 
-  const [agentStatuses, setAgentStatuses] = useState(
-    () => new Map<number | "advisor", AgentStatusState>(),
+  const [subagentStatuses, setSubagentStatuses] = useState(
+    () => new Map<number | "agent", SubagentStatusState>(),
   );
-  const [agentBoards, setAgentBoards] = useState<AgentBoardState[]>([]);
+  const [subagentBoards, setSubagentBoards] = useState<SubagentBoardState[]>([]);
 
   const [histIdx, setHistIdx] = useState(-1);
   const [busy, setBusy] = useState(false);
@@ -317,10 +321,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({
       setApprovalSelected,
       promptDraft,
       setPromptDraft,
-      agentStatuses,
-      setAgentStatuses,
-      agentBoards,
-      setAgentBoards,
+      subagentStatuses,
+      setSubagentStatuses,
+      subagentBoards,
+      setSubagentBoards,
       sigintBusy,
       setSigintBusy,
       handleSubmit,
@@ -350,8 +354,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({
       promptReq,
       approvalSelected,
       promptDraft,
-      agentStatuses,
-      agentBoards,
+      subagentStatuses,
+      subagentBoards,
       sigintBusy,
       handleSubmit,
       inputDisabled,

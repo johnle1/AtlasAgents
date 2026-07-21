@@ -22,12 +22,17 @@ import {
   printBashApproved,
   printBashRan,
   printBashResult,
-  printSkipped,
   type BashClass,
 } from "../../renderer.js";
-import { requestApproval } from "../../ui/uiBridge.js";
-import type { DispatchContext } from "../types.js";
+import {
+  printDeclineFeedback,
+  requestApprovalWithFeedback,
+} from "../../ui/approvalFlow.js";
+import type { DispatchContext, ShellResult } from "../types.js";
 import { logger } from "../../utils/logger.js";
+
+/** {@link ShellResult} plus the optional revise reason a decline can carry. */
+type CommandRunResult = ShellResult & { feedback?: string };
 
 /**
  * Classifies a command without executing it.
@@ -49,6 +54,151 @@ export const handleCommandClassify = (
   Promise.resolve({
     classification: context.classifyCommand(String(requestBody.command ?? "")),
   });
+
+/** Shared run/skip approval prompt used by both the background and foreground gates. */
+const confirmRunOrSkip = (
+  command: string,
+): Promise<{ approved: boolean; feedback?: string }> =>
+  requestApprovalWithFeedback(
+    { type: "runSkip", command },
+    "What should change about this command?",
+  );
+
+/** Result shape for a command the user declined to run (skip or revise). */
+const declinedCommandResult = (feedback?: string): CommandRunResult => ({
+  stdout: "",
+  stderr: "skipped by user — command was not executed",
+  exitCode: -1,
+  feedback,
+});
+
+/**
+ * Approves and detaches a `background: true` command, or reports the decline/spawn failure.
+ *
+ * @remarks
+ * Detached + `stdio: "ignore"` + `unref()`: the process outlives this request
+ * and its output is not proxied back to the agent.
+ *
+ * @param context - Provides `currentDir` for the spawned process's cwd.
+ * @param command - Raw command line to run.
+ */
+const runBackgroundCommand = async (
+  context: DispatchContext,
+  command: string,
+): Promise<CommandRunResult> => {
+  const { approved, feedback } = await confirmRunOrSkip(command);
+  if (!approved) {
+    printDeclineFeedback(feedback);
+    return declinedCommandResult(feedback);
+  }
+
+  printBashApproved();
+
+  const commandParts = command.trim().split(/\s+/);
+  if (commandParts.length === 0 || !commandParts[0]) {
+    return { stdout: "", stderr: "empty command", exitCode: 1 };
+  }
+
+  let spawnedProcess;
+  try {
+    spawnedProcess = spawn(commandParts[0], commandParts.slice(1), {
+      detached: true,
+      stdio: "ignore",
+      cwd: context.currentDir,
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
+    return {
+      stdout: "",
+      stderr: `Failed to spawn command: ${errorMessage}`,
+      exitCode: 1,
+    };
+  }
+
+  spawnedProcess.unref();
+
+  const statusMessage = `Started in background (PID ${spawnedProcess.pid}). Check your terminal for output.`;
+  printBashRan(0, statusMessage, "");
+  return { stdout: statusMessage, stderr: "", exitCode: 0 };
+};
+
+/**
+ * Gates a non-`"safe"` foreground command behind run/skip approval.
+ *
+ * @remarks
+ * `"dangerous"` commands also print a warning banner before prompting.
+ *
+ * @returns The decline result when the user skips/revises, or `null` to proceed.
+ */
+const confirmForegroundCommand = async (
+  command: string,
+  commandClassification: BashClass,
+): Promise<CommandRunResult | null> => {
+  if (commandClassification === "dangerous") {
+    beginBlockOutput();
+    logger.blank();
+    {
+      const theme = getTheme();
+      logger.info(`  ${theme.warning}⚠${theme.reset}  Dangerous command.`);
+    }
+    logger.blank();
+  }
+
+  const { approved, feedback } = await confirmRunOrSkip(command);
+  if (!approved) {
+    printDeclineFeedback(feedback);
+    return declinedCommandResult(feedback);
+  }
+
+  printBashApproved();
+  return null;
+};
+
+/**
+ * Runs an approved command in the foreground, tracking CWD changes and printing output.
+ *
+ * @remarks
+ * Wraps the command so `cd`/`pushd` inside it can report a new CWD, strips
+ * that tracking marker from stdout, and moves `context.currentDir` when the
+ * new path stays inside the workspace (escapes like `cd /` are ignored).
+ */
+const executeForegroundCommand = async (
+  context: DispatchContext,
+  command: string,
+  commandClassification: BashClass,
+): Promise<ShellResult> => {
+  const startTime = Date.now();
+
+  const trackedCommand = wrapCommandForCwdTracking(command, isWindowsShell());
+  const executionResult = await context.runShell(trackedCommand);
+
+  const { cleanedStdout, newCwd } = extractCwdFromOutput(
+    executionResult.stdout,
+  );
+  const resultWithCleanStdout = { ...executionResult, stdout: cleanedStdout };
+
+  if (newCwd && !trackedCwdsEqual(newCwd, context.currentDir)) {
+    try {
+      context.setCurrentDir(newCwd);
+    } catch {
+      // cd outside workspace (e.g. /) must not move the sandbox cursor.
+    }
+  }
+
+  // Safe commands get a compact timing line; others echo full captured output.
+  if (commandClassification === "safe") {
+    printBashResult(resultWithCleanStdout.exitCode, Date.now() - startTime);
+  } else {
+    printBashRan(
+      resultWithCleanStdout.exitCode,
+      resultWithCleanStdout.stdout,
+      resultWithCleanStdout.stderr,
+    );
+  }
+
+  return resultWithCleanStdout;
+};
 
 /**
  * Runs a shell command with classification-based approval and CWD tracking.
@@ -90,113 +240,18 @@ export const handleCommandRun = async (
   printBash(command, commandClassification);
 
   if (commandClassification === "background") {
-    const userApproved = (await requestApproval({
-      type: "runSkip",
-      command,
-    })) as boolean;
-
-    if (!userApproved) {
-      printSkipped();
-      return {
-        stdout: "",
-        stderr: "skipped by user — command was not executed",
-        exitCode: -1,
-      };
-    }
-
-    printBashApproved();
-
-    const commandParts = command.trim().split(/\s+/);
-    if (commandParts.length === 0 || !commandParts[0]) {
-      return {
-        stdout: "",
-        stderr: "empty command",
-        exitCode: 1,
-      };
-    }
-
-    let spawnedProcess;
-    try {
-      // Detached + unref: process outlives the CLI request; output is not proxied.
-      spawnedProcess = spawn(commandParts[0], commandParts.slice(1), {
-        detached: true,
-        stdio: "ignore",
-        cwd: context.currentDir,
-      });
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      return {
-        stdout: "",
-        stderr: `Failed to spawn command: ${errorMessage}`,
-        exitCode: 1,
-      };
-    }
-
-    spawnedProcess.unref();
-
-    const statusMessage = `Started in background (PID ${spawnedProcess.pid}). Check your terminal for output.`;
-    printBashRan(0, statusMessage, "");
-    return { stdout: statusMessage, stderr: "", exitCode: 0 };
+    return runBackgroundCommand(context, command);
   }
 
   if (commandClassification !== "safe") {
-    if (commandClassification === "dangerous") {
-      beginBlockOutput();
-      logger.blank();
-      {
-        const theme = getTheme();
-        logger.info(`  ${theme.warning}⚠${theme.reset}  Dangerous command.`);
-      }
-      logger.blank();
-    }
-
-    const userApproved = (await requestApproval({
-      type: "runSkip",
+    const declineResult = await confirmForegroundCommand(
       command,
-    })) as boolean;
-
-    if (!userApproved) {
-      printSkipped();
-      return {
-        stdout: "",
-        stderr: "skipped by user — command was not executed",
-        exitCode: -1,
-      };
-    }
-
-    printBashApproved();
-  }
-
-  const startTime = Date.now();
-
-  // Wrap so cd/pushd inside the child can update proxy currentDir afterward.
-  const trackedCommand = wrapCommandForCwdTracking(command, isWindowsShell());
-  const executionResult = await context.runShell(trackedCommand);
-
-  const { cleanedStdout, newCwd } = extractCwdFromOutput(
-    executionResult.stdout,
-  );
-  const resultWithCleanStdout = { ...executionResult, stdout: cleanedStdout };
-
-  if (newCwd && !trackedCwdsEqual(newCwd, context.currentDir)) {
-    try {
-      context.setCurrentDir(newCwd);
-    } catch {
-      // cd outside workspace (e.g. /) must not move the sandbox cursor.
-    }
-  }
-
-  // Safe commands get a compact timing line; others echo full captured output.
-  if (commandClassification === "safe") {
-    printBashResult(resultWithCleanStdout.exitCode, Date.now() - startTime);
-  } else {
-    printBashRan(
-      resultWithCleanStdout.exitCode,
-      resultWithCleanStdout.stdout,
-      resultWithCleanStdout.stderr,
+      commandClassification,
     );
+    if (declineResult) {
+      return declineResult;
+    }
   }
 
-  return resultWithCleanStdout;
+  return executeForegroundCommand(context, command, commandClassification);
 };

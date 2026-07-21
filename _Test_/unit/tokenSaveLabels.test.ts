@@ -63,8 +63,8 @@ describe("tokenSaveActivityMessage", () => {
 
   it("formats callers lookup", () => {
     expect(
-      tokenSaveActivityMessage("tokensave_callers", { symbol: "Advisor.plan" }),
-    ).toBe("Finding callers of Advisor.plan...");
+      tokenSaveActivityMessage("tokensave_callers", { symbol: "Agent.plan" }),
+    ).toBe("Finding callers of Agent.plan...");
   });
 
   it("formats index status check", () => {

@@ -225,7 +225,7 @@ describe("buildTaskBoardLines — boundary cases", () => {
 
   it("does not append activity lines for escalating or other status messages (boundary)", () => {
     const tasks = [{ id: 1, text: "Some task", state: "complete" }];
-    const lines = buildTaskBoardLines(tasks, "Escalating to advisor...", 60);
+    const lines = buildTaskBoardLines(tasks, "Escalating to agent...", 60);
     expect(lines.some((l) => l.isActivity)).toBe(false);
     expect(lines.map((l) => l.text).join(" ")).not.toContain("Escalating");
   });

@@ -2,8 +2,8 @@
  * Integration tests — spinner + bridge wiring
  *
  * Verifies that `spinnerForStatusFrame` (the logic layer) integrates
- * correctly with the bridge's `setSpinner` and `setAgentStatus` /
- * `removeAgentStatus` dispatch layer.
+ * correctly with the bridge's `setSpinner` and `setSubagentStatus` /
+ * `removeSubagentStatus` dispatch layer.
  *
  * Testing pyramid layer : Integration
  * Runner                 : Vitest
@@ -21,8 +21,8 @@
  *   - Does `setSpinner(null)` actually call `onSpinner(null)` — i.e. is
  *     the null handled correctly and not swallowed?
  *   - Do sequential frames update the hook in the correct order?
- *   - Does `clearAgentStatuses` call BOTH `onAgentStatuses` and
- *     `onAgentBoards` as documented?
+ *   - Does `clearSubagentStatuses` call BOTH `onSubagentStatuses` and
+ *     `onSubagentBoards` as documented?
  *
  * Category checklist:
  *   ✅ Happy path         — frames produce the expected hook calls
@@ -34,16 +34,16 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskFrame } from "../../packages/client/src/frames";
-import type { AgentBoardState } from "../../packages/client/src/ui/types";
+import type { SubagentBoardState } from "../../packages/client/src/ui/types";
 import {
-  clearAgentBoards,
-  clearAgentStatuses,
-  removeAgentStatus,
-  setAgentBoards,
-  setAgentStatus,
+  clearSubagentBoards,
+  clearSubagentStatuses,
+  removeSubagentStatus,
+  setSubagentBoards,
+  setSubagentStatus,
   setSpinner,
   updateAgentActivity,
-} from "../../packages/client/src/ui/bridge/agentStatus";
+} from "../../packages/client/src/ui/bridge/subagentStatus";
 import {
   getBridgeHooks,
   setBridgeHooks,
@@ -56,18 +56,18 @@ import { spinnerForStatusFrame } from "../../packages/client/src/ui/spinnerSync"
 // Shared test fixture builders
 // ---------------------------------------------------------------------------
 
-const advisorFrame = (
+const agentFrame = (
   stage: "understanding" | "drafting" | "ready" | "combining",
   icon: "◌" | "✓" | "⚠" = "◌",
 ): TaskFrame => ({
   kind: "status",
-  source: "advisor",
+  source: "agent",
   stage,
   icon,
   message: "",
 });
 
-const agentFrame = (
+const subagentFrame = (
   stage: "thinking" | "running" | "reading" | "done",
   activity?: { stage: "thinking" | "reading" | "running"; message: string },
 ): TaskFrame => ({
@@ -85,8 +85,8 @@ const agentFrame = (
 
 let mockHooks: {
   onSpinner: ReturnType<typeof vi.fn>;
-  onAgentStatuses: ReturnType<typeof vi.fn>;
-  onAgentBoards: ReturnType<typeof vi.fn>;
+  onSubagentStatuses: ReturnType<typeof vi.fn>;
+  onSubagentBoards: ReturnType<typeof vi.fn>;
   onBusy: ReturnType<typeof vi.fn>;
   onTaskActive: ReturnType<typeof vi.fn>;
 };
@@ -95,8 +95,8 @@ beforeEach(() => {
   // Create fresh spy functions for each test
   mockHooks = {
     onSpinner: vi.fn(),
-    onAgentStatuses: vi.fn(),
-    onAgentBoards: vi.fn(),
+    onSubagentStatuses: vi.fn(),
+    onSubagentBoards: vi.fn(),
     onBusy: vi.fn(),
     onTaskActive: vi.fn(),
   };
@@ -117,9 +117,9 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("Spinner pipeline — happy path", () => {
-  it("advisor thinking frame fires onSpinner with a thinking SpinnerState (happy path)", () => {
+  it("agent thinking frame fires onSpinner with a thinking SpinnerState (happy path)", () => {
     // Step 1: compute the spinner value from the incoming frame
-    const spinnerValue = spinnerForStatusFrame(advisorFrame("understanding", "◌"));
+    const spinnerValue = spinnerForStatusFrame(agentFrame("understanding", "◌"));
 
     // Step 2: push the value through the bridge dispatch
     // (The real orchestrator does exactly this in taskStream.ts)
@@ -131,13 +131,13 @@ describe("Spinner pipeline — happy path", () => {
     expect(mockHooks.onSpinner).toHaveBeenCalledOnce();
     expect(mockHooks.onSpinner).toHaveBeenCalledWith({
       active: true,
-      label: "Advisor",
+      label: "Agent",
       mode: "thinking",
     });
   });
 
-  it("advisor 'ready' frame fires onSpinner with null to clear the spinner (happy path)", () => {
-    const spinnerValue = spinnerForStatusFrame(advisorFrame("ready", "✓"));
+  it("agent 'ready' frame fires onSpinner with null to clear the spinner (happy path)", () => {
+    const spinnerValue = spinnerForStatusFrame(agentFrame("ready", "✓"));
     // spinnerForStatusFrame returns null for 'ready' → clear the spinner
     if (spinnerValue !== undefined) {
       setSpinner(spinnerValue);
@@ -145,21 +145,21 @@ describe("Spinner pipeline — happy path", () => {
     expect(mockHooks.onSpinner).toHaveBeenCalledWith(null);
   });
 
-  it("agent thinking stage fires onSpinner with Agent thinking spinner (happy path)", () => {
-    const spinnerValue = spinnerForStatusFrame(agentFrame("thinking"));
+  it("subagent thinking stage fires onSpinner with Subagent thinking spinner (happy path)", () => {
+    const spinnerValue = spinnerForStatusFrame(subagentFrame("thinking"));
     if (spinnerValue !== undefined) {
       setSpinner(spinnerValue);
     }
     expect(mockHooks.onSpinner).toHaveBeenCalledWith({
       active: true,
-      label: "Agent",
+      label: "Subagent",
       mode: "thinking",
     });
   });
 
-  it("agent reading activity fires onSpinner with working spinner and file path label (happy path)", () => {
+  it("subagent reading activity fires onSpinner with working spinner and file path label (happy path)", () => {
     const spinnerValue = spinnerForStatusFrame(
-      agentFrame("reading", { stage: "reading", message: "Reading src/utils.ts" }),
+      subagentFrame("reading", { stage: "reading", message: "Reading src/utils.ts" }),
     );
     if (spinnerValue !== undefined) {
       setSpinner(spinnerValue);
@@ -213,12 +213,12 @@ describe("Spinner pipeline — non-status frame passthrough", () => {
 // ---------------------------------------------------------------------------
 
 describe("Spinner pipeline — multi-frame sequence integrity", () => {
-  it("advisor thinking → advisor ready produces: thinking spinner, then null (state integrity)", () => {
-    // Simulate a realistic advisor run: thinking phase, then completion
+  it("agent thinking → agent ready produces: thinking spinner, then null (state integrity)", () => {
+    // Simulate a realistic agent run: thinking phase, then completion
     const frames: TaskFrame[] = [
-      advisorFrame("drafting", "◌"),
-      advisorFrame("combining", "◌"),
-      advisorFrame("ready", "✓"),
+      agentFrame("drafting", "◌"),
+      agentFrame("combining", "◌"),
+      agentFrame("ready", "✓"),
     ];
 
     for (const frame of frames) {
@@ -232,16 +232,16 @@ describe("Spinner pipeline — multi-frame sequence integrity", () => {
     expect(mockHooks.onSpinner).toHaveBeenCalledTimes(3);
 
     const calls = mockHooks.onSpinner.mock.calls.map((c: unknown[]) => c[0]);
-    expect(calls[0]).toMatchObject({ mode: "thinking", label: "Advisor" });
-    expect(calls[1]).toMatchObject({ mode: "thinking", label: "Advisor" });
+    expect(calls[0]).toMatchObject({ mode: "thinking", label: "Agent" });
+    expect(calls[1]).toMatchObject({ mode: "thinking", label: "Agent" });
     expect(calls[2]).toBeNull();
   });
 
-  it("agent thinking → agent working → agent done produces correct sequence (state integrity)", () => {
+  it("subagent thinking → subagent working → subagent done produces correct sequence (state integrity)", () => {
     const frames: TaskFrame[] = [
-      agentFrame("thinking"),
-      agentFrame("reading", { stage: "reading", message: "Reading index.ts" }),
-      agentFrame("done"),
+      subagentFrame("thinking"),
+      subagentFrame("reading", { stage: "reading", message: "Reading index.ts" }),
+      subagentFrame("done"),
     ];
 
     for (const frame of frames) {
@@ -252,55 +252,55 @@ describe("Spinner pipeline — multi-frame sequence integrity", () => {
     }
 
     const calls = mockHooks.onSpinner.mock.calls.map((c: unknown[]) => c[0]);
-    expect(calls[0]).toMatchObject({ mode: "thinking", label: "Agent" });
+    expect(calls[0]).toMatchObject({ mode: "thinking", label: "Subagent" });
     expect(calls[1]).toMatchObject({ mode: "working" });
     expect(calls[2]).toBeNull();
   });
 });
 
 // ---------------------------------------------------------------------------
-// setAgentStatus / removeAgentStatus — contract consistency
+// setSubagentStatus / removeSubagentStatus — contract consistency
 // ---------------------------------------------------------------------------
 
-describe("setAgentStatus / removeAgentStatus integration", () => {
-  it("setAgentStatus invokes onAgentStatuses with an updater function (contract)", () => {
-    setAgentStatus({ id: 1, label: "Agent 1", icon: "◌", message: "Thinking…" });
-    expect(mockHooks.onAgentStatuses).toHaveBeenCalledOnce();
+describe("setSubagentStatus / removeSubagentStatus integration", () => {
+  it("setSubagentStatus invokes onSubagentStatuses with an updater function (contract)", () => {
+    setSubagentStatus({ id: 1, label: "Agent 1", icon: "◌", message: "Thinking…" });
+    expect(mockHooks.onSubagentStatuses).toHaveBeenCalledOnce();
     // The updater should be a function (React dispatch pattern)
-    expect(typeof mockHooks.onAgentStatuses.mock.calls[0]![0]).toBe("function");
+    expect(typeof mockHooks.onSubagentStatuses.mock.calls[0]![0]).toBe("function");
   });
 
-  it("setAgentStatus updater inserts the status into the map (contract)", () => {
-    setAgentStatus({ id: 2, label: "Agent 2", icon: "✓", message: "Done" });
+  it("setSubagentStatus updater inserts the status into the map (contract)", () => {
+    setSubagentStatus({ id: 2, label: "Agent 2", icon: "✓", message: "Done" });
     // Simulate React calling the updater with the current state map
-    const previousMap = new Map<number | "advisor", unknown>();
-    const updater = mockHooks.onAgentStatuses.mock.calls[0]![0] as (
-      m: Map<number | "advisor", unknown>,
-    ) => Map<number | "advisor", unknown>;
+    const previousMap = new Map<number | "agent", unknown>();
+    const updater = mockHooks.onSubagentStatuses.mock.calls[0]![0] as (
+      m: Map<number | "agent", unknown>,
+    ) => Map<number | "agent", unknown>;
     const newMap = updater(previousMap);
     expect(newMap.has(2)).toBe(true);
     expect(newMap.get(2)).toMatchObject({ label: "Agent 2", icon: "✓" });
   });
 
-  it("removeAgentStatus updater deletes the agent from the map (contract)", () => {
-    const initialMap = new Map<number | "advisor", unknown>([[
+  it("removeSubagentStatus updater deletes the agent from the map (contract)", () => {
+    const initialMap = new Map<number | "agent", unknown>([[
       3,
       { id: 3, label: "Agent 3", icon: "◌", message: "" },
     ]]);
-    removeAgentStatus(3);
-    const updater = mockHooks.onAgentStatuses.mock.calls[0]![0] as (
-      m: Map<number | "advisor", unknown>,
-    ) => Map<number | "advisor", unknown>;
+    removeSubagentStatus(3);
+    const updater = mockHooks.onSubagentStatuses.mock.calls[0]![0] as (
+      m: Map<number | "agent", unknown>,
+    ) => Map<number | "agent", unknown>;
     const newMap = updater(initialMap);
     expect(newMap.has(3)).toBe(false);
   });
 
-  it("removeAgentStatus is a no-op when agent does not exist (edge — defensive)", () => {
-    const initialMap = new Map<number | "advisor", unknown>();
-    removeAgentStatus(99);
-    const updater = mockHooks.onAgentStatuses.mock.calls[0]![0] as (
-      m: Map<number | "advisor", unknown>,
-    ) => Map<number | "advisor", unknown>;
+  it("removeSubagentStatus is a no-op when agent does not exist (edge — defensive)", () => {
+    const initialMap = new Map<number | "agent", unknown>();
+    removeSubagentStatus(99);
+    const updater = mockHooks.onSubagentStatuses.mock.calls[0]![0] as (
+      m: Map<number | "agent", unknown>,
+    ) => Map<number | "agent", unknown>;
     const newMap = updater(initialMap);
     // Should return the same map reference when the agent wasn't present
     expect(newMap).toBe(initialMap);
@@ -308,36 +308,36 @@ describe("setAgentStatus / removeAgentStatus integration", () => {
 });
 
 // ---------------------------------------------------------------------------
-// clearAgentStatuses — clears BOTH agent statuses AND agent boards
+// clearSubagentStatuses — clears BOTH agent statuses AND agent boards
 // ---------------------------------------------------------------------------
 
-describe("clearAgentStatuses integration", () => {
-  it("calls both onAgentStatuses and onAgentBoards (contract consistency)", () => {
-    clearAgentStatuses();
-    expect(mockHooks.onAgentStatuses).toHaveBeenCalledOnce();
-    expect(mockHooks.onAgentBoards).toHaveBeenCalledOnce();
+describe("clearSubagentStatuses integration", () => {
+  it("calls both onSubagentStatuses and onSubagentBoards (contract consistency)", () => {
+    clearSubagentStatuses();
+    expect(mockHooks.onSubagentStatuses).toHaveBeenCalledOnce();
+    expect(mockHooks.onSubagentBoards).toHaveBeenCalledOnce();
   });
 
-  it("onAgentStatuses updater returns an empty Map (contract)", () => {
-    clearAgentStatuses();
-    const updater = mockHooks.onAgentStatuses.mock.calls[0]![0] as () => Map<unknown, unknown>;
+  it("onSubagentStatuses updater returns an empty Map (contract)", () => {
+    clearSubagentStatuses();
+    const updater = mockHooks.onSubagentStatuses.mock.calls[0]![0] as () => Map<unknown, unknown>;
     expect(updater()).toEqual(new Map());
   });
 
-  it("onAgentBoards updater returns an empty array (contract)", () => {
-    clearAgentStatuses();
-    const boardUpdater = mockHooks.onAgentBoards.mock.calls[0]![0] as () => unknown[];
+  it("onSubagentBoards updater returns an empty array (contract)", () => {
+    clearSubagentStatuses();
+    const boardUpdater = mockHooks.onSubagentBoards.mock.calls[0]![0] as () => unknown[];
     expect(boardUpdater()).toEqual([]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// setAgentBoards + updateAgentActivity — activity preservation contract
+// setSubagentBoards + updateAgentActivity — activity preservation contract
 // ---------------------------------------------------------------------------
 
-describe("setAgentBoards activity preservation", () => {
+describe("setSubagentBoards activity preservation", () => {
   it("preserves the previous activity when a task is still running (contract)", () => {
-    const previousBoards: AgentBoardState[] = [
+    const previousBoards: SubagentBoardState[] = [
       {
         id: 1,
         label: "Agent 1",
@@ -346,7 +346,7 @@ describe("setAgentBoards activity preservation", () => {
       },
     ];
 
-    const newBoards: AgentBoardState[] = [
+    const newBoards: SubagentBoardState[] = [
       {
         id: 1,
         label: "Agent 1",
@@ -356,8 +356,8 @@ describe("setAgentBoards activity preservation", () => {
       },
     ];
 
-    setAgentBoards(newBoards);
-    const boardUpdater = mockHooks.onAgentBoards.mock.calls[0]![0] as (
+    setSubagentBoards(newBoards);
+    const boardUpdater = mockHooks.onSubagentBoards.mock.calls[0]![0] as (
       prev: typeof previousBoards,
     ) => typeof previousBoards;
     const result = boardUpdater(previousBoards);
@@ -370,7 +370,7 @@ describe("setAgentBoards activity preservation", () => {
   });
 
   it("clears activity when no task is running in the board (contract)", () => {
-    const previousBoards: AgentBoardState[] = [
+    const previousBoards: SubagentBoardState[] = [
       {
         id: 1,
         label: "Agent 1",
@@ -379,7 +379,7 @@ describe("setAgentBoards activity preservation", () => {
       },
     ];
 
-    const newBoards: AgentBoardState[] = [
+    const newBoards: SubagentBoardState[] = [
       {
         id: 1,
         label: "Agent 1",
@@ -388,8 +388,8 @@ describe("setAgentBoards activity preservation", () => {
       },
     ];
 
-    setAgentBoards(newBoards);
-    const boardUpdater = mockHooks.onAgentBoards.mock.calls[0]![0] as (
+    setSubagentBoards(newBoards);
+    const boardUpdater = mockHooks.onSubagentBoards.mock.calls[0]![0] as (
       prev: typeof previousBoards,
     ) => typeof previousBoards;
     const result = boardUpdater(previousBoards);
@@ -401,7 +401,7 @@ describe("setAgentBoards activity preservation", () => {
 
 describe("updateAgentActivity", () => {
   it("updates the activity for the matching agent board (contract)", () => {
-    const previousBoards: AgentBoardState[] = [
+    const previousBoards: SubagentBoardState[] = [
       {
         id: 1,
         label: "Agent 1",
@@ -413,7 +413,7 @@ describe("updateAgentActivity", () => {
     const newActivity = { stage: "writing" as const, message: "Writing output.ts" };
     updateAgentActivity(1, newActivity);
 
-    const updater = mockHooks.onAgentBoards.mock.calls[0]![0] as (
+    const updater = mockHooks.onSubagentBoards.mock.calls[0]![0] as (
       prev: typeof previousBoards,
     ) => typeof previousBoards;
     const result = updater(previousBoards);
@@ -421,7 +421,7 @@ describe("updateAgentActivity", () => {
   });
 
   it("is a no-op when the agent board is not found (edge — missing agent)", () => {
-    const previousBoards: AgentBoardState[] = [
+    const previousBoards: SubagentBoardState[] = [
       {
         id: 1,
         label: "Agent 1",
@@ -431,7 +431,7 @@ describe("updateAgentActivity", () => {
     ];
 
     updateAgentActivity(999, { stage: "reading" as const, message: "some file" });
-    const updater = mockHooks.onAgentBoards.mock.calls[0]![0] as (
+    const updater = mockHooks.onSubagentBoards.mock.calls[0]![0] as (
       prev: typeof previousBoards,
     ) => typeof previousBoards;
     const result = updater(previousBoards);

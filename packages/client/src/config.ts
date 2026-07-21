@@ -63,17 +63,17 @@ export interface UiConfig {
  *   server: "localhost",
  *   port: 7000,
  *   password: "secret",
- *   advisorModel: "gemma3:27b",
- *   agentModel: "gemma3:4b",
- *   advisorTemp: 0.1,
- *   agentTemp: 0.4,
+ *   subagentModel: "gemma3:27b",
+ *   subsubagentModel: "gemma3:4b",
+ *   agentTemp: 0.1,
+ *   subagentTemp: 0.4,
  *   retries: 3,
  *   timeout: 600000,
  *   shellTimeoutMs: 120000,
  *   maxContextBudget: 0.2,
  *   workspace: "/home/user/projects",
  *   showThinkOutput: false,
- *   agentCap: 3,
+ *   subagentCap: 3,
  *   ui: { theme: "default", showSpinner: true, useAlternateBuffer: false }
  * };
  */
@@ -109,44 +109,59 @@ export interface Config {
   password: string;
 
   /**
-   * Ollama model name for the advisor role.
-   *
-   * @remarks
-   * The advisor handles planning and coordination tasks. Use larger models
-   * for better reasoning. Example values: "gemma3:27b", "llama3:70b".
-   * Empty until set by user or first-run prompts.
-   */
-  advisorModel: string;
-
-  /**
    * Ollama model name for the agent role.
    *
    * @remarks
-   * Agents handle code generation and execution tasks. Smaller models are
+   * The agent handles planning and coordination tasks. Use larger models
+   * for better reasoning. Example values: "gemma3:27b", "llama3:70b".
+   * Empty until set by user or first-run prompts.
+   */
+  subagentModel: string;
+
+  /**
+   * Ollama model name for the subagent role.
+   *
+   * @remarks
+   * Subagents handle code generation and execution tasks. Smaller models are
    * typically sufficient for faster response times. Example values: "gemma3:4b",
    * "llama3:8b". Empty until set by user or first-run prompts.
    */
-  agentModel: string;
+  subsubagentModel: string;
 
   /**
-   * Sampling temperature for the advisor model (0.0-1.0).
+   * Provider serving the agent role.
+   *
+   * @remarks
+   * `"ollama"` (the default) talks to the local Ollama instance. Any other
+   * value must match a provider added on the server via `/providers add` —
+   * e.g. a vLLM server on a GPU box, AWS Trainium, or Google TPU.
+   */
+  agentProvider: string;
+
+  /**
+   * Provider serving the subagent role. Same rules as {@link agentProvider}.
+   */
+  subagentProvider: string;
+
+  /**
+   * Sampling temperature for the subsubagent model (0.0-1.0).
    *
    * @remarks
    * Lower values (e.g., 0.1) produce more deterministic output suitable for
    * planning and coordination. Higher values produce more varied output.
    * Range is 0.0 to 1.0.
    */
-  advisorTemp: number;
+  agentTemp: number;
 
   /**
-   * Sampling temperature for the agent model (0.0-1.0).
+   * Sampling temperature for the subsubsubagent model (0.0-1.0).
    *
    * @remarks
    * Moderate values (e.g., 0.4) balance creativity with reliability for code
    * generation tasks. Lower values are more deterministic, higher values more
    * creative. Range is 0.0 to 1.0.
    */
-  agentTemp: number;
+  subagentTemp: number;
 
   /**
    * Maximum number of retry attempts for failed server requests.
@@ -197,11 +212,11 @@ export interface Config {
   workspace: string;
 
   /**
-   * Whether to display advisor and agent "think" boxes in the terminal.
+   * Whether to display agent and subagent "think" boxes in the terminal.
    *
    * @remarks
-   * When true, the CLI shows the internal reasoning process of the advisor and
-   * agent models. When false, only the final output is displayed. Default is false
+   * When true, the CLI shows the internal reasoning process of the agent and
+   * subsubsubagent models. When false, only the final output is displayed. Default is false
    * to reduce noise in the terminal.
    */
   showThinkOutput: boolean;
@@ -210,10 +225,10 @@ export interface Config {
    * Maximum number of parallel agent groups when no trigger word is used.
    *
    * @remarks
-   * This caps concurrent agent execution to prevent resource exhaustion. Minimum
+   * This caps concurrent subagent execution to prevent resource exhaustion. Minimum
    * value is 1. Use `::max` as a special value to indicate no cap. Default is 3.
    */
-  agentCap: number;
+  subagentCap: number;
 
   /**
    * Client-side UI preferences.
@@ -243,12 +258,16 @@ const DEFAULT_CONFIG: Config = {
   password: "",
 
   // Model names (empty until set by user or first-run prompts)
-  advisorModel: "",
-  agentModel: "",
+  subagentModel: "",
+  subsubagentModel: "",
 
-  // Low for advisor (deterministic planning), moderate for agents (creative code)
-  advisorTemp: 0.1,
-  agentTemp: 0.4,
+  // Native Ollama by default; switched via /providers + /set agent|subagent
+  agentProvider: "ollama",
+  subagentProvider: "ollama",
+
+  // Low for agent (deterministic planning), moderate for subagents (creative code)
+  agentTemp: 0.1,
+  subagentTemp: 0.4,
 
   // Standard retry count — 3 attempts before escalating or failing
   retries: 3,
@@ -265,11 +284,11 @@ const DEFAULT_CONFIG: Config = {
   // Empty until set via `/workspace set <path>` or editing config.json
   workspace: "",
 
-  // Disable think output by default (shows advisor/agent think boxes when true)
+  // Disable think output by default (shows agent/subagent think boxes when true)
   showThinkOutput: false,
 
-  // Allow 3 parallel agent groups by default (minimum 1)
-  agentCap: 3,
+  // Allow 3 parallel subagent groups by default (minimum 1)
+  subagentCap: 3,
 
   // Default UI preferences
   ui: { theme: "default", showSpinner: true, useAlternateBuffer: false },
@@ -357,7 +376,7 @@ export const ensureDirs = (): void => {
  * - Starting with DEFAULT_CONFIG as the base layer
  * - Overriding with parsed config values
  * - Validating showThinkOutput is boolean (otherwise use default)
- * - Validating agentCap is positive integer (otherwise use default)
+ * - Validating subagentCap is positive integer (otherwise use default)
  * - Merging ui objects with defaults as base
  *
  * @param parsedConfig - Config object parsed from config.json.
@@ -370,12 +389,12 @@ const mergeConfigFromDisk = (parsedConfig: Partial<Config>): Config => ({
     typeof parsedConfig.showThinkOutput === "boolean"
       ? parsedConfig.showThinkOutput
       : DEFAULT_CONFIG.showThinkOutput,
-  agentCap:
-    typeof parsedConfig.agentCap === "number" &&
-    Number.isInteger(parsedConfig.agentCap) &&
-    parsedConfig.agentCap >= 1
-      ? parsedConfig.agentCap
-      : DEFAULT_CONFIG.agentCap,
+  subagentCap:
+    typeof parsedConfig.subagentCap === "number" &&
+    Number.isInteger(parsedConfig.subagentCap) &&
+    parsedConfig.subagentCap >= 1
+      ? parsedConfig.subagentCap
+      : DEFAULT_CONFIG.subagentCap,
   ui: { ...DEFAULT_CONFIG.ui, ...parsedConfig.ui },
 });
 
@@ -386,7 +405,7 @@ const mergeConfigFromDisk = (parsedConfig: Partial<Config>): Config => ({
  * This function checks if the loaded config needs corrections by:
  * - Checking if any DEFAULT_CONFIG keys are missing from stored config
  * - Checking if nested ui object is missing any keys
- * - Validating agentCap is a positive integer
+ * - Validating subagentCap is a positive integer
  * - Validating showThinkOutput is a boolean
  *
  * Returns true if any corrections are needed, indicating the config should be
@@ -418,10 +437,10 @@ const configNeedsPersist = (
     }
   }
   if (
-    parsedConfig.agentCap !== undefined &&
-    (typeof parsedConfig.agentCap !== "number" ||
-      !Number.isInteger(parsedConfig.agentCap) ||
-      parsedConfig.agentCap < 1)
+    parsedConfig.subagentCap !== undefined &&
+    (typeof parsedConfig.subagentCap !== "number" ||
+      !Number.isInteger(parsedConfig.subagentCap) ||
+      parsedConfig.subagentCap < 1)
   ) {
     return true;
   }
@@ -464,7 +483,12 @@ export const loadConfig = (): Config => {
   }
   try {
     const rawConfigString = fs.readFileSync(CONFIG_FILE, "utf-8");
-    const parsedConfig = JSON.parse(rawConfigString) as Partial<Config>;
+    const parsedJson: unknown = JSON.parse(rawConfigString);
+    if (typeof parsedJson !== "object" || parsedJson === null) {
+      // Bad shape (e.g. a JSON array or primitive) — treat like unreadable/corrupt.
+      return { ...DEFAULT_CONFIG, ui: { ...DEFAULT_CONFIG.ui } };
+    }
+    const parsedConfig = parsedJson as Partial<Config>;
     const mergedConfig = mergeConfigFromDisk(parsedConfig);
     if (
       configNeedsPersist(parsedConfig as Record<string, unknown>, parsedConfig)
@@ -514,15 +538,15 @@ export const saveConfig = (config: Config): void => {
  * config, then saves the result to disk. Only keys present in the patch object
  * are modified; all other fields remain unchanged.
  *
- * @param patch - Fields to update (e.g. { advisorModel: "gemma3:27b" }).
+ * @param patch - Fields to update (e.g. { subagentModel: "gemma3:27b" }).
  * @returns The updated configuration after merging and saving.
  *
  * @example
  * const updatedConfig = updateConfig({
- *   advisorModel: "gemma3:27b",
- *   advisorTemp: 0.2
+ *   subagentModel: "gemma3:27b",
+ *   subagentTemp: 0.2
  * });
- * console.log(updatedConfig.advisorModel); // "gemma3:27b"
+ * console.log(updatedConfig.subagentModel); // "gemma3:27b"
  */
 export const updateConfig = (patch: Partial<Config>): Config => {
   const currentConfig = loadConfig();
@@ -543,7 +567,7 @@ export const updateConfig = (patch: Partial<Config>): Config => {
  * Note: This re-reads the file on each call, which is acceptable for rare
  * single-field lookups but inefficient for repeated access.
  *
- * @param key - A key of the Config interface e.g. "server", "advisorModel".
+ * @param key - A key of the Config interface e.g. "server", "subagentModel".
  * @returns The value for that key, typed to match the field.
  *
  * @example
@@ -567,8 +591,8 @@ export const getConfig = <K extends keyof Config>(key: K): Config[K] => {
  * @returns The full updated configuration after saving.
  *
  * @example
- * const updatedConfig = setConfig("advisorModel", "gemma3:27b");
- * console.log(updatedConfig.advisorModel); // "gemma3:27b"
+ * const updatedConfig = setConfig("subagentModel", "gemma3:27b");
+ * console.log(updatedConfig.subagentModel); // "gemma3:27b"
  */
 export const setConfig = <K extends keyof Config>(
   key: K,

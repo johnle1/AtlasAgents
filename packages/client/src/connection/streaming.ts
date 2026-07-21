@@ -91,10 +91,10 @@ export async function streamRequest(
     const requester = rsocket.requestStream(payload, STREAM_WINDOW, {
       onError: (e: Error) => finish(e),
 
-      onNext: (p: Payload, isComplete: boolean) => {
+      onNext: (framePayload: Payload, isComplete: boolean) => {
         frameChain = frameChain
           .then(async () => {
-            const frame = decodeFrame(p.data ?? undefined);
+            const frame = decodeFrame(framePayload.data ?? undefined);
             if (frame) {
               // Tokens first: UI can stream glyphs while heavier handlers run.
               if (frame.kind === "token" && onToken) {
@@ -135,16 +135,16 @@ export async function streamRequest(
  *
  * @remarks
  * Builds the task request body (`kind: "task"`) from `config`, overriding
- * `maxAgents` when the caller passes an explicit value (otherwise
- * `config.agentCap`). Delegates protocol work to {@link streamRequest}.
+ * `maxSubagents` when the caller passes an explicit value (otherwise
+ * `config.subagentCap`). Delegates protocol work to {@link streamRequest}.
  *
  * @param task - User-facing task description.
- * @param config - Provides models, temps, and default `agentCap`.
+ * @param config - Provides models, temps, and default `subagentCap`.
  * @param metadata - Auth metadata Buffer.
  * @param rsocket - Live RSocket connection.
  * @param onFrame - Receives each decoded task frame.
  * @param onToken - Optional streaming token sink for the CLI.
- * @param maxAgents - Optional concurrency hint (`1`, `2`, `"max"`, or a number).
+ * @param maxSubagents - Optional concurrency hint (`1`, `2`, `"max"`, or a number).
  * @returns Resolves when the task stream completes.
  * @throws {@link Error} Propagates stream / handler failures from {@link streamRequest}.
  *
@@ -168,18 +168,20 @@ export async function sendTask(
   rsocket: RSocket,
   onFrame: (frame: TaskFrame) => void | Promise<void>,
   onToken?: (token: string) => void,
-  maxAgents?: 1 | 2 | "max" | number,
+  maxSubagents?: 1 | 2 | "max" | number,
 ): Promise<void> {
   await streamRequest(
     rsocket,
     {
       kind: "task",
       text: task,
-      maxAgents: maxAgents ?? config.agentCap,
-      advisorModel: config.advisorModel,
-      agentModel: config.agentModel,
-      advisorTemp: config.advisorTemp,
+      maxSubagents: maxSubagents ?? config.subagentCap,
+      subagentModel: config.subagentModel,
+      subsubagentModel: config.subsubagentModel,
+      agentProvider: config.agentProvider,
+      subagentProvider: config.subagentProvider,
       agentTemp: config.agentTemp,
+      subagentTemp: config.subagentTemp,
     },
     metadata,
     onFrame,

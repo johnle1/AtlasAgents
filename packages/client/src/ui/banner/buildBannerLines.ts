@@ -4,7 +4,7 @@
  * @remarks
  * Produces one fully styled terminal line per array entry — including box-drawing
  * borders, centered welcome text, the pixel octopus from {@link LOGO_GRID}, and
- * advisor/agent model labels. Use this when you need raw ANSI strings (scripts,
+ * agent/subsubagent model labels. Use this when you need raw ANSI strings (scripts,
  * logs, or a non-Ink renderer). Prefer the Ink `Banner` component
  * (`../components/Banner.tsx`) inside the interactive TUI so colors go through
  * Ink’s attribute system.
@@ -84,10 +84,10 @@ const borderedBlank = (borderColor: string, resetCode: string): string =>
  * 1. Top border with bold title + version
  * 2. Welcome text (centered)
  * 3. Pixel logo (centered)
- * 4. Advisor / agent model lines (left-labeled, padded to the right border)
+ * 4. Advisor / subsubagent model lines (left-labeled, padded to the right border)
  * 5. Bottom border
  *
- * Model names come from `configuration.advisorModel` / `configuration.agentModel`
+ * Model names come from `configuration.subagentModel` / `configuration.subagentModel`
  * and fall back to `"not set"` when missing so the layout never shows empty labels.
  *
  * **Padding note:** padding for model lines uses {@link visibleLength} on the
@@ -97,7 +97,7 @@ const borderedBlank = (borderColor: string, resetCode: string): string =>
  *
  * Does not throw; missing models degrade to placeholders.
  *
- * @param configuration - App config providing current advisor and agent model names.
+ * @param configuration - App config providing current agent and subsubsubagent model names.
  * @param version - Semver (or build) string shown after `LoopyCode CLI v`.
  * @returns Ordered ANSI-styled lines ready to print with `console.log` or similar.
  *
@@ -107,8 +107,8 @@ const borderedBlank = (borderColor: string, resetCode: string): string =>
  * import type { Config } from "../../config.js";
  *
  * const configuration = {
- *   advisorModel: "llama3.2:3b",
- *   agentModel: "qwen2.5-coder:7b",
+ *   subagentModel: "llama3.2:3b",
+ *   subsubagentModel: "qwen2.5-coder:7b",
  * } as Config;
  *
  * for (const line of buildBannerLines(configuration, "0.4.0")) {
@@ -120,7 +120,7 @@ const borderedBlank = (borderColor: string, resetCode: string): string =>
  * ```ts
  * // Empty model fields render as "not set" without shrinking the box.
  * const lines = buildBannerLines({} as Config, "1.0.0");
- * // …includes "  Advisor: not set" and "  Agent: not set"
+ * // …includes "  Agent: not set" and "  Subagent: not set"
  * ```
  *
  * @see {@link LOGO_GRID} for the art painted into the logo section.
@@ -134,8 +134,20 @@ export const buildBannerLines = (
   const borderColor = fg(BANNER_BORDER_HEX);
   const resetCode = theme.reset;
 
-  const advisorModelName = configuration.advisorModel || "not set";
-  const agentModelName = configuration.agentModel || "not set";
+  const subagentModelName = configuration.subagentModel || "not set";
+  const subsubagentModelName = configuration.subsubagentModel || "not set";
+
+  // Only call out the provider when it's not the default "ollama", so the
+  // common case stays visually uncluttered.
+  const agentProviderSuffix =
+    configuration.agentProvider && configuration.agentProvider !== "ollama"
+      ? ` (${configuration.agentProvider})`
+      : "";
+  const subagentProviderSuffix =
+    configuration.subagentProvider &&
+    configuration.subagentProvider !== "ollama"
+      ? ` (${configuration.subagentProvider})`
+      : "";
 
   const bannerLines: string[] = [];
 
@@ -172,14 +184,14 @@ export const buildBannerLines = (
   bannerLines.push(borderedBlank(borderColor, resetCode));
 
   // Pad from the uncolored label so theme accent escapes do not inflate width.
-  const advisorInfoLine = `  Advisor: ${advisorModelName}`;
+  const agentInfoLine = `  Agent: ${subagentModelName}${agentProviderSuffix}`;
   bannerLines.push(
-    `${borderColor}│${resetCode}  Advisor: ${theme.textAccent}${advisorModelName}${resetCode}${" ".repeat(Math.max(0, BANNER_INNER - visibleLength(advisorInfoLine)))}${borderColor}│${resetCode}`,
+    `${borderColor}│${resetCode}  Agent: ${theme.textAccent}${subagentModelName}${resetCode}${theme.textSecondary}${agentProviderSuffix}${resetCode}${" ".repeat(Math.max(0, BANNER_INNER - visibleLength(agentInfoLine)))}${borderColor}│${resetCode}`,
   );
 
-  const agentInfoLine = `  Agent: ${agentModelName}`;
+  const subagentInfoLine = `  Subagent: ${subsubagentModelName}${subagentProviderSuffix}`;
   bannerLines.push(
-    `${borderColor}│${resetCode}  Agent: ${theme.textAccent}${agentModelName}${resetCode}${" ".repeat(Math.max(0, BANNER_INNER - visibleLength(agentInfoLine)))}${borderColor}│${resetCode}`,
+    `${borderColor}│${resetCode}  Subagent: ${theme.textAccent}${subsubagentModelName}${resetCode}${theme.textSecondary}${subagentProviderSuffix}${resetCode}${" ".repeat(Math.max(0, BANNER_INNER - visibleLength(subagentInfoLine)))}${borderColor}│${resetCode}`,
   );
 
   bannerLines.push(borderedBlank(borderColor, resetCode));

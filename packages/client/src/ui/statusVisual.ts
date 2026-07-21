@@ -7,8 +7,8 @@
  */
 
 import type {
+  SubagentStage,
   AgentStage,
-  AdvisorStage,
   StatusIcon,
   TaskLifecycleState,
 } from "../frames.js";
@@ -40,12 +40,12 @@ export type StatusVisual = {
 };
 
 /**
- * Checks if a given advisor/agent stage is actively working.
+ * Checks if a given agent/agent stage is actively working.
  *
  * @param stage - The stage to check.
  * @returns True if the stage represents active execution, false otherwise.
  */
-export const isWorkingStage = (stage?: AgentStage | AdvisorStage): boolean =>
+export const isWorkingStage = (stage?: SubagentStage | AgentStage): boolean =>
   stage === "running" ||
   stage === "reading" ||
   stage === "writing" ||
@@ -100,21 +100,21 @@ export const getWorkingFrame = (pulseIndex: number): string => {
 };
 
 /**
- * Resolves the status rendering details for an agent/advisor stage.
+ * Resolves the status rendering details for an agent/agent stage.
  *
  * @param stage - Current active stage name.
  * @param frameIcon - Default icon.
  * @param pulseIndex - Animation index.
- * @param isAdvisor - True if this represents the Advisor.
+ * @param isAgent - True if this represents the Agent.
  * @returns Status visual characteristics.
  */
 export const resolveWorkerVisual = (
-  stage: AgentStage | AdvisorStage | undefined,
+  stage: SubagentStage | AgentStage | undefined,
   frameIcon: StatusIcon,
   pulseIndex: number,
-  isAdvisor: boolean,
+  isAgent: boolean,
 ): StatusVisual => {
-  if (isAdvisor) {
+  if (isAgent) {
     return {
       glyph: frameIcon,
       color:

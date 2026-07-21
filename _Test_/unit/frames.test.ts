@@ -20,13 +20,13 @@ describe("encodeFrame / decodeFrame round-trip", () => {
     });
   });
 
-  it("think frame (advisor)", () => {
+  it("think frame (agent)", () => {
     expect(
-      roundTrip({ kind: "think", text: "hmm", advisor: true }),
-    ).toEqual({ kind: "think", text: "hmm", advisor: true });
+      roundTrip({ kind: "think", text: "hmm", agent: true }),
+    ).toEqual({ kind: "think", text: "hmm", agent: true });
   });
 
-  it("think frame (non-advisor)", () => {
+  it("think frame (non-agent)", () => {
     expect(roundTrip({ kind: "think", text: "hmm" })).toEqual({
       kind: "think",
       text: "hmm",
@@ -48,10 +48,10 @@ describe("encodeFrame / decodeFrame round-trip", () => {
     expect(roundTrip(frame)).toEqual(frame);
   });
 
-  it("status frame (advisor)", () => {
+  it("status frame (agent)", () => {
     const frame: TaskFrame = {
       kind: "status",
-      source: "advisor",
+      source: "agent",
       stage: "understanding",
       icon: "◌",
       message: "thinking",

@@ -34,11 +34,11 @@ import type {
  *
  * @example
  * ```ts
- * const buf = await requestResponseBuffer(rsocket, {
+ * const responseBuffer = await requestResponseBuffer(rsocket, {
  *   data: Buffer.from(JSON.stringify({ kind: "command", type: "models.list", payload: {} })),
  *   metadata: authMetadata(config),
  * });
- * console.log(JSON.parse(buf.toString("utf-8")));
+ * console.log(JSON.parse(responseBuffer.toString("utf-8")));
  * ```
  */
 export const requestResponseBuffer = (
@@ -46,7 +46,7 @@ export const requestResponseBuffer = (
   payload: Payload,
 ): Promise<Buffer> => {
   return new Promise((resolve, reject) => {
-    let buf: Buffer | undefined;
+    let responseBuffer: Buffer | undefined;
     // RSocket can signal completion via onNext(isComplete) *and* onComplete;
     // only the first win should settle the Promise.
     let settled = false;
@@ -58,8 +58,8 @@ export const requestResponseBuffer = (
         reject(err);
         return;
       }
-      if (buf && buf.length > 0) {
-        resolve(buf);
+      if (responseBuffer && responseBuffer.length > 0) {
+        resolve(responseBuffer);
       } else {
         reject(new Error("Empty response from server"));
       }
@@ -69,7 +69,9 @@ export const requestResponseBuffer = (
       onNext: (response: Payload, isComplete: boolean) => {
         // Defensive concat: some peers fragment large JSON across frames.
         if (response.data && response.data.length > 0) {
-          buf = buf ? Buffer.concat([buf, response.data]) : response.data;
+          responseBuffer = responseBuffer
+            ? Buffer.concat([responseBuffer, response.data])
+            : response.data;
         }
         if (isComplete) done();
       },
@@ -121,7 +123,15 @@ export async function sendCommand<TResponse>(
     metadata,
   });
   const text = responseBuf.toString("utf-8");
-  const env = JSON.parse(text) as CommandResponseEnvelope;
+  const parsed: unknown = JSON.parse(text);
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    typeof (parsed as { ok?: unknown }).ok !== "boolean"
+  ) {
+    throw new Error("Malformed response envelope from server");
+  }
+  const env = parsed as CommandResponseEnvelope;
   if (!env.ok) {
     throw new Error(env.error ?? "Command failed");
   }
@@ -195,7 +205,7 @@ export async function fetchModels(
  * Uploads local skill markdown files to the server.
  *
  * @remarks
- * Replaces (or merges, per server policy) the skill set available to advisor
+ * Replaces (or merges, per server policy) the skill set available to agent
  * and agent for subsequent tasks. Does not return skill contents back.
  *
  * @param rsocket - Live RSocket connection.
@@ -304,23 +314,27 @@ export async function clearMemory(
  *
  * @remarks
  * While a task streams, the server may pause for plan approval. Send
- * `"implement"` to proceed, `"skip"` to reject, or `"edit"` with a replacement
- * `steps` array. The `id` must match the plan frame the UI received.
+ * `"implement"` to proceed, `"skip"` to reject, or `"edit"` with free-text
+ * `feedback` — the agent re-plans using that feedback rather than having its
+ * plan rewritten by hand. The `id` must match the plan frame the UI received.
  *
  * @param rsocket - Live RSocket connection.
  * @param metadata - Auth metadata Buffer.
  * @param id - Plan correlator from the server’s plan request frame.
  * @param decision - `"implement"` | `"skip"` | `"edit"` (server may accept synonyms).
- * @param steps - Required for `"edit"`: replacement plan steps; ignored otherwise.
+ * @param feedback - Free-text feedback for `"edit"`; ignored otherwise.
  * @throws {@link Error} When the command fails or the plan id is unknown.
  *
  * @example
  * ```ts
  * await respondPlan(rsocket, authMetadata(config), planId, "implement");
- * await respondPlan(rsocket, authMetadata(config), planId, "edit", [
- *   "Run tests",
- *   "Update README",
- * ]);
+ * await respondPlan(
+ *   rsocket,
+ *   authMetadata(config),
+ *   planId,
+ *   "edit",
+ *   "Add error handling for the upload step",
+ * );
  * ```
  */
 export async function respondPlan(
@@ -328,7 +342,12 @@ export async function respondPlan(
   metadata: Buffer,
   id: string,
   decision: string,
-  steps?: unknown[],
+  feedback?: string,
 ): Promise<void> {
-  await sendCommand(rsocket, "plan.respond", { id, decision, steps }, metadata);
+  await sendCommand(
+    rsocket,
+    "plan.respond",
+    { id, decision, feedback },
+    metadata,
+  );
 }

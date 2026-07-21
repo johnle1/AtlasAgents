@@ -5,23 +5,23 @@ import { loadConfig } from "./config.js";
  *
  * @remarks
  * Users can append these trigger words to tasks to control how many agents
- * work simultaneously. Each trigger word maps to a specific maxAgents setting
+ * work simultaneously. Each trigger word maps to a specific maxSubagents setting
  * and a human-readable label for display.
  *
- * - `::focus` — Single agent (maxAgents: 1)
- * - `::collab` — Two agents (maxAgents: 2)
- * - `::max` — Unlimited agents (maxAgents: "max")
+ * - `::focus` — Single agent (maxSubagents: 1)
+ * - `::collab` — Two agents (maxSubagents: 2)
+ * - `::max` — Unlimited agents (maxSubagents: "max")
  *
  * @example
  * ```ts
  * const modifiers = parseTaskModifiers("fix bug ::focus");
- * console.log(modifiers.maxAgents); // 1
+ * console.log(modifiers.maxSubagents); // 1
  * ```
  */
 export const TRIGGER_WORDS = {
-  "::focus": { maxAgents: 1 as const, label: "focus mode" },
-  "::collab": { maxAgents: 2 as const, label: "collab mode" },
-  "::max": { maxAgents: "max" as const, label: "max mode" },
+  "::focus": { maxSubagents: 1 as const, label: "focus mode" },
+  "::collab": { maxSubagents: 2 as const, label: "collab mode" },
+  "::max": { maxSubagents: "max" as const, label: "max mode" },
 } as const;
 
 /**
@@ -34,7 +34,7 @@ export const TRIGGER_WORDS = {
 export type TriggerWord = keyof typeof TRIGGER_WORDS;
 
 /**
- * Allowed values for the maxAgents parameter.
+ * Allowed values for the maxSubagents parameter.
  *
  * @remarks
  * Controls how many agents can work on a task simultaneously:
@@ -43,7 +43,7 @@ export type TriggerWord = keyof typeof TRIGGER_WORDS;
  * - `"max"` — Unlimited agents
  * - `number` — Custom agent count from config
  */
-export type MaxAgentsParam = 1 | 2 | "max" | number;
+export type MaxSubagentsParam = 1 | 2 | "max" | number;
 
 /**
  * Result of parsing a task string for trigger words.
@@ -56,13 +56,13 @@ export type MaxAgentsParam = 1 | 2 | "max" | number;
  * ```ts
  * const modifiers = parseTaskModifiers("deploy app ::collab");
  * console.log(modifiers.clean); // "deploy app"
- * console.log(modifiers.maxAgents); // 2
+ * console.log(modifiers.maxSubagents); // 2
  * console.log(modifiers.modeLabel); // "collab mode"
  * ```
  */
 export type TaskModifiers = {
   /** Agent concurrency setting extracted from trigger word or config default. */
-  maxAgents: MaxAgentsParam;
+  maxSubagents: MaxSubagentsParam;
 
   /** Human-readable mode label for UI display, null if no trigger found. */
   modeLabel: string | null;
@@ -153,13 +153,13 @@ export const countTriggers = (raw: string): number =>
  * If no trigger word is found, returns default settings from config.
  *
  * @param raw - The raw task text that may contain trigger words.
- * @returns Object with maxAgents, modeLabel, clean text, and triggerFound fields.
+ * @returns Object with maxSubagents, modeLabel, clean text, and triggerFound fields.
  *
  * @example
  * ```ts
  * const modifiers = parseTaskModifiers("deploy app ::collab");
  * console.log(modifiers.clean); // "deploy app"
- * console.log(modifiers.maxAgents); // 2
+ * console.log(modifiers.maxSubagents); // 2
  * console.log(modifiers.modeLabel); // "collab mode"
  * console.log(modifiers.triggerFound); // "::collab"
  * ```
@@ -172,7 +172,7 @@ export const parseTaskModifiers = (raw: string): TaskModifiers => {
 
     const triggerConfig = TRIGGER_WORDS[triggerWord];
     return {
-      maxAgents: triggerConfig.maxAgents,
+      maxSubagents: triggerConfig.maxSubagents,
       modeLabel: triggerConfig.label,
       // Remove trigger word and collapse multiple spaces
       clean: raw.replace(triggerWord, "").replace(/\s+/g, " ").trim(),
@@ -182,7 +182,7 @@ export const parseTaskModifiers = (raw: string): TaskModifiers => {
 
   // No trigger word found: use default config settings
   return {
-    maxAgents: loadConfig().agentCap,
+    maxSubagents: loadConfig().subagentCap,
     modeLabel: null,
     clean: raw,
     triggerFound: null,
@@ -214,16 +214,16 @@ export const formatModeNotice = (modifiers: TaskModifiers): string | null => {
     return null;
   }
 
-  if (modifiers.maxAgents === "max") {
+  if (modifiers.maxSubagents === "max") {
     return `◎ ${modifiers.modeLabel} — no agent cap`;
   }
 
   const agentCountText =
-    modifiers.maxAgents === 1
+    modifiers.maxSubagents === 1
       ? "1 agent"
-      : modifiers.maxAgents === 2
+      : modifiers.maxSubagents === 2
         ? "2 agents"
-        : "advisor decides";
+        : "agent decides";
 
   return `◎ ${modifiers.modeLabel} — ${agentCountText}`;
 };

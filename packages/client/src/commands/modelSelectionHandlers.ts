@@ -1,87 +1,102 @@
 /**
- * Interactive advisor/agent model picker used by `/set advisor` and `/set agent`.
+ * Interactive agent/subsubsubagent model picker used by `/set agent` and `/set subagent`.
  *
  * @remarks
- * Loads model names from the server, prompts for a numbered choice, writes
- * local config, syncs via `config.set`, then refreshes the Ink banner. Local
- * config rolls back if the server rejects the change.
+ * Loads provider-grouped model names from the server, prompts for a numbered
+ * choice, writes local config, syncs via `config.setModel`, then refreshes the
+ * Ink banner. Local config rolls back if the server rejects the change.
  */
 
 import { updateConfig, loadConfig } from "../config.js";
 import type { Connection } from "../connection/index.js";
 import type { PromptPort } from "../ui/promptPort.js";
 import { refreshInkBanner } from "../ui/uiBridge.js";
-import { printModels, printError, printSuccess, printLine } from "../renderer.js";
+import { printGroupedModels, printError, printSuccess, printLine } from "../renderer.js";
+import type { ModelGroup } from "../renderer.js";
 import { formatErrorMessage } from "./utils.js";
 
 /**
- * Lets the user pick the advisor or agent model and persists the choice.
+ * Lets the user pick the agent or subsubsubagent model (from any configured
+ * provider) and persists the choice.
  *
  * @remarks
  * Order of operations matters for consistency:
- * 1. Fetch names (`listModels`)
+ * 1. Fetch provider-grouped models (`providers.listModels`)
  * 2. User picks a 1-based index (`prompts.choose`); out-of-range / cancel → no-op
- * 3. Write local config for `advisorModel` or `agentModel`
- * 4. Send `config.set` to the server
+ * 3. Write local config for `subagentModel`/`agentProvider` (or subagent equivalents)
+ * 4. Send `config.setModel` to the server
  * 5. Only then call `connection.updateConfig` + refresh the banner
  *
- * If step 4 fails, local config is restored to the previous model name. The
+ * If step 4 fails, local config is restored to the previous provider/model. The
  * connection object is left alone on failure because it was never updated.
  *
- * When the server returns tool-capability flags, a short note explains whether
- * native tool calling is enabled for that role.
+ * When the server returns a tool-capability flag, a short note explains
+ * whether native tool calling is enabled for that role.
  *
- * @param modelRole - Which config field to update (`"advisor"` | `"agent"`).
+ * @param modelRole - Which config fields to update (`"agent"` | `"subagent"`).
  * @param connection - Live RSocket connection.
  * @param prompts - Numbered choice prompt port.
  *
  * @example
  * ```ts
- * await handleSetModel("advisor", connection, prompts);
  * await handleSetModel("agent", connection, prompts);
+ * await handleSetModel("subagent", connection, prompts);
  * ```
  */
 export const handleSetModel = async (
-  modelRole: "advisor" | "agent",
+  modelRole: "agent" | "subagent",
   connection: Connection,
   prompts: PromptPort,
 ): Promise<void> => {
-  let availableModels: string[];
+  let groups: ModelGroup[];
 
   try {
-    availableModels = await connection.listModels();
+    const response = await connection.sendCommand<{ groups: ModelGroup[] }>(
+      "providers.listModels",
+      {},
+    );
+    groups = response.groups;
   } catch (error) {
     printError(`Could not fetch models: ${formatErrorMessage(error)}`);
     return;
   }
 
-  if (availableModels.length === 0) {
-    printError("No models available on the server.");
+  const entries = printGroupedModels(groups, modelRole);
+
+  if (entries.length === 0) {
+    printError("No models available on any configured provider.");
     return;
   }
 
-  printModels(availableModels, modelRole);
-
   const selectedNumber = await prompts.choose(
-    `  Pick a number (1-${availableModels.length}): `,
-    availableModels.length,
+    `  Pick a number (1-${entries.length}): `,
+    entries.length,
   );
 
   // prompts.choose is 1-based; 0 / out-of-range means cancel.
-  const modelIndex = selectedNumber - 1;
-  if (modelIndex < 0 || modelIndex >= availableModels.length) {
+  const entryIndex = selectedNumber - 1;
+  if (entryIndex < 0 || entryIndex >= entries.length) {
     printError("Cancelled — no change.");
     return;
   }
 
-  const selectedModelName = availableModels[modelIndex];
-  const configKey = modelRole === "advisor" ? "advisorModel" : "agentModel";
-  // Capture for rollback if the server rejects config.set.
-  const previousModelName = loadConfig()[configKey] ?? "";
+  const { provider: selectedProvider, model: selectedModelName } =
+    entries[entryIndex];
+  const modelKey = modelRole === "agent" ? "subagentModel" : "subsubagentModel";
+  const providerKey =
+    modelRole === "agent" ? "agentProvider" : "subagentProvider";
+
+  // Capture for rollback if the server rejects config.setModel.
+  const previousConfig = loadConfig();
+  const previousModelName = previousConfig[modelKey] ?? "";
+  const previousProvider = previousConfig[providerKey] ?? "ollama";
 
   let updatedConfig;
   try {
-    updatedConfig = updateConfig({ [configKey]: selectedModelName });
+    updatedConfig = updateConfig({
+      [modelKey]: selectedModelName,
+      [providerKey]: selectedProvider,
+    });
   } catch (error) {
     printError(`Failed to save configuration: ${formatErrorMessage(error)}`);
     return;
@@ -90,42 +105,33 @@ export const handleSetModel = async (
   try {
     const response = await connection.sendCommand<{
       ok: boolean;
-      agentModelSupportsTools?: boolean;
-      advisorModelSupportsTools?: boolean;
-    }>("config.set", {
-      key: configKey,
-      value: selectedModelName,
+      supportsTools?: boolean;
+    }>("config.setModel", {
+      role: modelRole,
+      provider: selectedProvider,
+      model: selectedModelName,
     });
 
     // Defer in-memory Connection config until the server has accepted the change.
     connection.updateConfig(updatedConfig);
     refreshInkBanner(updatedConfig);
-    printSuccess(`${modelRole} model set to ${selectedModelName}`);
+    printSuccess(
+      `${modelRole} model set to ${selectedModelName} (${selectedProvider})`,
+    );
 
-    if (
-      modelRole === "agent" &&
-      typeof response.agentModelSupportsTools === "boolean"
-    ) {
+    if (typeof response.supportsTools === "boolean") {
       printLine(
-        response.agentModelSupportsTools
+        response.supportsTools
           ? "  native tool calling: enabled"
-          : "  native tool calling: disabled (using <<TOOL>> text protocol)",
-      );
-    }
-
-    if (
-      modelRole === "advisor" &&
-      typeof response.advisorModelSupportsTools === "boolean"
-    ) {
-      printLine(
-        response.advisorModelSupportsTools
-          ? "  native tool calling: enabled"
-          : "  native tool calling: disabled (using inline JSON plan)",
+          : "  native tool calling: disabled (using inline/legacy text protocol)",
       );
     }
   } catch (error) {
     // Local disk config moved ahead of server — undo so disk matches the live session.
-    updateConfig({ [configKey]: previousModelName });
+    updateConfig({
+      [modelKey]: previousModelName,
+      [providerKey]: previousProvider,
+    });
     printError(
       `Failed to set ${modelRole} model on server: ${formatErrorMessage(error)}`,
     );

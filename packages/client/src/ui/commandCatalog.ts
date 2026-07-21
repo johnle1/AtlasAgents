@@ -42,12 +42,28 @@ export const COMMAND_CATALOG: CommandEntry[] = [
     requiresArgs: true,
   },
   {
-    command: "/set advisor",
-    description: "Choose advisor model",
+    command: "/set agent",
+    description: "Choose subsubagent model (from any configured provider)",
   },
   {
-    command: "/set agent",
-    description: "Choose agent model",
+    command: "/set subagent",
+    description: "Choose subsubsubagent model (from any configured provider)",
+  },
+  {
+    command: "/providers list",
+    description: "List configured providers and their role assignment",
+  },
+  {
+    command: "/providers add",
+    label: "/providers add <name> --url <baseUrl> [--key <apiKey>]",
+    description: "Add an OpenAI-compatible provider (vLLM, Trainium, TPU, ...)",
+    requiresArgs: true,
+  },
+  {
+    command: "/providers remove",
+    label: "/providers remove <name>",
+    description: "Remove a configured provider",
+    requiresArgs: true,
   },
   {
     command: "/agent cap",
@@ -75,7 +91,8 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   },
   {
     command: "/skills sync",
-    description: "Sync skills to server",
+    label: "/skills sync [path]",
+    description: "Sync skills to server, optionally from a custom path",
   },
   {
     command: "/memory show",
@@ -146,7 +163,7 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   {
     command: "/think",
     label: "/think on/off",
-    description: "Show advisor/agent think boxes in terminal",
+    description: "Show agent/agent think boxes in terminal",
     requiresArgs: true,
   },
   {

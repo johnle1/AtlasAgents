@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { runCommandTool } from "../../packages/server/src/orchestration/tools/runCommandHandler.js";
-import type { ToolHandlerContext } from "../../packages/server/src/orchestration/tools/toolHandler.js";
+import type { ToolHandlerContext } from "../../packages/server/src/orchestration/tools/types.js";
 import { emptyCommandPlan } from "../../packages/server/src/orchestration/types.js";
 
 const buildContext = (
@@ -13,7 +13,7 @@ const buildContext = (
   taskId: "task-1",
   subtask: "setup",
   agentSource: { agentId: 0, agentLabel: "Agent 1" },
-  emitAgentStatus: vi.fn(),
+  emitSubagentStatus: vi.fn(),
   messages: [],
   workspace: {} as ToolHandlerContext["workspace"],
   terminal: { runWithConfirmation } as ToolHandlerContext["terminal"],
@@ -78,5 +78,64 @@ describe("runCommandTool — repeated command failures", () => {
     await runCommandTool.execute(args, ctx);
     expect(ctx.trackers.failedCommandAttempts.has(normalized)).toBe(false);
     expect(ctx.trackers.completedSetupCommands.has(normalized)).toBe(true);
+  });
+});
+
+describe("runCommandTool — user requested changes (Revise)", () => {
+  it("tells the agent to revise instead of repeating the command", async () => {
+    const command = "rm -rf node_modules";
+    const runWithConfirmation = vi.fn().mockResolvedValue({
+      stdout: "",
+      stderr: "skipped by user — command was not executed",
+      exitCode: -1,
+      feedback: "use npm ci instead, don't wipe node_modules",
+    });
+
+    const ctx = buildContext(runWithConfirmation);
+    const args = { command, purpose: "setup", background: false };
+
+    const result = await runCommandTool.execute(args, ctx);
+    expect(result.feedback).toContain("User requested changes");
+    expect(result.feedback).toContain(
+      "use npm ci instead, don't wipe node_modules",
+    );
+    expect(result.feedback).toContain(
+      "Do not run the same command again",
+    );
+  });
+
+  it("does not count a revise as a command failure", async () => {
+    const command = "rm -rf node_modules";
+    const runWithConfirmation = vi.fn().mockResolvedValue({
+      stdout: "",
+      stderr: "",
+      exitCode: -1,
+      feedback: "don't do this",
+    });
+
+    const ctx = buildContext(runWithConfirmation);
+    const args = { command, purpose: "setup", background: false };
+
+    await runCommandTool.execute(args, ctx);
+    await runCommandTool.execute(args, ctx);
+
+    expect(ctx.trackers.failedCommandAttempts.has(command)).toBe(false);
+  });
+
+  it("does not mark a revised setup command as completed", async () => {
+    const command = "npm install";
+    const normalized = command.toLowerCase();
+    const runWithConfirmation = vi.fn().mockResolvedValue({
+      stdout: "",
+      stderr: "",
+      exitCode: -1,
+      feedback: "hold off on installing",
+    });
+
+    const ctx = buildContext(runWithConfirmation);
+    const args = { command, purpose: "setup", background: false };
+
+    await runCommandTool.execute(args, ctx);
+    expect(ctx.trackers.completedSetupCommands.has(normalized)).toBe(false);
   });
 });

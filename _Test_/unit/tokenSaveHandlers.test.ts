@@ -14,7 +14,7 @@ const {
   mockPrintLine,
   mockPrintError,
   mockPrintSuccess,
-  mockRequestApproval,
+  mockRequestApprovalWithFeedback,
   mockSendCommand,
   mockExecFile,
 } = vi.hoisted(() => ({
@@ -27,7 +27,7 @@ const {
   mockPrintLine: vi.fn(),
   mockPrintError: vi.fn(),
   mockPrintSuccess: vi.fn(),
-  mockRequestApproval: vi.fn(),
+  mockRequestApprovalWithFeedback: vi.fn(),
   mockSendCommand: vi.fn(),
   mockExecFile: vi.fn(),
 }));
@@ -50,8 +50,8 @@ vi.mock("../../packages/client/src/renderer.js", () => ({
   printSuccess: mockPrintSuccess,
 }));
 
-vi.mock("../../packages/client/src/ui/uiBridge.js", () => ({
-  requestApproval: mockRequestApproval,
+vi.mock("../../packages/client/src/ui/approvalFlow.js", () => ({
+  requestApprovalWithFeedback: mockRequestApprovalWithFeedback,
 }));
 
 vi.mock("node:child_process", () => ({
@@ -77,7 +77,7 @@ beforeEach(() => {
     { name: "tokensave_search", description: "search" },
   ]);
   mockSendCommand.mockResolvedValue(undefined);
-  mockRequestApproval.mockResolvedValue(true);
+  mockRequestApprovalWithFeedback.mockResolvedValue({ approved: true });
   mockExecFile.mockImplementation(
     (
       _cmd: string,
@@ -158,7 +158,20 @@ describe("handleTokenSave init", () => {
 
   it("cancels when approval is rejected", async () => {
     mockHasIndex.mockResolvedValue(false);
-    mockRequestApproval.mockResolvedValue(false);
+    mockRequestApprovalWithFeedback.mockResolvedValue({ approved: false });
+    await handleTokenSave("init", "", conn, fileProxy);
+    expect(mockPrintLine).toHaveBeenCalledWith(
+      expect.stringContaining("cancelled"),
+    );
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("cancels (does not run init) when the user picks Revise instead of approving", async () => {
+    mockHasIndex.mockResolvedValue(false);
+    mockRequestApprovalWithFeedback.mockResolvedValue({
+      approved: false,
+      feedback: "don't create that folder yet",
+    });
     await handleTokenSave("init", "", conn, fileProxy);
     expect(mockPrintLine).toHaveBeenCalledWith(
       expect.stringContaining("cancelled"),

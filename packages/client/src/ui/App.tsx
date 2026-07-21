@@ -17,7 +17,7 @@ import { ConnectionStatusLine } from "./components/ConnectionStatusLine.js";
 import { InputBox } from "./components/InputBox.js";
 import { ApprovalMenu } from "./components/ApprovalMenu.js";
 import { PromptOverlay } from "./components/PromptOverlay.js";
-import { AgentTaskBoard } from "./components/AgentTaskBoard.js";
+import { SubagentTaskBoard } from "./components/SubagentTaskBoard.js";
 import type { AppProps } from "./types.js";
 import {
   commandRequiresArgs,
@@ -93,7 +93,7 @@ const AppContent: React.FC = () => {
     busy,
     approval,
     promptReq,
-    agentBoards,
+    subagentBoards,
     sigintBusy,
     setActiveIndex,
     setScrollOffset,
@@ -107,8 +107,8 @@ const AppContent: React.FC = () => {
     setApproval,
     setPromptReq,
     setBannerEntries,
-    setAgentStatuses,
-    setAgentBoards,
+    setSubagentStatuses,
+    setSubagentBoards,
     setSigintBusy,
     inputHistory,
     setInputHistory,
@@ -134,8 +134,8 @@ const AppContent: React.FC = () => {
     setBusy,
     setSpinner,
     setStreamingText,
-    setAgentStatuses,
-    setAgentBoards,
+    setSubagentStatuses,
+    setSubagentBoards,
   });
 
   const { exit } = useApp();
@@ -169,8 +169,8 @@ const AppContent: React.FC = () => {
     setApproval,
     setPromptReq,
     setBannerEntries,
-    setAgentStatuses,
-    setAgentBoards,
+    setSubagentStatuses,
+    setSubagentBoards,
   });
 
   const { submit } = useSubmitLine({
@@ -321,8 +321,8 @@ const AppContent: React.FC = () => {
       <HistoryView />
 
       {/* Agent task boards: one per active agent, shows parallel work */}
-      {agentBoards.map((agentBoard) => (
-        <AgentTaskBoard key={agentBoard.id} board={agentBoard} />
+      {subagentBoards.map((agentBoard) => (
+        <SubagentTaskBoard key={agentBoard.id} board={agentBoard} />
       ))}
 
       {/* Status spinner: shows loading state for long-running operations */}

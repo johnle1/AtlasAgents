@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { HistoryItem } from "../types.js";
-import { formatAdvisorThinkForDisplay, formatAgentThinkForDisplay } from "../../renderer.js";
+import { formatAgentThinkForDisplay } from "../../renderer.js";
 import { useAppContext } from "../../DataContext.js";
 
 /**
@@ -76,11 +76,11 @@ export const renderHistoryItem = (
         <Box key={key} flexDirection="column" marginY={1}>
           {/* Label indicating whether the thought trace belongs to the coordinator or a worker */}
           <Text dimColor>
-            {item.advisor ? "Advisor thinking…" : "thinking…"}
+            {item.agent ? "Agent thinking…" : "thinking…"}
           </Text>
           <Text>
-            {item.advisor
-              ? formatAdvisorThinkForDisplay(item.text)
+            {item.agent
+              ? formatAgentThinkForDisplay(item.text)
               : formatAgentThinkForDisplay(item.text)}
           </Text>
         </Box>
@@ -98,7 +98,7 @@ export const renderHistoryItem = (
           <Text dimColor>{executionLabel}</Text>
 
           {/* ===== AGENT-SPECIFIC STEPS ===== */}
-          {/* Map active agent workflows or fallback to sequential single-agent listings. */}
+          {/* Map active subagent workflows or fallback to sequential single-agent listings. */}
           {item.agents.length > 0
             ? item.agents.map((agent) => (
                 <Box key={`${key}-agent-${agent.id}`} flexDirection="column">

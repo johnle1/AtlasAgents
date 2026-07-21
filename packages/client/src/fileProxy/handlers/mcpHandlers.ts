@@ -14,7 +14,10 @@ import {
   tokenSaveHistoryLabel,
   tokenSaveHistoryTarget,
 } from "../../mcp/tokenSaveLabels.js";
-import { printTokenSaveOp } from "../../renderer/fileOperations.js";
+import {
+  printTokenSaveOp,
+  printTokenSaveResult,
+} from "../../renderer/fileOperations.js";
 
 /**
  * Invokes an allow-listed TokenSave / MCP tool with the given arguments.
@@ -49,12 +52,28 @@ export const handleMcpCall = async (
     );
   }
 
-  const args = (body.arguments ?? {}) as Record<string, unknown>;
+  const rawArguments = body.arguments;
+  const args: Record<string, unknown> =
+    typeof rawArguments === "object" && rawArguments !== null
+      ? (rawArguments as Record<string, unknown>)
+      : {};
 
   printTokenSaveOp(
     tokenSaveHistoryLabel(tool),
     tokenSaveHistoryTarget(tool, args),
   );
 
-  return callTokenSaveTool(context.workspaceRoot, tool, args);
+  const result = await callTokenSaveTool(context.workspaceRoot, tool, args);
+
+  // Echo whatever the tool actually found (file paths, symbol locations, …) —
+  // mirrors printBashRan showing stdout after a command runs.
+  if (!result.isError && result.data !== undefined) {
+    const resultText =
+      typeof result.data === "string"
+        ? result.data
+        : JSON.stringify(result.data);
+    printTokenSaveResult(resultText);
+  }
+
+  return result;
 };

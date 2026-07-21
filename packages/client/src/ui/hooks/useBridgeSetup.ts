@@ -24,8 +24,8 @@
  *   setApproval,
  *   setPromptReq,
  *   setBannerEntries,
- *   setAgentStatuses,
- *   setAgentBoards,
+ *   setSubagentStatuses,
+ *   setSubagentBoards,
  * });
  * ```
  */
@@ -76,8 +76,8 @@ export const useBridgeSetup = ({
   setApproval,
   setPromptReq,
   setBannerEntries,
-  setAgentStatuses,
-  setAgentBoards,
+  setSubagentStatuses,
+  setSubagentBoards,
 }: BridgeSetupContext): void => {
   // Track whether we entered alternate screen mode so we can exit it on cleanup.
   // Using a ref instead of state avoids triggering re-renders when this changes.
@@ -126,12 +126,12 @@ export const useBridgeSetup = ({
             line: bannerLine,
           })),
         ),
-      onAgentStatuses: (statusUpdater) => setAgentStatuses(statusUpdater),
-      onAgentBoards: (boardUpdater) => setAgentBoards(boardUpdater),
+      onSubagentStatuses: (statusUpdater) => setSubagentStatuses(statusUpdater),
+      onSubagentBoards: (boardUpdater) => setSubagentBoards(boardUpdater),
     });
 
     // Register the streaming token handler for LLM response streaming.
-    // When the server streams tokens (e.g., during an agent response), this handler
+    // When the server streams tokens (e.g., during an subagent response), this handler
     // appends each token to the streaming text state. The UI renders this as
     // progressively updating text below the history.
     registerStreamingHandler((streamingToken) => {
@@ -175,7 +175,7 @@ export const useBridgeSetup = ({
     setApproval,
     setPromptReq,
     setBannerEntries,
-    setAgentStatuses,
-    setAgentBoards,
+    setSubagentStatuses,
+    setSubagentBoards,
   ]);
 };

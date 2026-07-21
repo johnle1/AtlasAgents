@@ -129,25 +129,25 @@ export const handleModels = async (
         // Step 1: Send delete command and capture warnings about stale config
         const response = await connection.sendCommand<{
           ok: boolean;
-          wasAdvisorModel?: boolean;
           wasAgentModel?: boolean;
+          wasSubagentModel?: boolean;
         }>("models.delete", { name: modelName });
 
         // ===== DISPLAY SUCCESS AND ANY WARNINGS =====
         // Step 2: Print success message
         printSuccess(`Deleted ${modelName}`);
 
-        // Step 3: Warn if deleted model was the active advisor model
-        if (response.wasAdvisorModel) {
+        // Step 3: Warn if deleted model was the active subagent model
+        if (response.wasAgentModel) {
           printLine(
-            "⚠ Warning: This was your active advisor model. Run /set advisor to choose a new one.",
+            "⚠ Warning: This was your active subagent model. Run /set agent to choose a new one.",
           );
         }
 
-        // Step 4: Warn if deleted model was the active agent model
-        if (response.wasAgentModel) {
+        // Step 4: Warn if deleted model was the active subsubagent model
+        if (response.wasSubagentModel) {
           printLine(
-            "⚠ Warning: This was your active agent model. Run /set agent to choose a new one.",
+            "⚠ Warning: This was your active subsubagent model. Run /set subagent to choose a new one.",
           );
         }
       } catch (error) {

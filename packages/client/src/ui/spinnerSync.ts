@@ -3,16 +3,16 @@
  *
  * @remarks
  * Decides whether the status spinner should be in "thinking" or "working" mode,
- * or cleared entirely, based on task status frames incoming from the advisor/agents.
+ * or cleared entirely, based on task status frames incoming from the agent/subagents.
  */
 
-import type { AdvisorStage, TaskFrame } from "../frames.js";
+import type { AgentStage, TaskFrame } from "../frames.js";
 import type { SpinnerState } from "./types.js";
 
 /**
- * Set of advisor workflow stages that represent active thinking.
+ * Set of subagent workflow stages that represent active thinking.
  */
-const ADVISOR_THINKING_STAGES = new Set<AdvisorStage>([
+const AGENT_THINKING_STAGES = new Set<AgentStage>([
   "understanding",
   "reading-context",
   "drafting",
@@ -61,16 +61,16 @@ export const spinnerForStatusFrame = (
     return undefined;
   }
 
-  if (frame.source === "advisor") {
-    // If advisor is actively generating suggestions and thinking icon is set
+  if (frame.source === "agent") {
+    // If agent is actively generating suggestions and thinking icon is set
     if (
-      ADVISOR_THINKING_STAGES.has(frame.stage as AdvisorStage) &&
+      AGENT_THINKING_STAGES.has(frame.stage as AgentStage) &&
       frame.icon === "◌"
     ) {
-      return thinkingSpinner("Advisor");
+      return thinkingSpinner("Agent");
     }
 
-    // Once advisor has completed draft and is ready for interaction
+    // Once agent has completed draft and is ready for interaction
     if (frame.stage === "ready") {
       return null;
     }
@@ -78,13 +78,13 @@ export const spinnerForStatusFrame = (
     return undefined;
   }
 
-  // Handle agent-level progress states
+  // Handle subagent-level progress states
   if (frame.activity?.stage === "thinking") {
-    return thinkingSpinner("Agent");
+    return thinkingSpinner("Subagent");
   }
 
   if (frame.stage === "thinking") {
-    return thinkingSpinner("Agent");
+    return thinkingSpinner("Subagent");
   }
 
   if (frame.activity) {

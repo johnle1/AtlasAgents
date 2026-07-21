@@ -1,5 +1,10 @@
 /**
- * Unit tests — server orchestration/orchestrator/orchestratorPipelineTypes.ts
+ * Unit tests — server orchestration/orchestrator/orchestratorPipelineHelpers.ts
+ *
+ * @remarks
+ * These helpers previously lived in `orchestratorPipelineTypes.ts` (hence this
+ * file's name) but were moved to `orchestratorPipelineHelpers.ts` when the
+ * pure formatting/plan helpers were split out from the type definitions.
  */
 
 import { describe, expect, it } from "vitest";
@@ -9,7 +14,7 @@ import {
   formatPoolProgress,
   formatPoolStart,
   toOrderedResults,
-} from "../../packages/server/src/orchestration/orchestrator/orchestratorPipelineTypes.js";
+} from "../../packages/server/src/orchestration/orchestrator/orchestratorPipelineHelpers.js";
 import type { ToolResultSummary } from "../../packages/server/src/orchestration/types.js";
 import { emptyCommandPlan } from "../../packages/server/src/orchestration/types.js";
 

@@ -9,7 +9,7 @@
  *
  * Supported command families:
  * - Config: `/set`, `/config`, `/agent`
- * - Models: `/models`
+ * - Models: `/models`, `/providers`
  * - Skills / memory: `/skills`, `/memory`
  * - Workspace: `/workspace`, `/cwd`
  * - Display: `/spinner`, `/think`, `/theme`
@@ -42,6 +42,7 @@ import {
 } from "./configHandlers.js";
 import { handleSetModel } from "./modelSelectionHandlers.js";
 import { handleModels } from "./modelHandlers.js";
+import { handleProviders } from "./providerHandlers.js";
 import { handleSkills } from "./skillHandlers.js";
 import { handleMemory } from "./memoryHandlers.js";
 import { handleWorkspace, handleCwd } from "./workspaceHandlers.js";
@@ -116,7 +117,7 @@ export class CommandHandler {
    * @remarks
    * Parsing: strip leading `/`, split on whitespace into
    * `command` / `subcommand` / `argument` (argument may contain spaces).
-   * `/set advisor|agent` delegates model picking via
+   * `/set agent|agent` delegates model picking via
    * {@link handleSetModel}. `/help` is intentionally removed (points users to
    * `/config`).
    *
@@ -141,13 +142,12 @@ export class CommandHandler {
 
     switch (command) {
       case "set":
-        await handleSetConfig(
-          subcommand,
-          argument,
-          this.conn,
-          this.prompts,
-          (role) => handleSetModel(role, this.conn, this.prompts),
-        );
+        await handleSetConfig(subcommand, argument, {
+          connection: this.conn,
+          prompts: this.prompts,
+          handleSetModel: (role) =>
+            handleSetModel(role, this.conn, this.prompts),
+        });
         break;
       case "agent":
         handleAgent(subcommand, argument);
@@ -163,6 +163,9 @@ export class CommandHandler {
         break;
       case "models":
         await handleModels(subcommand, argument, this.conn);
+        break;
+      case "providers":
+        await handleProviders(subcommand, argument, this.conn);
         break;
       case "new":
         await handleNew(this.conn);
