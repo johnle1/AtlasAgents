@@ -55,7 +55,7 @@ import type { ToolSchema } from "../orchestration/tools/types.js";
 import type { ConfigRole } from "../config/configManager.js";
 import { ConfigError } from "../config/configManager.js";
 import { OpenAiCompatibleAdapter } from "./openAiCompatibleAdapter.js";
-import { SingleModelAdmin } from "./singleModelAdmin.js";
+import { SingleModelAdmin } from "./openAiCompatibleAdmin.js";
 
 /**
  * The built-in provider name that always resolves to the native Ollama client.
@@ -269,7 +269,12 @@ export class ProviderRegistry implements IProviderRegistry {
       // One-off client for this override — not cached, since it's specific
       // to a single task's model overrides rather than the role's steady
       // configured provider. A new instance is created each time.
-      return new RoleRoutedClient(this, this.deps.config, role, trimmedOverride);
+      return new RoleRoutedClient(
+        this,
+        this.deps.config,
+        role,
+        trimmedOverride,
+      );
     }
     // No override: return the cached role-routed client, which re-reads config on each call.
     return this.roleClients[role];

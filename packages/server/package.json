@@ -16,13 +16,18 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnle1/LoopyCode.git",
+    "directory": "packages/server"
+  },
   "files": [
     "dist",
     "default-data"
   ],
   "type": "commonjs",
   "dependencies": {
-    "@loopycode/shared": "file:../shared",
+    "@loopycode/shared": "^0.1.0",
     "@rsocket/core": "1.0.0-alpha.3",
     "@rsocket/tcp-server": "1.0.0-alpha.3",
     "diff": "^9.0.0",
