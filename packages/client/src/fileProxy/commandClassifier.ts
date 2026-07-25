@@ -3,17 +3,39 @@
  *
  * @remarks
  * Returns `"safe"`, `"dangerous"`, or `"cautious"` using allow/deny token sets
- * from `constants.ts`. This is **not** a complete shell parser — quotes,
- * pipes, and `$(…)` are not modeled. Prefer failing to `"cautious"` so the
- * user still confirms unknown forms.
+ * from `constants.ts`. This is **not** a complete shell parser — quoted
+ * metacharacters are not distinguished from real ones (e.g. `grep "a;b" f`
+ * also fails closed). Prefer failing to `"cautious"` so the user still
+ * confirms unknown forms.
  */
 
 import type { BashClass } from "../renderer.js";
 import {
   DANGEROUS_TOKENS,
+  ESCAPING_PATH_PATTERN,
   SAFE_BASE_COMMANDS,
+  SAFE_FIND_PRIMARIES,
   SAFE_GIT_SUBCOMMANDS,
+  SHELL_METACHARACTER_PATTERN,
 } from "./constants.js";
+
+/**
+ * Reports whether a `find` invocation carries a primary we have not vetted.
+ *
+ * @remarks
+ * Only `-`-prefixed tokens are considered; bare operands (paths, `-name`
+ * patterns, `{}`, `+`) are values, not primaries. Negative numeric arguments
+ * such as the `-1` in `-mtime -1` are skipped for the same reason.
+ */
+const hasUnknownFindPrimary = (commandTokens: string[]): boolean =>
+  commandTokens
+    .slice(1)
+    .some(
+      (token) =>
+        token.startsWith("-") &&
+        !SAFE_FIND_PRIMARIES.has(token) &&
+        !/^-\d+$/.test(token),
+    );
 
 /**
  * Classifies a shell command line for auto-run vs approval flows.
@@ -21,11 +43,22 @@ import {
  * @remarks
  * Evaluation order:
  * 1. Empty → `"cautious"`
- * 2. Base command in {@link SAFE_BASE_COMMANDS} → `"safe"`
- * 3. `git` + safe subcommand → `"safe"`
- * 4. Contains `chmod 777` → `"dangerous"`
- * 5. Any token in {@link DANGEROUS_TOKENS} → `"dangerous"`
- * 6. Otherwise → `"cautious"`
+ * 2. Any token in {@link DANGEROUS_TOKENS} → `"dangerous"`
+ * 3. Contains a shell metacharacter ({@link SHELL_METACHARACTER_PATTERN}) → `"cautious"`
+ * 4. `find` with a primary outside {@link SAFE_FIND_PRIMARIES} → `"cautious"`
+ * 5. An argument matching {@link ESCAPING_PATH_PATTERN} → `"cautious"`
+ * 6. Base command in {@link SAFE_BASE_COMMANDS} → `"safe"`
+ * 7. `git` + safe subcommand → `"safe"`
+ * 8. Otherwise → `"cautious"`
+ *
+ * Danger, metacharacter, `find`-primary, and escaping-path checks all run
+ * unconditionally, before the allow-list fast paths — otherwise a command
+ * chained onto an allow-listed base command (e.g. `echo x && rm -rf /`), one
+ * abusing an allow-listed binary's own flags (e.g.
+ * `find . -maxdepth 0 -exec sh p {} +`, which contains no shell metacharacter
+ * at all), or one simply pointed outside the workspace
+ * (e.g. `cat /Users/you/.ssh/id_rsa`) would return `"safe"` on the first
+ * token alone, without ever seeing what follows.
  *
  * Matching is case-insensitive on whitespace-split tokens.
  *
@@ -38,6 +71,10 @@ import {
  * classifyCommand("git status");    // "safe"
  * classifyCommand("rm -rf build");  // "dangerous"
  * classifyCommand("npm test");      // "cautious"
+ * classifyCommand("echo x && rm -rf /");          // "dangerous"
+ * classifyCommand("find . -exec sh p {} +");      // "dangerous"
+ * classifyCommand("find . -newermt yesterday");   // "cautious" (unknown primary)
+ * classifyCommand("cat ~/.ssh/id_rsa");           // "cautious" (outside workspace)
  * ```
  */
 export const classifyCommand = (command: string): BashClass => {
@@ -52,6 +89,37 @@ export const classifyCommand = (command: string): BashClass => {
 
   const baseCommand = commandTokens[0] ?? "";
 
+  // Scan every token unconditionally, even when the base command is
+  // allow-listed — a chained/subsequent command must not hide behind it.
+  for (const token of commandTokens) {
+    if (DANGEROUS_TOKENS.has(token)) {
+      return "dangerous";
+    }
+  }
+
+  // Shell metacharacters can chain, redirect, or substitute an entirely
+  // different, unvetted command (e.g. `echo x && curl … | sh`) — never treat
+  // these as "safe" from the first token alone.
+  if (SHELL_METACHARACTER_PATTERN.test(normalizedCommand)) {
+    return "cautious";
+  }
+
+  // `find` is allow-listed for read-only searches, but its own primaries can
+  // execute commands (`-exec … {} +`), destroy data (`-delete`), or write
+  // files (`-fprintf`) with no shell metacharacter at all. The known-bad ones
+  // are caught by DANGEROUS_TOKENS above; anything else unrecognized fails
+  // closed here so an unlisted primary cannot inherit "safe".
+  if (baseCommand === "find" && hasUnknownFindPrimary(commandTokens)) {
+    return "cautious";
+  }
+
+  // `command.run` has no path confinement (only `cwd`), so an allow-listed
+  // reader aimed at an absolute or traversing path would silently read
+  // outside the workspace and ship the contents back. Require approval.
+  if (commandTokens.slice(1).some((token) => ESCAPING_PATH_PATTERN.test(token))) {
+    return "cautious";
+  }
+
   if (SAFE_BASE_COMMANDS.has(baseCommand)) {
     return "safe";
   }
@@ -62,17 +130,6 @@ export const classifyCommand = (command: string): BashClass => {
     SAFE_GIT_SUBCOMMANDS.has(commandTokens[1] ?? "")
   ) {
     return "safe";
-  }
-
-  // World-writable modes are called out even when `chmod` is not in DANGEROUS_TOKENS.
-  if (normalizedCommand.includes("chmod 777")) {
-    return "dangerous";
-  }
-
-  for (const token of commandTokens) {
-    if (DANGEROUS_TOKENS.has(token)) {
-      return "dangerous";
-    }
   }
 
   // Unknown binaries / build tools: require confirm, but without the “dangerous” banner.

@@ -85,16 +85,16 @@ const planJsonErrorMessage = (rawResponse: string): string => {
 };
 
 /** Generates error message for empty model response (may indicate reasoning model). */
-const emptyAgentResponseMessage = (subagentModel: string): string =>
-  `Agent model '${subagentModel}' returned an empty response. It may be a reasoning model whose output was not captured, or the model tag may be incorrect.`;
+const emptyAgentResponseMessage = (agentModel: string): string =>
+  `Agent model '${agentModel}' returned an empty response. It may be a reasoning model whose output was not captured, or the model tag may be incorrect.`;
 
 /** Returns appropriate error message based on response content (empty vs. invalid JSON). */
 const agentPlanFailureMessage = (
-  subagentModel: string,
+  agentModel: string,
   rawResponse: string,
 ): string => {
   if (rawResponse.trim().length === 0) {
-    return emptyAgentResponseMessage(subagentModel);
+    return emptyAgentResponseMessage(agentModel);
   }
   return planJsonErrorMessage(rawResponse);
 };
@@ -167,7 +167,7 @@ type ParsedToolCall = { name: string; args: Record<string, unknown> };
  */
 type PlanningConfig = {
   /** Ollama model identifier to use for planning. */
-  subagentModel: string;
+  agentModel: string;
   /** Sampling temperature for planning (typically low for consistency). */
   agentTemperature: number;
   /** Whether the configured model supports native tool calling. */
@@ -177,7 +177,7 @@ type PlanningConfig = {
 /** Resolved model and temperature for one advise/combine call (no tool-support flag needed). */
 type ModelAndTemperature = {
   /** Ollama model identifier to use. */
-  subagentModel: string;
+  agentModel: string;
   /** Sampling temperature to use. */
   agentTemperature: number;
 };
@@ -197,11 +197,11 @@ const resolveModelAndTemperature = async (
   config: IConfigManager,
   overrides: TaskModelOverrides | undefined,
 ): Promise<ModelAndTemperature> => {
-  const subagentModel =
-    overrides?.subagentModel?.trim() || (await config.getSubagentModel());
+  const agentModel =
+    overrides?.agentModel?.trim() || (await config.getAgentModel());
   const agentTemperature =
     overrides?.agentTemp ?? (await config.getAgentTemperature());
-  return { subagentModel, agentTemperature };
+  return { agentModel, agentTemperature };
 };
 
 /**
@@ -219,14 +219,14 @@ const resolvePlanningConfig = async (
   config: IConfigManager,
   overrides: TaskModelOverrides | undefined,
 ): Promise<PlanningConfig> => {
-  const { subagentModel, agentTemperature } = await resolveModelAndTemperature(
+  const { agentModel, agentTemperature } = await resolveModelAndTemperature(
     config,
     overrides,
   );
   const configuredSupportsTools =
-    overrides?.subagentModelSupportsTools ??
-    (await config.getSubagentModelSupportsTools());
-  return { subagentModel, agentTemperature, configuredSupportsTools };
+    overrides?.agentModelSupportsTools ??
+    (await config.getAgentModelSupportsTools());
+  return { agentModel, agentTemperature, configuredSupportsTools };
 };
 
 /**
@@ -655,7 +655,7 @@ type PlanAttemptOutcome =
  * @param thinkText - Extracted `<agent-think>` block content, if present (used for debug logging).
  * @param thinkTextForPlan - Think text to use for the plan-line fallback (agent-think, think, or cleaned response).
  * @param verificationAttempt - Current retry attempt count for this call to `plan()`.
- * @param subagentModel - Model identifier, used in error messages and debug logs.
+ * @param agentModel - Model identifier, used in error messages and debug logs.
  * @param maxSubagents - Max agent constraint to apply to any derived plan.
  * @returns An accepted plan, a retry request with the incremented attempt count, or a failure.
  */
@@ -667,7 +667,7 @@ const resolvePlanAttempt = (
   thinkText: string | null,
   thinkTextForPlan: string | null,
   verificationAttempt: number,
-  subagentModel: string,
+  agentModel: string,
   maxSubagents: MaxSubagentsParam,
 ): PlanAttemptOutcome => {
   let parsedPlan: unknown | null = planCall ? planCall.args : null;
@@ -697,7 +697,7 @@ const resolvePlanAttempt = (
 
     logger.debug(
       {
-        subagentModel,
+        agentModel,
         configuredSupportsTools,
         rawResponse: rawResponse.slice(0, 4000),
         thinkText: thinkText?.slice(0, 2000) ?? null,
@@ -707,7 +707,7 @@ const resolvePlanAttempt = (
     return {
       outcome: "failed",
       error: new ValidationError(
-        agentPlanFailureMessage(subagentModel, rawResponse),
+        agentPlanFailureMessage(agentModel, rawResponse),
       ),
     };
   }
@@ -736,7 +736,7 @@ const resolvePlanAttempt = (
 
     logger.debug(
       {
-        subagentModel,
+        agentModel,
         configuredSupportsTools,
         rawResponse: rawResponse.slice(0, 4000),
         thinkText: thinkText?.slice(0, 2000) ?? null,
@@ -751,7 +751,7 @@ const resolvePlanAttempt = (
     return {
       outcome: "failed",
       error: new ValidationError(
-        agentPlanFailureMessage(subagentModel, rawResponse),
+        agentPlanFailureMessage(agentModel, rawResponse),
       ),
     };
   }
@@ -831,8 +831,8 @@ export class Agent {
     hooks?: SubagentPlanHooks,
     maxSubagents: MaxSubagentsParam = 3,
   ): Promise<SubagentPlan> => {
-    // Step 1: Read subagent model and temperature from IConfigManager
-    const { subagentModel, agentTemperature, configuredSupportsTools } =
+    // Step 1: Read agent model and temperature from IConfigManager
+    const { agentModel, agentTemperature, configuredSupportsTools } =
       await resolvePlanningConfig(this.dependencies.config, overrides);
 
     // Step 2: Build system text: skill content, memory context header, then PLANNING_INSTRUCTION
@@ -878,7 +878,7 @@ export class Agent {
 
       if (configuredSupportsTools) {
         const agentResult = await this.dependencies.ollama.chatWithTools(
-          subagentModel,
+          agentModel,
           messages,
           planningTools,
           { temperature: agentTemperature, includeThinking: true },
@@ -895,7 +895,7 @@ export class Agent {
         );
       } else {
         for await (const token of this.dependencies.ollama.chatStream(
-          subagentModel,
+          agentModel,
           messages,
           { temperature: agentTemperature, includeThinking: true },
         )) {
@@ -966,7 +966,7 @@ export class Agent {
         thinkText,
         thinkTextForPlan,
         verificationAttempt,
-        subagentModel,
+        agentModel,
         maxSubagents,
       );
 
@@ -1029,7 +1029,7 @@ export class Agent {
     history: Message[],
     overrides?: TaskModelOverrides,
   ): Promise<string> => {
-    const { subagentModel, agentTemperature } =
+    const { agentModel, agentTemperature } =
       await resolveModelAndTemperature(this.dependencies.config, overrides);
 
     // Flatten the agent's message list so the agent sees the whole attempt in one user blob
@@ -1049,7 +1049,7 @@ export class Agent {
     ];
 
     // Blocking: the agent waits on this before appending guidance and retrying chatStream
-    return this.dependencies.ollama.chat(subagentModel, agentMessages, {
+    return this.dependencies.ollama.chat(agentModel, agentMessages, {
       temperature: agentTemperature,
     });
   };
@@ -1081,7 +1081,7 @@ export class Agent {
     overrides?: TaskModelOverrides,
   ): AsyncGenerator<string> {
     // combine uses the same model as planning
-    const { subagentModel, agentTemperature } =
+    const { agentModel, agentTemperature } =
       await resolveModelAndTemperature(this.dependencies.config, overrides);
 
     // One section per completed subtask so the model can merge / dedupe / summarise
@@ -1101,7 +1101,7 @@ export class Agent {
     ];
     // Stream tokens out — AgentOrchestrator forwards these to the client as the only visible output when N>1 subtasks
     for await (const token of this.dependencies.ollama.chatStream(
-      subagentModel,
+      agentModel,
       agentMessages,
       {
         temperature: agentTemperature,

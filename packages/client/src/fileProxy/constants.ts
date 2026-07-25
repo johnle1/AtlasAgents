@@ -28,10 +28,7 @@ export const SKIP_DIR_NAMES = new Set([
  * {@link LocalFileProxy.handle} skips `startWorking` / teardown animation for
  * these metadata routes (`file.get_cwd`, `command.classify`).
  */
-export const QUIET_PROXY_ROUTES = new Set([
-  "file.get_cwd",
-  "command.classify",
-]);
+export const QUIET_PROXY_ROUTES = new Set(["file.get_cwd", "command.classify"]);
 
 /**
  * Base executables treated as read-only → classification `"safe"`.
@@ -69,6 +66,12 @@ export const SAFE_GIT_SUBCOMMANDS = new Set(["status", "log", "diff"]);
  * Matched as whole whitespace-separated tokens after lowercasing (e.g. `rm`,
  * `-rf`, `--force`). Presence of any token here fails closed to requiring
  * explicit user approval with a danger warning in the CLI.
+ *
+ * Includes `find`'s action primaries (`-exec`, `-delete`, `-fprintf`, …).
+ * Those run commands or write/destroy files using only spaces — no shell
+ * metacharacter — so {@link SHELL_METACHARACTER_PATTERN} cannot catch them
+ * and `find` being in {@link SAFE_BASE_COMMANDS} would otherwise auto-approve
+ * e.g. `find . -maxdepth 0 -exec sh payload {} +`.
  */
 export const DANGEROUS_TOKENS = new Set([
   "rm",
@@ -82,4 +85,122 @@ export const DANGEROUS_TOKENS = new Set([
   "dd",
   "mkfs",
   "reset",
+  "chmod",
+  // find primaries that execute commands
+  "-exec",
+  "-execdir",
+  "-ok",
+  "-okdir",
+  // find primaries that destroy or write files
+  "-delete",
+  "-fprintf",
+  "-fprint",
+  "-fprint0",
+  "-fls",
 ]);
+
+/**
+ * `find` primaries that only match or print — safe to auto-approve.
+ *
+ * @remarks
+ * `find` is the one entry in {@link SAFE_BASE_COMMANDS} whose own flags can
+ * execute code, so it gets an allow-list rather than relying on the
+ * {@link DANGEROUS_TOKENS} deny-list alone. Any `-flag` not listed here fails
+ * closed to `"cautious"`, so a primary nobody thought of (or a new one added
+ * by a future `find` release) cannot silently inherit `"safe"`.
+ *
+ * `-printf`/`-ls` are included (they write to stdout); their `-fprintf`/`-fls`
+ * counterparts write to arbitrary files and are in {@link DANGEROUS_TOKENS}.
+ */
+export const SAFE_FIND_PRIMARIES = new Set([
+  // matching
+  "-name",
+  "-iname",
+  "-path",
+  "-ipath",
+  "-lname",
+  "-ilname",
+  "-regex",
+  "-iregex",
+  "-type",
+  "-xtype",
+  "-size",
+  "-empty",
+  "-perm",
+  "-user",
+  "-group",
+  "-uid",
+  "-gid",
+  "-nouser",
+  "-nogroup",
+  "-links",
+  "-inum",
+  "-samefile",
+  "-newer",
+  "-newermt",
+  "-anewer",
+  "-cnewer",
+  "-atime",
+  "-ctime",
+  "-mtime",
+  "-amin",
+  "-cmin",
+  "-mmin",
+  "-used",
+  // traversal control
+  "-maxdepth",
+  "-mindepth",
+  "-depth",
+  "-prune",
+  "-quit",
+  "-follow",
+  "-mount",
+  "-xdev",
+  "-noleaf",
+  "-ignore_readdir_race",
+  "-noignore_readdir_race",
+  // operators
+  "-a",
+  "-and",
+  "-o",
+  "-or",
+  "-not",
+  // stdout-only output
+  "-print",
+  "-print0",
+  "-printf",
+  "-ls",
+]);
+
+/**
+ * Shell metacharacters that can chain, redirect, or substitute a second,
+ * unvetted command onto an otherwise allow-listed base command (e.g.
+ * `echo x && rm -rf /`, `cat f | sh`, `echo x > ~/.bashrc`, `` `whoami` ``,
+ * `$(curl …)`). Any command containing one of these must never be
+ * classified `"safe"` purely from its first token.
+ *
+ * @remarks
+ * Deliberately does not distinguish quoted occurrences from real ones
+ * (e.g. `grep "a;b" file.txt` also matches) — consistent with this
+ * module's fail-closed-to-`"cautious"` philosophy rather than parsing
+ * quoting/escaping.
+ */
+export const SHELL_METACHARACTER_PATTERN = /[;&|`<>\n]|\$\(/;
+
+/**
+ * Argument shapes that point outside the workspace the agent is scoped to.
+ *
+ * @remarks
+ * `command.run` sets only `cwd` — unlike the `file.*` routes, it has no path
+ * confinement — so an allow-listed reader (`cat`, `grep`, `find`, …) given an
+ * absolute or traversing path reads anywhere the user can, returns the
+ * contents to the server, and (because `"safe"` commands print only a timing
+ * line) shows the user nothing. `cat /Users/you/.ssh/id_rsa` must therefore
+ * require approval rather than auto-run.
+ *
+ * Matches an absolute path (`/etc/passwd`), a home-relative path (`~/.aws`),
+ * a `..` traversal segment, or an absolute path tucked into a flag value
+ * (`--file=/etc/passwd`). Workspace-relative arguments (`src/a.ts`, `.`,
+ * `*.ts`) do not match and stay eligible for `"safe"`.
+ */
+export const ESCAPING_PATH_PATTERN = /^[/~]|^\.\.(?:\/|$)|\/\.\.(?:\/|$)|=[/~]/;

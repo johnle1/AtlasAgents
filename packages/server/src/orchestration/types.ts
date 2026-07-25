@@ -32,21 +32,21 @@ export interface SessionInfo {
  * enable debug logging for a single task.
  */
 export type TaskModelOverrides = {
-  /** Override subagent model */
+  /** Override agent model */
   agentModel?: string;
-  /** Override subsubagent model */
+  /** Override subagent model */
   subagentModel?: string;
   /** Override the provider serving the agent role (e.g. "ollama", "vllm-gpu") */
   agentProvider?: string;
   /** Override the provider serving the subagent role */
   subagentProvider?: string;
-  /** Override subagent temperature */
+  /** Override agent temperature */
   agentTemp?: number;
-  /** Override subsubagent temperature */
+  /** Override subagent temperature */
   subagentTemp?: number;
-  /** When true, use native Ollama tool_calls for the subagent model */
+  /** When true, use native Ollama tool_calls for the agent model */
   agentModelSupportsTools?: boolean;
-  /** When true, use native Ollama tool_calls for the subsubagent model */
+  /** When true, use native Ollama tool_calls for the subagent model */
   subagentModelSupportsTools?: boolean;
   /** When true, subagent logs raw turns and parsed tools to stderr */
   debug?: boolean;

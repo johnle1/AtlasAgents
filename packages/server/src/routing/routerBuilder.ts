@@ -468,6 +468,7 @@ function buildModelOverrides(body: Record<string, unknown>) {
   } = {};
 
   const stringFields = [
+    { key: "agentModel", target: "agentModel" },
     { key: "subagentModel", target: "subagentModel" },
     { key: "agentProvider", target: "agentProvider" },
     { key: "subagentProvider", target: "subagentProvider" },

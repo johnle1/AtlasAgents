@@ -77,9 +77,9 @@ const SEARCH_TOOL: ToolSchema = {
 };
 
 const mockConfig = {
-  getSubagentModel: async () => "test-agent",
+  getAgentModel: async () => "test-agent",
   getAgentTemperature: async () => 0,
-  getSubagentModelSupportsTools: async () => true,
+  getAgentModelSupportsTools: async () => true,
 } as unknown as IConfigManager;
 
 const createAgent = (ollama: IOllamaClient): Agent =>
@@ -436,9 +436,9 @@ describe("Agent.plan without native tool support", () => {
     } as unknown as IOllamaClient;
 
     const config = {
-      getSubagentModel: async () => "gemma4:12b",
+      getAgentModel: async () => "gemma4:12b",
       getAgentTemperature: async () => 0,
-      getSubagentModelSupportsTools: async () => false,
+      getAgentModelSupportsTools: async () => false,
     } as unknown as IConfigManager;
 
     const agent = new Agent({ ollama, config });
@@ -462,9 +462,9 @@ describe("Agent.plan without native tool support", () => {
     } as unknown as IOllamaClient;
 
     const config = {
-      getSubagentModel: async () => "gemma4:26b",
+      getAgentModel: async () => "gemma4:26b",
       getAgentTemperature: async () => 0,
-      getSubagentModelSupportsTools: async () => false,
+      getAgentModelSupportsTools: async () => false,
     } as unknown as IConfigManager;
 
     const plan = await new Agent({ ollama, config }).plan("fix the bug", "", "");
@@ -494,9 +494,9 @@ COMMAND PLAN:
     } as unknown as IOllamaClient;
 
     const config = {
-      getSubagentModel: async () => "gemma4:26b",
+      getAgentModel: async () => "gemma4:26b",
       getAgentTemperature: async () => 0,
-      getSubagentModelSupportsTools: async () => false,
+      getAgentModelSupportsTools: async () => false,
     } as unknown as IConfigManager;
 
     const plan = await new Agent({ ollama, config }).plan("fix the bug", "", "");
@@ -519,9 +519,9 @@ COMMAND PLAN:
     } as unknown as IOllamaClient;
 
     const config = {
-      getSubagentModel: async () => "gemma4:26b",
+      getAgentModel: async () => "gemma4:26b",
       getAgentTemperature: async () => 0,
-      getSubagentModelSupportsTools: async () => false,
+      getAgentModelSupportsTools: async () => false,
     } as unknown as IConfigManager;
 
     const plan = await new Agent({ ollama, config }).plan("fix the bug", "", "");
@@ -538,9 +538,9 @@ COMMAND PLAN:
     } as unknown as IOllamaClient;
 
     const config = {
-      getSubagentModel: async () => "gemma4:26b",
+      getAgentModel: async () => "gemma4:26b",
       getAgentTemperature: async () => 0,
-      getSubagentModelSupportsTools: async () => false,
+      getAgentModelSupportsTools: async () => false,
     } as unknown as IConfigManager;
 
     const plan = await new Agent({ ollama, config }).plan("fix the bug", "", "");
@@ -555,9 +555,9 @@ COMMAND PLAN:
     } as unknown as IOllamaClient;
 
     const config = {
-      getSubagentModel: async () => "gemma4:26b",
+      getAgentModel: async () => "gemma4:26b",
       getAgentTemperature: async () => 0,
-      getSubagentModelSupportsTools: async () => false,
+      getAgentModelSupportsTools: async () => false,
     } as unknown as IConfigManager;
 
     await expect(

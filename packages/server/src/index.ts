@@ -264,6 +264,17 @@ const main = async (): Promise<void> => {
   // Interactive startup prompts
   const { password, port } = await runServerStartupPrompts();
 
+  // An empty password would let every client authenticate automatically.
+  // Every server start requires a real password — no unauthenticated mode.
+  if (password.trim().length === 0) {
+    logger.error(
+      "No password set. The server would accept every client without " +
+        "authentication, exposing file and shell access to anyone who can " +
+        "reach this port. Restart and set a password.",
+    );
+    process.exit(1);
+  }
+
   // Install default user data and configuration files
   await installUserDataDefaults(process.cwd());
 
@@ -332,32 +343,32 @@ const main = async (): Promise<void> => {
     }
   }
 
-  // Check subsubagent model configuration
+  // Check agent model configuration
   try {
-    const subagentModel = await app.config.getSubagentModel();
+    const agentModel = await app.config.getAgentModel();
     const agentProvider = await app.config.getAgentProvider();
     const agentAdmin = await app.providerRegistry.getAdmin(agentProvider);
-    await syncAgentToolSupport(agentAdmin, app.config, subagentModel);
+    await syncAgentToolSupport(agentAdmin, app.config, agentModel);
   } catch (error) {
     if (error instanceof ConfigError) {
       logger.warn(
-        "No subsubagent model configured. Connect a client and run /set agent",
+        "No agent model configured. Connect a client and run /set agent",
       );
     } else {
       throw error;
     }
   }
 
-  // Check subsubsubagent model configuration
+  // Check subagent model configuration
   try {
-    const subsubagentModel = await app.config.getSubagentModel();
+    const subagentModel = await app.config.getSubagentModel();
     const subagentProvider = await app.config.getSubagentProvider();
     const subagentAdmin = await app.providerRegistry.getAdmin(subagentProvider);
-    await syncSubagentToolSupport(subagentAdmin, app.config, subsubagentModel);
+    await syncSubagentToolSupport(subagentAdmin, app.config, subagentModel);
   } catch (error) {
     if (error instanceof ConfigError) {
       logger.warn(
-        "No subsubsubagent model configured. Connect a client and run /set subagent",
+        "No subagent model configured. Connect a client and run /set subagent",
       );
     } else {
       throw error;

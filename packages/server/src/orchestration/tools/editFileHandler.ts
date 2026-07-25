@@ -89,8 +89,7 @@ export const editFileTool: ToolHandler = {
         path,
         oldText,
         newText,
-        replaceAll,
-        recorderContext,
+        { replaceAll, ctx: recorderContext },
       );
       if (outcome.accepted) {
         trackers.filesWrittenThisTask.add(path);

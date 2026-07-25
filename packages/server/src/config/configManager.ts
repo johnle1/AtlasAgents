@@ -1050,7 +1050,7 @@ export class ConfigManager implements IConfigManager {
    * - User-facing command: `/set subagent model-name`
    *
    * **Tool Support:**
-   * After getting the model name, check getAgentModelSupportsTools() to determine
+   * After getting the model name, check getSubagentModelSupportsTools() to determine
    * if the model supports native tool_calls or requires legacy text markers.
    *
    * **Fresh Read:**
@@ -1064,7 +1064,7 @@ export class ConfigManager implements IConfigManager {
    * ```typescript
    * try {
    *   const model = await configManager.getSubagentModel();
-   *   const supportsTools = await configManager.getAgentModelSupportsTools();
+   *   const supportsTools = await configManager.getSubagentModelSupportsTools();
    *   console.log(`Executing with: ${model} (tools: ${supportsTools})`);
    * } catch (error) {
    *   if (error instanceof ConfigError) {

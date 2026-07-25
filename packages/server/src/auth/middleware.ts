@@ -1,3 +1,5 @@
+import { ConfigurationError } from "../errors/index.js";
+
 /**
  * Authentication middleware for RSocket connections.
  *
@@ -11,21 +13,20 @@
  * - Expects client metadata in format: `{ password: "user-provided-password" }`
  * - Password is never persisted; it exists only in server process memory
  *
- * **Dev Mode:**
- * - When server starts with an empty password (user presses enter without typing),
- *   dev mode activates and all connections are automatically approved
- * - Intended for local development without authentication friction
+ * **No unauthenticated mode:**
+ * - A non-empty password is required. Because the listener binds all
+ *   interfaces, an empty password would expose the agent's file and shell
+ *   tooling to anyone who can reach the port, so the constructor throws
+ *   rather than accepting one.
  *
  * @example
  * ```typescript
- * Production: require password
  * const auth = new AuthMiddleware("my-secure-password");
  * auth.validate("my-secure-password"); // → "shared"
  * auth.validate("wrong"); // → null
  *
- * Dev mode allows all:
- * const devAuth = new AuthMiddleware("");
- * devAuth.validate("anything"); // → "shared"
+ * An empty (or whitespace-only) password is rejected outright:
+ * new AuthMiddleware(""); // throws ConfigurationError
  * ```
  */
 export class AuthMiddleware {
@@ -33,20 +34,27 @@ export class AuthMiddleware {
    * Initialize authentication middleware with a server password.
    *
    * @param expectedPassword - The password typed by operator at server startup.
-   *                          Empty string (or only whitespace) activates dev mode,
-   *                          which bypasses password validation and accepts all connections.
    *                          Password is stored in memory, never written to disk.
+   *
+   * @throws {ConfigurationError} When `expectedPassword` is empty or only
+   *   whitespace — every server start must set a real password.
    */
-  constructor(private readonly expectedPassword: string) {}
+  constructor(private readonly expectedPassword: string) {
+    if (expectedPassword.trim().length === 0) {
+      throw new ConfigurationError(
+        "Refusing to start with an empty password: every client would be " +
+          "authenticated automatically. Set a password to start the server.",
+      );
+    }
+  }
 
   /**
    * Validate a client's password and return a user ID on success.
    *
    * **Authentication Logic:**
    * 1. Trim the expected password from constructor
-   * 2. If empty → dev mode active → approve all clients
-   * 3. Otherwise → compare trimmed client password to trimmed expected password
-   * 4. On match → return shared user ID; on mismatch → return null (unauthorized)
+   * 2. Compare trimmed client password to trimmed expected password
+   * 3. On match → return shared user ID; on mismatch → return null (unauthorized)
    *
    * **Return Value Meaning:**
    * - `"shared"`: Client authorized; all authenticated clients share this user ID
@@ -58,25 +66,18 @@ export class AuthMiddleware {
    *
    * @param metadataPassword - The password provided by the client in RSocket
    *                          connection metadata, extracted from JSON `{ password: "..." }`.
-   *                          Empty or missing strings will fail auth (unless dev mode).
+   *                          Empty or missing strings always fail auth.
    *
-   * @returns `"shared"` when client is authorized (password matches or dev mode),
-   *          `null` when client is unauthorized (password mismatch in production mode).
+   * @returns `"shared"` when the password matches, `null` on mismatch.
    *
    * @example
    * ```typescript
    * const auth = new AuthMiddleware("secret123");
    *
-   * Production validation:
    * auth.validate("secret123");   // → "shared" (exact match)
    * auth.validate(" secret123 "); // → "shared" (whitespace trimmed)
    * auth.validate("wrong");       // → null (mismatch)
    * auth.validate("");            // → null (empty doesn't match "secret123")
-   *
-   * Dev mode validation:
-   * const devAuth = new AuthMiddleware("");
-   * devAuth.validate("anything");  // → "shared" (all allowed)
-   * devAuth.validate("");          // → "shared" (all allowed)
    * ```
    */
   validate = (metadataPassword: string): string | null => {
@@ -84,13 +85,7 @@ export class AuthMiddleware {
     // from operator input at startup
     const expected = this.expectedPassword.trim();
 
-    // Dev mode: if no password was set, approve all connections
-    // This is indicated by an empty string after trimming
-    if (expected.length === 0) {
-      return "shared";
-    }
-
-    // Production mode: compare trimmed client password to expected password
+    // Compare trimmed client password to expected password.
     // Trim client input too, so "password " matches "password"
     // Return "shared" user ID on match, null (unauthorized) on mismatch
     return metadataPassword.trim() === expected ? "shared" : null;
