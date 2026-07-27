@@ -36,6 +36,10 @@ jobs:
           cache: npm
       - name: Install workspace dependencies
         run: npm ci
+      - name: Build shared workspace package
+        # packages/client imports @loopycode/shared's build output; test:e2e
+        # only builds packages/client itself, so this must run first.
+        run: npm run build -w @loopycode/shared
       - name: Install test suite dependencies
         run: cd _Test_ && npm install
       - name: System (E2E) tests
