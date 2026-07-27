@@ -181,9 +181,14 @@ export const regenerateServerCert = async (
 /**
  * Returns the expiration date of a server certificate.
  *
+ * @remarks
+ * Parses the `validTo` string field rather than reading the newer
+ * `validToDate` getter, which isn't present on every Node.js build this
+ * server might run under.
+ *
  * @param cert - A certificate previously returned by
  *   {@link loadOrCreateServerCert} or {@link regenerateServerCert}.
  * @returns The certificate's `notAfter` date.
  */
 export const certificateExpiry = (cert: ServerCertificate): Date =>
-  new X509Certificate(cert.cert).validToDate;
+  new Date(new X509Certificate(cert.cert).validTo);

@@ -89,7 +89,7 @@ describe("loadOrCreateServerCert — validity period", () => {
     const { cert } = await loadOrCreateServerCert(root);
     const x509 = new X509Certificate(cert);
     expect(
-      yearsBetween(x509.validFromDate, x509.validToDate),
+      yearsBetween(new Date(x509.validFrom), new Date(x509.validTo)),
     ).toBeCloseTo(2, 1);
   });
 
@@ -98,7 +98,7 @@ describe("loadOrCreateServerCert — validity period", () => {
     const { cert } = await loadOrCreateServerCert(root, 5);
     const x509 = new X509Certificate(cert);
     expect(
-      yearsBetween(x509.validFromDate, x509.validToDate),
+      yearsBetween(new Date(x509.validFrom), new Date(x509.validTo)),
     ).toBeCloseTo(5, 1);
   });
 
@@ -163,6 +163,6 @@ describe("certificateExpiry", () => {
     const cert = await loadOrCreateServerCert(root);
     const expiry = certificateExpiry(cert);
     const x509 = new X509Certificate(cert.cert);
-    expect(expiry.getTime()).toBe(x509.validToDate.getTime());
+    expect(expiry.getTime()).toBe(new Date(x509.validTo).getTime());
   });
 });
