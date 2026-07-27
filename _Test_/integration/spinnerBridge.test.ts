@@ -33,7 +33,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TaskFrame } from "../../packages/client/src/frames";
+import type { TaskFrame } from "../../packages/client/src/types/frames";
 import type { SubagentBoardState } from "../../packages/client/src/ui/types";
 import {
   clearSubagentBoards,

@@ -16,10 +16,10 @@
  * with its own config flag (`agentModelSupportsTools`, `subagentModelSupportsTools`).
  */
 
-import type { ConfigRole } from "../config/configManager.js";
+import type { ConfigRole } from "../config/configManager/index.js";
 import type { IConfigManager } from "../orchestration/interfaces/configInterfaces.js";
 import type { IOllamaAdminClient } from "../orchestration/interfaces/ollamaInterfaces.js";
-import { logger } from "../logger.js";
+import { logger } from "../utils/logger.js";
 import { modelSupportsNativeTools } from "./modelCapabilities.js";
 
 /**
@@ -190,11 +190,12 @@ export const syncSubagentToolSupport = async (
   syncModelToolSupport(ollama, config, "subagent", modelName);
 
 /**
- * Deprecated alias for `syncSubagentToolSupport`.
+ * Deprecated alias for `syncAgentToolSupport`.
  *
  * @remarks
- * Kept for backwards compatibility. Use `syncSubagentToolSupport` in new code.
+ * "Advisor" was this role's name before the agent/subagent rename. Kept for
+ * backwards compatibility. Use `syncAgentToolSupport` in new code.
  *
- * @deprecated Use `syncSubagentToolSupport` instead.
+ * @deprecated Use `syncAgentToolSupport` instead.
  */
-export const syncAdvisorToolSupport = syncSubagentToolSupport;
+export const syncAdvisorToolSupport = syncAgentToolSupport;

@@ -13,7 +13,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import fg from "fast-glob";
 import { computeDiff, formatDiffPlain } from "@loopycode/shared";
-import { formatDisplayPath } from "../../pathDisplay.js";
+import { formatDisplayPath } from "../../utils/pathDisplay.js";
 import {
   printCd,
   printCreateDir,

@@ -1,0 +1,43 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install workspace dependencies
+        run: npm ci
+      - name: Build (also serves as the typecheck gate — this repo has no separate tsc/lint script)
+        run: npm run build
+      - name: Install test suite dependencies
+        run: cd _Test_ && npm install
+      - name: Unit tests
+        run: cd _Test_ && npm run test:unit
+      - name: Integration tests
+        run: cd _Test_ && npm run test:integration
+
+  system:
+    needs: build-and-unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install workspace dependencies
+        run: npm ci
+      - name: Install test suite dependencies
+        run: cd _Test_ && npm install
+      - name: System (E2E) tests
+        # Builds packages/client itself, so system tests never silently skip in CI.
+        run: cd _Test_ && npm run test:e2e

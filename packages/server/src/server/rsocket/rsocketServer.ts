@@ -25,7 +25,6 @@ import {
   type RSocket,
   type SetupPayload,
 } from "@rsocket/core";
-import { TcpServerTransport } from "@rsocket/tcp-server";
 
 import type { Router } from "../../routing/router.js";
 import type { AuthMiddleware, SessionRecord } from "./types.js";
@@ -33,6 +32,8 @@ import {
   createRequestResponseHandler,
   createRequestStreamHandler,
 } from "./handlers/index.js";
+import { createTlsServerTransport } from "../tls/tlsServerTransport.js";
+import type { ServerCertificate } from "../tls/certificateStore.js";
 
 /**
  * An RSocket/TCP server that authenticates, routes, and cancels LoopyCode CLI
@@ -108,13 +109,17 @@ export class RSocketServer {
    * @param clientPeers - Optional shared map of `requesterId → RSocket`. Pass
    *   this when another component needs to send frames to connected clients;
    *   otherwise the server falls back to an internal map.
+   * @param cert - The server's TLS certificate and private key (see
+   *   {@link loadOrCreateServerCert}). Every connection is TLS 1.3; there is
+   *   no plaintext fallback.
    */
   constructor(
     private readonly port: number,
     private readonly auth: AuthMiddleware,
     private readonly router: Router,
-    private readonly onConnectionClosed?: (requesterId: string) => void,
-    private readonly clientPeers?: Map<string, RSocket>,
+    private readonly onConnectionClosed: ((requesterId: string) => void) | undefined,
+    private readonly clientPeers: Map<string, RSocket> | undefined,
+    private readonly cert: ServerCertificate,
   ) {}
 
   /**
@@ -138,9 +143,10 @@ export class RSocketServer {
    * ```
    */
   start = async (): Promise<void> => {
-    const transport = new TcpServerTransport({
-      listenOptions: { host: "0.0.0.0", port: this.port },
-    });
+    const transport = createTlsServerTransport(
+      { host: "0.0.0.0", port: this.port },
+      this.cert,
+    );
     const core = new RSocketServerCore({
       transport,
       acceptor: { accept: this.onAccept },

@@ -9,9 +9,10 @@
  */
 
 import { RSocketConnector, type RSocket } from "@rsocket/core";
-import { TcpClientTransport } from "@rsocket/tcp-client";
-import type { Config } from "../config.js";
-import type { TaskFrame } from "../frames.js";
+import type { Config } from "../config/index.js";
+import { createTlsClientTransport } from "./tls/tlsClientTransport.js";
+import { checkAndPinFingerprint } from "./tls/fingerprintStore.js";
+import type { TaskFrame } from "../types/frames.js";
 import type { LocalFileProxy } from "../localFileProxy.js";
 import {
   clearMemory as clearMemoryFn,
@@ -41,7 +42,7 @@ import {
 } from "./constants.js";
 import { ConnectionLifecycle } from "./lifecycle.js";
 
-export type { PullProgress, TaskFrame } from "../frames.js";
+export type { PullProgress, TaskFrame } from "../types/frames.js";
 
 /**
  * Manages one persistent RSocket TCP connection to the LoopyCode server.
@@ -329,10 +330,32 @@ export class Connection {
           );
         }
 
-        const transport = new TcpClientTransport({
-          connectionOptions: {
-            host: this.config.server,
-            port: this.config.port,
+        const transport = createTlsClientTransport({
+          host: this.config.server,
+          port: this.config.port,
+          onCertificate: (fingerprint256) => {
+            const decision = checkAndPinFingerprint(
+              this.config.server,
+              this.config.port,
+              fingerprint256,
+            );
+            if (!decision.trust) {
+              process.stderr.write(
+                `\nWARNING: server certificate fingerprint changed for ${this.config.server}:${this.config.port}\n` +
+                  `  expected: ${decision.pinnedFingerprint}\n` +
+                  `  received: ${fingerprint256}\n` +
+                  "Refusing to connect. If the server certificate was legitimately " +
+                  "regenerated, clear the pin and reconnect to trust it again.\n\n",
+              );
+              return "reject";
+            }
+            if (decision.firstConnection) {
+              process.stderr.write(
+                `Trusting new server certificate for ${this.config.server}:${this.config.port} ` +
+                  `(fingerprint: ${fingerprint256}). Verify this out-of-band if possible.\n`,
+              );
+            }
+            return "trust";
           },
         });
 
@@ -556,7 +579,7 @@ export class Connection {
   listModels = async (): Promise<string[]> => this.fetchModels();
 
   /**
-   * Uploads local skill markdown files for agent/agent use.
+   * Uploads local skill markdown files for agent/subagent use.
    *
    * @param skills - Skill name + content payloads to sync.
    * @throws {@link Error} On connect or command failure.

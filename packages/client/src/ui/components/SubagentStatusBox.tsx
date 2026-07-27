@@ -8,7 +8,7 @@ import {
 import type { SubagentStatusBoxProps as Props } from "./types.js";
 
 /**
- * Renders a stylized status container for an individual agent or agent using Ink.
+ * Renders a stylized status container for an individual agent or subagent using Ink.
  *
  * @remarks
  * This component visualizes the agent's progress, state transitions, and messages.

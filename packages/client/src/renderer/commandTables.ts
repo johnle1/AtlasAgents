@@ -6,7 +6,7 @@
  * {@link appendStyledLines} with consistent vertical spacing.
  */
 
-import type { Config } from "../config.js";
+import type { Config } from "../config/index.js";
 import type { MemoryEntry } from "../connection/index.js";
 import { getTheme } from "../theme/themeManager.js";
 import { THEMES } from "../theme/themes.js";

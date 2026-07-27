@@ -11,8 +11,8 @@ import type {
   AgentStage,
   StatusIcon,
   TaskLifecycleState,
-} from "../frames.js";
-import { loadConfig } from "../config.js";
+} from "../types/frames.js";
+import { loadConfig } from "../config/index.js";
 import { inTmux, isScreenReaderLikely } from "./terminalEnv.js";
 
 /** Circle pulse character sequence for standard terminals. */
@@ -40,7 +40,7 @@ export type StatusVisual = {
 };
 
 /**
- * Checks if a given agent/agent stage is actively working.
+ * Checks if a given agent/subagent stage is actively working.
  *
  * @param stage - The stage to check.
  * @returns True if the stage represents active execution, false otherwise.
@@ -100,7 +100,7 @@ export const getWorkingFrame = (pulseIndex: number): string => {
 };
 
 /**
- * Resolves the status rendering details for an agent/agent stage.
+ * Resolves the status rendering details for an agent/subagent stage.
  *
  * @param stage - Current active stage name.
  * @param frameIcon - Default icon.
@@ -191,4 +191,3 @@ export const resolveTaskLifecycleVisual = (
       return { glyph: "✗", color: "red" };
   }
 };
-

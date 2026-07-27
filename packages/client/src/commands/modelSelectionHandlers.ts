@@ -1,5 +1,5 @@
 /**
- * Interactive agent/subsubsubagent model picker used by `/set agent` and `/set subagent`.
+ * Interactive agent/subagent model picker used by `/set agent` and `/set subagent`.
  *
  * @remarks
  * Loads provider-grouped model names from the server, prompts for a numbered
@@ -7,7 +7,7 @@
  * Ink banner. Local config rolls back if the server rejects the change.
  */
 
-import { updateConfig, loadConfig } from "../config.js";
+import { updateConfig, loadConfig } from "../config/index.js";
 import type { Connection } from "../connection/index.js";
 import type { PromptPort } from "../ui/promptPort.js";
 import { refreshInkBanner } from "../ui/uiBridge.js";
@@ -16,7 +16,7 @@ import type { ModelGroup } from "../renderer.js";
 import { formatErrorMessage } from "./utils.js";
 
 /**
- * Lets the user pick the agent or subsubsubagent model (from any configured
+ * Lets the user pick the agent or subagent model (from any configured
  * provider) and persists the choice.
  *
  * @remarks

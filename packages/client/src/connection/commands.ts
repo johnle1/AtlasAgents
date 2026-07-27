@@ -9,7 +9,7 @@
  */
 
 import type { Payload, RSocket } from "@rsocket/core";
-import type { InstalledModel } from "../frames.js";
+import type { InstalledModel } from "../types/frames.js";
 import type {
   MemoryEntry,
   SkillPayload,

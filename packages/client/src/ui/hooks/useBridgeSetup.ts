@@ -32,8 +32,8 @@
 
 import { useEffect, useRef } from "react";
 
-import { loadConfig } from "../../config.js";
-import { buildPromptLabel } from "../../pathDisplay.js";
+import { loadConfig } from "../../config/index.js";
+import { buildPromptLabel } from "../../utils/pathDisplay.js";
 import { buildBannerLines } from "../../renderer/banner.js";
 import type { BridgeSetupContext } from "./types.js";
 import {
@@ -131,7 +131,7 @@ export const useBridgeSetup = ({
     });
 
     // Register the streaming token handler for LLM response streaming.
-    // When the server streams tokens (e.g., during an subagent response), this handler
+    // When the server streams tokens (e.g., during a subagent response), this handler
     // appends each token to the streaming text state. The UI renders this as
     // progressively updating text below the history.
     registerStreamingHandler((streamingToken) => {

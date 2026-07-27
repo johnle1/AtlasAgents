@@ -72,7 +72,7 @@ const emptyPlan = (): SubagentPlan => ({
 
 /**
  * Builds the agent's planning context: memory context header (with an
- * appended workspace snapshot when the subagent model can't call tools and
+ * appended workspace snapshot when the agent model can't call tools and
  * the context lacks structure already), a stack hint, and the selected
  * skill body.
  *
@@ -88,7 +88,7 @@ export const preparePlanningContext = async (
   >,
   params: {
     taskText: string;
-    subagentModel: string;
+    agentModel: string;
     modelOverrides: TaskModelOverrides | undefined;
     perConn: PerConnection;
     emit: (frame: TaskFrame) => void;
@@ -96,14 +96,14 @@ export const preparePlanningContext = async (
   },
 ): Promise<PlanningContextResult> => {
   const { contextBuilder, skillManager, sessionManager, config } = deps;
-  const { taskText, subagentModel, modelOverrides, perConn, emit, signal } = params;
+  const { taskText, agentModel, modelOverrides, perConn, emit, signal } = params;
 
-  let contextHeader = await contextBuilder.build(taskText, subagentModel);
+  let contextHeader = await contextBuilder.build(taskText, agentModel);
   // Order matches the original inline code: context build happens before
   // this config read, not the other way around.
   const agentSupportsTools =
-    modelOverrides?.subagentModelSupportsTools ??
-    (await config.getSubagentModelSupportsTools());
+    modelOverrides?.agentModelSupportsTools ??
+    (await config.getAgentModelSupportsTools());
 
   // Append workspace snapshot if agent doesn't support tools and context lacks structure
   const appendWorkspaceSnapshot = async (): Promise<string> => {

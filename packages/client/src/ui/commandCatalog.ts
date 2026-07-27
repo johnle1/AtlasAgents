@@ -43,11 +43,11 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   },
   {
     command: "/set agent",
-    description: "Choose subsubagent model (from any configured provider)",
+    description: "Choose agent model (from any configured provider)",
   },
   {
     command: "/set subagent",
-    description: "Choose subsubsubagent model (from any configured provider)",
+    description: "Choose subagent model (from any configured provider)",
   },
   {
     command: "/providers list",
@@ -163,7 +163,7 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   {
     command: "/think",
     label: "/think on/off",
-    description: "Show agent/agent think boxes in terminal",
+    description: "Show agent/subagent think boxes in terminal",
     requiresArgs: true,
   },
   {

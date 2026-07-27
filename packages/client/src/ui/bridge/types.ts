@@ -6,7 +6,7 @@
  * state updates between server-side code and the React-based Ink UI.
  */
 
-import type { Config } from "../../config.js";
+import type { Config } from "../../config/index.js";
 import type {
   SubagentBoardState,
   SubagentStatusState,

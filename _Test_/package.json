@@ -9,6 +9,7 @@
     "test:unit": "vitest run unit",
     "test:integration": "vitest run integration",
     "test:system": "vitest run system",
+    "test:e2e": "npm run build --prefix ../packages/client && vitest run system",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },

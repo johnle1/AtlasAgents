@@ -6,7 +6,7 @@
  * root together so the sandbox and prompt stay aligned.
  */
 
-import { updateConfig } from "../config.js";
+import { updateConfig } from "../config/index.js";
 import type { LocalFileProxy } from "../localFileProxy.js";
 import { printError, printLine, printSuccessOp } from "../renderer.js";
 import * as os from "node:os";

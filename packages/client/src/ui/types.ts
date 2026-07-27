@@ -14,7 +14,7 @@ import type {
   PlanExecution,
   StatusIcon,
   TaskLifecycleState,
-} from "../frames.js";
+} from "../types/frames.js";
 
 /**
  * Display styling for plain-text history lines.
@@ -46,7 +46,7 @@ export type HistoryItem =
       kind: "think";
       /** Collapsible reasoning block content. */
       text: string;
-      /** When `true`, styled as subagent output rather than subsubagent output. */
+      /** When `true`, styled as agent output rather than subagent output. */
       agent?: boolean;
     }
   | {
@@ -81,7 +81,7 @@ export type HistoryItem =
 export type SpinnerMode = "thinking" | "working";
 
 /**
- * Active bottom-line spinner shown while the agent or an agent is working.
+ * Active bottom-line spinner shown while the agent or a subagent is working.
  *
  * @remarks
  * Only the `active: true` variant exists — absence of spinner state is
@@ -89,7 +89,7 @@ export type SpinnerMode = "thinking" | "working";
  */
 export type SpinnerState = {
   active: true;
-  /** Label beside the spinner (e.g. `"Advisor"`, `"Agent 2"`). */
+  /** Label beside the spinner (e.g. `"Agent"`, `"Agent 2"`). */
   label: string;
   mode: SpinnerMode;
 };

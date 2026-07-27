@@ -3,7 +3,7 @@
  *
  * @remarks
  * Provides functions to normalize and validate untrusted rule objects from disk,
- * subagent responses, or user input. Handles backward compatibility (createdAt → timestamp),
+ * agent responses, or user input. Handles backward compatibility (createdAt → timestamp),
  * type coercion with safe defaults, and file structure validation.
  *
  * Used by {@link PreferenceManager} and {@link ContextBuilder} to ensure
@@ -33,7 +33,7 @@ const CONFIDENCE_RANK: Record<PreferenceConfidence, number> = {
 /**
  * Normalizes untrusted confidence value to valid PreferenceConfidence type.
  *
- * @param raw - Untrusted value from subagent response or file
+ * @param raw - Untrusted value from agent response or file
  * @returns One of 'high', 'medium', 'low' (defaults to 'medium')
  *
  * @remarks
@@ -58,7 +58,7 @@ export const parseConfidence = (raw: unknown): PreferenceConfidence => {
 /**
  * Normalizes untrusted source value to valid PreferenceSource type.
  *
- * @param raw - Untrusted value from subagent response or file
+ * @param raw - Untrusted value from agent response or file
  * @returns One of 'explicit', 'outcome', 'fix', 'style' (defaults to 'explicit')
  *
  * @remarks
@@ -87,7 +87,7 @@ export const parseSource = (raw: unknown): PreferenceSource => {
 /**
  * Validates and normalizes an untrusted rule object into a PreferenceRule.
  *
- * @param unknownRule - Untrusted rule object from file or subagent response
+ * @param unknownRule - Untrusted rule object from file or agent response
  * @returns Normalized PreferenceRule or null if required fields missing or invalid
  *
  * @remarks

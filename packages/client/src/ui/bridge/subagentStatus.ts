@@ -2,11 +2,11 @@
  * Agent status, board, and spinner management for the Ink CLI UI.
  *
  * @remarks
- * This module controls the state of task boards, agent/agent progress indicators,
+ * This module controls the state of task boards, agent/subagent progress indicators,
  * activity messages, and loading spinners rendered by the Ink interface.
  */
 
-import type { SubagentStage } from "../../frames.js";
+import type { SubagentStage } from "../../types/frames.js";
 import type {
   SubagentBoardState,
   SubagentStatusState,
@@ -77,7 +77,9 @@ export const clearSubagentStatuses = (): void => {
  *
  * @param subagentBoards - The updated list of agent boards.
  */
-export const setSubagentBoards = (subagentBoards: SubagentBoardState[]): void => {
+export const setSubagentBoards = (
+  subagentBoards: SubagentBoardState[],
+): void => {
   const bridgeHooks = getBridgeHooks();
   bridgeHooks.onSubagentBoards?.((previousSubagentBoards) =>
     subagentBoards.map((agentBoard) => {
@@ -139,4 +141,3 @@ export const updateAgentActivity = (
     );
   });
 };
-

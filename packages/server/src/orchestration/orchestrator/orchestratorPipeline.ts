@@ -31,7 +31,7 @@ import {
   markOrchestratorErrorReported,
 } from "../taskErrors.js";
 import { AbortError, NotFoundError } from "../../errors/index.js";
-import { logger } from "../../logger.js";
+import { logger } from "../../utils/logger.js";
 import type {
   OrchestratorPipelineDeps,
   OrchestratorPipelineParams,
@@ -166,7 +166,7 @@ export const runOrchestratorPipeline = async (
     phase = "context";
     const { contextHeader, skillBody } = await preparePlanningContext(
       { contextBuilder, skillManager, sessionManager, config },
-      { taskText, subagentModel, modelOverrides, perConn, emit, signal },
+      { taskText, agentModel, modelOverrides, perConn, emit, signal },
     );
 
     emitStatus({

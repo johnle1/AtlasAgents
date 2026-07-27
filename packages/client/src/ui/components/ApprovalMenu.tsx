@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { Box, Text, useInput } from "ink";
 import type { ApprovalRequest, PlanDecision } from "../types.js";
 import { resolveApproval } from "../uiBridge.js";
-import { useAppContext } from "../../DataContext.js";
+import { useAppContext } from "../../state/DataContext.js";
 import type { ApprovalMenuOption as Option } from "./types.js";
 
 /**

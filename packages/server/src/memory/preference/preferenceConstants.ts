@@ -41,7 +41,7 @@ export const SIMILARITY_THRESHOLD = 0.8;
  * @remarks
  * {@link scheduleConsolidation} and manual `/consolidate` commands only
  * run the agent consolidation when rule count ≥ this threshold.
- * Consolidation uses the subagent model (expensive), so batching is important.
+ * Consolidation uses the agent model (expensive), so batching is important.
  *
  * **Value: 20**
  * - Avoids frequent expensive agent calls

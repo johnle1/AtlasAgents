@@ -9,7 +9,7 @@
  * 2. **Raw tasks** (e.g., "write a hello world function") - Sent to the server for subagent execution
  * 3. **Empty input** - Ignored
  *
- * Before executing a raw task, the hook validates that the agent and subsubagent models
+ * Before executing a raw task, the hook validates that the agent and subagent models
  * are configured. If not, it shows an error message instead of attempting to connect.
  *
  * The hook includes a submission lock to prevent double-execution from rapid Enter presses,
@@ -25,7 +25,7 @@
 import { useCallback, useRef } from "react";
 
 import { formatErrorMessage } from "../../commands/utils.js";
-import { loadConfig } from "../../config.js";
+import { loadConfig } from "../../config/index.js";
 import type { SubmitLineContext } from "./types.js";
 import { sanitizeHistoryLine } from "../historySanitize.js";
 import { MAX_INPUT_HISTORY } from "../constants.js";
@@ -118,7 +118,7 @@ export const useSubmitLine = ({
               ...previousHistory,
               {
                 kind: "text",
-                text: "Agent and subsubsubagent models must be set. Use /set agent and /set subagent.",
+                text: "Agent and subagent models must be set. Use /set agent and /set subagent.",
                 variant: "error",
               },
             ]);

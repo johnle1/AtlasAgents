@@ -11,8 +11,8 @@
  * `../frames.js` and are re-exported here for convenience.
  */
 
-export type { PullProgress, TaskFrame } from "../frames.js";
-export type { InstalledModel } from "../frames.js";
+export type { PullProgress, TaskFrame } from "../types/frames.js";
+export type { InstalledModel } from "../types/frames.js";
 
 /**
  * One topic in the server-side user preference (“memory”) store.

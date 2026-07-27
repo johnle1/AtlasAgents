@@ -24,7 +24,7 @@
  */
 
 import { existsSync, readdirSync } from "node:fs";
-import { ConfigManager } from "../config/configManager.js";
+import { ConfigManager } from "../config/configManager/index.js";
 
 /** One detected hardware target, with enough detail to name and launch a provider for it. */
 export type HardwareTarget =

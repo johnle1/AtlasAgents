@@ -9,7 +9,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { beginBlockOutput } from "../../agentStatus.js";
+import { beginBlockOutput } from "../../state/agentStatus.js";
 import { getTheme } from "../../theme/themeManager.js";
 import {
   extractCwdFromOutput,
@@ -107,8 +107,7 @@ const runBackgroundCommand = async (
       cwd: context.currentDir,
     });
   } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : String(error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return {
       stdout: "",
       stderr: `Failed to spawn command: ${errorMessage}`,

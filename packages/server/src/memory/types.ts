@@ -98,7 +98,7 @@ export interface EscalationEntry {
   /** Description of why the agent escalated (the blocker or error). */
   reason: string;
 
-  /** Advisor or user guidance that unblocked the agent. */
+  /** Agent or user guidance that unblocked the agent. */
   guidance: string;
 
   /** ISO-8601 timestamp when the escalation was logged. */

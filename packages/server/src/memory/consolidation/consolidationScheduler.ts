@@ -3,7 +3,7 @@
  *
  * @remarks
  * This module automates memory maintenance by periodically consolidating preference rules.
- * Consolidation uses the subagent model to intelligently merge similar rules, reducing
+ * Consolidation uses the agent model to intelligently merge similar rules, reducing
  * redundancy and improving context builder performance as rules accumulate.
  *
  * **Scheduling:**

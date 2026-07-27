@@ -8,7 +8,7 @@
  */
 
 import type { RSocket } from "@rsocket/core";
-import type { Config } from "../config.js";
+import type { Config } from "../config/index.js";
 
 /**
  * Builds the authentication metadata Buffer attached to RSocket payloads.

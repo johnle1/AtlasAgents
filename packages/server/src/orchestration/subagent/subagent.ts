@@ -77,7 +77,7 @@ import type {
   TaskTrackers,
 } from "./types.js";
 import { AbortError } from "../../errors/index.js";
-import { logger } from "../../logger.js";
+import { logger } from "../../utils/logger.js";
 
 /**
  * Maximum iterations to prevent infinite tool loops in a single task.

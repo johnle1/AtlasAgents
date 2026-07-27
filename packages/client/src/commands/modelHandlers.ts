@@ -137,17 +137,17 @@ export const handleModels = async (
         // Step 2: Print success message
         printSuccess(`Deleted ${modelName}`);
 
-        // Step 3: Warn if deleted model was the active subagent model
+        // Step 3: Warn if deleted model was the active agent model
         if (response.wasAgentModel) {
           printLine(
-            "⚠ Warning: This was your active subagent model. Run /set agent to choose a new one.",
+            "⚠ Warning: This was your active agent model. Run /set agent to choose a new one.",
           );
         }
 
-        // Step 4: Warn if deleted model was the active subsubagent model
+        // Step 4: Warn if deleted model was the active subagent model
         if (response.wasSubagentModel) {
           printLine(
-            "⚠ Warning: This was your active subsubagent model. Run /set subagent to choose a new one.",
+            "⚠ Warning: This was your active subagent model. Run /set subagent to choose a new one.",
           );
         }
       } catch (error) {

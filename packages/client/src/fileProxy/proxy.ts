@@ -8,7 +8,12 @@
 
 import * as path from "node:path";
 import type { ClientOpResponse, ClientRoute } from "@loopycode/shared";
-import { isTaskActive, startThinking, startWorking, stopAnimated } from "../agentStatus.js";
+import {
+  isTaskActive,
+  startThinking,
+  startWorking,
+  stopAnimated,
+} from "../state/agentStatus.js";
 import type { BashClass } from "../renderer.js";
 import { classifyCommand } from "./commandClassifier.js";
 import { QUIET_PROXY_ROUTES } from "./constants.js";
@@ -18,7 +23,7 @@ import {
   listDirectoryEntries as listDirectoryEntriesImpl,
   listStructure as listStructureImpl,
 } from "./directoryListing.js";
-import { loadConfig } from "../config.js";
+import { loadConfig } from "../config/index.js";
 import { assertInsideRoot, resolveAbsolutePath } from "./pathUtils.js";
 import { runShell } from "./shellRunner.js";
 import { tokenSaveWorkingLabel } from "../mcp/tokenSaveLabels.js";

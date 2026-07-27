@@ -44,6 +44,7 @@ import type { OllamaClient } from "../ollama/client.js";
 import type { IConfigManager } from "../orchestration/interfaces/configInterfaces.js";
 import type { ProviderRegistry } from "../providers/providerRegistry.js";
 import type { PreferenceRule } from "../orchestration/interfaces.js";
+import type { ServerConfig } from "../config/configManager/index.js";
 
 export { IOrchestrator, PreferenceRulesTransformer, RouterBuilderDeps };
 
@@ -86,6 +87,31 @@ function parseObjectField<T>(payload: unknown, field: string): T {
   return {} as T;
 }
 
+/**
+ * Drops API keys from a provider map before it crosses the wire to a client.
+ *
+ * @remarks
+ * `providers.list` and `config.get` both expose this map to any authenticated
+ * client. `apiKey` is a credential for a third-party model provider (e.g. a
+ * vLLM/OpenAI-compatible endpoint) — no client consumer reads it, only
+ * `baseUrl` and the provider name, so it must never be sent. `hasApiKey` is
+ * kept (rather than omitting the field entirely) so a future UI can still
+ * show "key configured" without ever shipping the secret itself.
+ */
+export const stripProviderSecrets = (
+  providers: Record<string, { baseUrl: string; apiKey?: string }>,
+): Record<string, { baseUrl: string; hasApiKey: boolean }> => {
+  const stripped: Record<string, { baseUrl: string; hasApiKey: boolean }> = {};
+  for (const [name, provider] of Object.entries(providers)) {
+    stripped[name] = {
+      baseUrl: provider.baseUrl,
+      hasApiKey:
+        typeof provider.apiKey === "string" && provider.apiKey.length > 0,
+    };
+  }
+  return stripped;
+};
+
 // ===== MODEL HANDLERS =====
 
 /**
@@ -110,10 +136,7 @@ function createDeleteModelHandler(
     await ollama.deleteModel(modelName);
 
     // Check if deleted model was configured as active
-    const currentConfig = (await config.getAll()) as {
-      agentModel?: unknown;
-      subagentModel?: unknown;
-    };
+    const currentConfig = (await config.getAll()) as ServerConfig;
 
     const wasAgentModel =
       String(currentConfig.agentModel ?? "").trim() === modelName;
@@ -150,7 +173,14 @@ function createListRunningModelsHandler(ollama: OllamaClient): CommandHandler {
  * Creates a handler for getting current configuration.
  */
 function createGetConfigHandler(config: IConfigManager): CommandHandler {
-  return async () => config.getAll();
+  return async () => {
+    const fullConfig = await config.getAll();
+    const { providers } = fullConfig as ServerConfig;
+    return {
+      ...fullConfig,
+      providers: stripProviderSecrets(providers ?? {}),
+    };
+  };
 }
 
 /**
@@ -174,7 +204,7 @@ function createSetConfigHandler(
         config,
         name,
       );
-      return { ok: true, subagentModelSupportsTools: agentModelSupportsTools };
+      return { ok: true, agentModelSupportsTools };
     } else if (configKey === "subagentModel") {
       const name = String(configValue ?? "");
       await config.setModel("subagent", name);
@@ -233,7 +263,7 @@ function createListProvidersHandler(config: IConfigManager): CommandHandler {
     const agentProvider = await config.getAgentProvider();
     const subagentProvider = await config.getSubagentProvider();
     return {
-      providers: { [OLLAMA_PROVIDER_NAME]: {}, ...providers },
+      providers: { [OLLAMA_PROVIDER_NAME]: {}, ...stripProviderSecrets(providers) },
       agentProvider,
       subagentProvider,
     };

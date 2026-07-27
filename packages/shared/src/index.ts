@@ -1,11 +1,14 @@
-export type { DiffChunk } from "./types.js";
-export type { ClientRoute, ClientOpResponse } from "./clientProtocol.js";
-export type { DiffDisplayLine } from "./diffEngine.js";
+export type { DiffChunk } from "./diff/types.js";
+export type {
+  ClientRoute,
+  ClientOpResponse,
+} from "./protocol/clientProtocol.js";
+export type { DiffDisplayLine } from "./diff/diffEngine.js";
 export {
   computeDiff,
   formatDiffPlain,
   getDiffDisplayLines,
-} from "./diffEngine.js";
+} from "./diff/diffEngine.js";
 export type {
   SubagentBoardSnapshot,
   SubagentPlan,
@@ -19,5 +22,5 @@ export type {
   StatusIcon,
   TaskFrame,
   TaskLifecycleState,
-} from "./frames.js";
-export { decodeFrame, encodeFrame } from "./frames.js";
+} from "./frames/frames.js";
+export { decodeFrame, encodeFrame } from "./frames/frames.js";

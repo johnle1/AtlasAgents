@@ -16,7 +16,7 @@ import {
   readAllSkills,
   readSkillsFromDir,
   type SkillManager,
-} from "../skills.js";
+} from "../skills/skills.js";
 import { printSkills, printError, printSuccess } from "../renderer.js";
 import type { Connection } from "../connection/index.js";
 import { formatErrorMessage } from "./utils.js";
@@ -57,7 +57,7 @@ const printSyncResult = (syncedCount: number): void => {
  * @remarks
  * - `list` — prints local skill names
  * - `add` — creates a skill file (and typically opens an editor via create/add)
- * - `sync` — uploads skill payloads to the server for agent/agent use
+ * - `sync` — uploads skill payloads to the server for agent/subagent use
  *
  * @param sub - Subcommand after `/skills`.
  * @param arg - Skill name for `add`; optional source directory for `sync`.

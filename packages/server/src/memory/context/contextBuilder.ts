@@ -2,7 +2,7 @@
  * Builds bounded memory headers from preferences and patterns for LLM context.
  *
  * @remarks
- * Implements the {@link IContextBuilder} interface used by {@link SubagentOrchestrator.runTask}.
+ * Implements the {@link IContextBuilder} interface used by {@link AgentOrchestrator.runTask}.
  * Constructs intelligent context headers that inject relevant user preferences,
  * project patterns, and task-specific fixes into LLM prompts.
  *
@@ -72,8 +72,8 @@ export class ContextBuilder implements IContextBuilder {
   private readonly ollamaClient: IOllamaAdminClient;
 
   /**
-   * Configuration manager for accessing subsubagent model settings.
-   * Provides the active subsubagent model and configuration parameters.
+   * Configuration manager for accessing agent model settings.
+   * Provides the active agent model and configuration parameters.
    */
   private readonly configManager: IConfigManager;
 
@@ -136,7 +136,7 @@ export class ContextBuilder implements IContextBuilder {
    *
    * @remarks
    * When called without argument, clears all cached context windows so the next
-   * `build()` call re-queries Ollama for all models. Useful after switching subsubagent models.
+   * `build()` call re-queries Ollama for all models. Useful after switching agent models.
    *
    * When called with a model tag, only that model's cache entry is removed,
    * allowing selective invalidation if model context changes.
@@ -183,7 +183,7 @@ export class ContextBuilder implements IContextBuilder {
    * Builds a context header from preferences, fixes, and patterns.
    *
    * @param taskText - Original user task description
-   * @param subagentModelOverride - Optional model override (default: configured subsubagent model)
+   * @param agentModelOverride - Optional model override (default: configured agent model)
    * @returns Header text with preferences, fixes, and patterns; empty string if nothing fits
    *
    * @remarks
@@ -207,17 +207,17 @@ export class ContextBuilder implements IContextBuilder {
    */
   build = async (
     taskText: string,
-    subagentModelOverride?: string,
+    agentModelOverride?: string,
   ): Promise<string> => {
     // ===== STEP 1: Setup & Budget Calculation =====
-    // Step 1a: Use task subsubagent model when provided, else server config
-    const subagentModelTag =
-      subagentModelOverride?.trim() ||
-      (await this.configManager.getSubagentModel());
+    // Step 1a: Use task agent model when provided, else server config
+    const agentModelTag =
+      agentModelOverride?.trim() ||
+      (await this.configManager.getAgentModel());
 
     // Step 1b: Query Ollama for this model's context window (cached)
     // Example: llama2 → 4096 tokens
-    const totalContextTokens = await this.getContextWindow(subagentModelTag);
+    const totalContextTokens = await this.getContextWindow(agentModelTag);
 
     // Step 1c: Reserve 20% of context for memory header (80% stays for response)
     // Example: 4096 tokens total → 819 token budget for memory header

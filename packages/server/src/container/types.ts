@@ -27,7 +27,7 @@ import type { TerminalExecutor } from "../workspace/execution/terminalExecutor.j
 import type { WorkspaceManager } from "../workspace/manager/workspaceManager.js";
 
 // ===== CONFIGURATION TYPE IMPORTS =====
-import type { ConfigManager } from "../config/configManager.js";
+import type { ConfigManager } from "../config/configManager/index.js";
 
 // ===== MEMORY TYPE IMPORTS =====
 import type { ContextBuilder } from "../memory/context/contextBuilder.js";

@@ -2,7 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { HistoryItem } from "../types.js";
 import { formatAgentThinkForDisplay } from "../../renderer.js";
-import { useAppContext } from "../../DataContext.js";
+import { useAppContext } from "../../state/DataContext.js";
 
 /**
  * Detects whether a text block contains standard ANSI escape character codes.
@@ -39,7 +39,7 @@ const hasAnsi = (text: string): boolean => /\x1b\[[0-9;]*m/.test(text);
  * @example
  * ```tsx
  * import { renderHistoryItem } from "./HistoryView.js";
- * 
+ *
  * const textItem = { kind: "text" as const, text: "Completed compile step", variant: "success" };
  * const node = renderHistoryItem(textItem, "item-1");
  * ```
@@ -75,9 +75,7 @@ export const renderHistoryItem = (
       return (
         <Box key={key} flexDirection="column" marginY={1}>
           {/* Label indicating whether the thought trace belongs to the coordinator or a worker */}
-          <Text dimColor>
-            {item.agent ? "Agent thinking…" : "thinking…"}
-          </Text>
+          <Text dimColor>{item.agent ? "Agent thinking…" : "thinking…"}</Text>
           <Text>
             {item.agent
               ? formatAgentThinkForDisplay(item.text)
@@ -165,7 +163,7 @@ export const renderHistoryItem = (
  * import React from "react";
  * import { render } from "ink";
  * import { HistoryView } from "./HistoryView.js";
- * 
+ *
  * // Note: Requires parent wrapper with active DataContext.
  * ```
  */

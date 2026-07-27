@@ -66,7 +66,7 @@ const BorderedBlank: React.FC<{ border: (s: string) => React.ReactNode }> = ({
  * import { render } from "ink";
  * import { Banner } from "./Banner.js";
  *
- * render(<Banner version="1.0.0" subagentModel="gpt-4o" subagentModel="gpt-4o-mini" />);
+ * render(<Banner version="1.0.0" agentModel="gpt-4o" subagentModel="gpt-4o-mini" />);
  * ```
  */
 export const Banner: React.FC<BannerProps> = ({
@@ -74,10 +74,10 @@ export const Banner: React.FC<BannerProps> = ({
   subagentModel,
   version,
 }) => {
-  // Clean up subagent model name, falling back to a "not set" placeholder if empty.
+  // Clean up agent model name, falling back to a "not set" placeholder if empty.
   const agent = agentModel.trim() || "not set";
 
-  // Clean up subsubagent model name, falling back to a "not set" placeholder if empty.
+  // Clean up subagent model name, falling back to a "not set" placeholder if empty.
   const subagent = (subagentModel ?? "").trim() || "not set";
 
   // Compute borders based on the static banner inner width configuration.
@@ -140,7 +140,7 @@ export const Banner: React.FC<BannerProps> = ({
         {border("│")}
       </Text>
 
-      {/* Active Subsubagent model information row */}
+      {/* Active Subagent model information row */}
       <Text>
         {border("│")}
         {"  Subagent: "}

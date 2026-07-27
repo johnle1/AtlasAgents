@@ -32,8 +32,8 @@ export interface IContextBuilder {
    * Returns an empty string if no relevant memory is found or the budget is exhausted.
    *
    * @param taskText - Original user task request for keyword extraction and matching.
-   * @param subagentModelOverride - Optional model name to use for context budget calculation.
-   *   When provided, overrides the default subagent model from config (budget math only).
+   * @param agentModelOverride - Optional model name to use for context budget calculation.
+   *   When provided, overrides the default agent model from config (budget math only).
    * @returns Markdown-formatted context header (may be empty if no relevant memory found).
    *
    * @example
@@ -44,5 +44,5 @@ export interface IContextBuilder {
    * Empty string if no preferences or prior work match
    * ```
    */
-  build(taskText: string, subagentModelOverride?: string): Promise<string>;
+  build(taskText: string, agentModelOverride?: string): Promise<string>;
 }

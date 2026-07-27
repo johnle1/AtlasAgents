@@ -37,4 +37,4 @@ export type {
 
 export { Connection } from "./connection.js";
 
-export type { PullProgress, TaskFrame } from "../frames.js";
+export type { PullProgress, TaskFrame } from "../types/frames.js";

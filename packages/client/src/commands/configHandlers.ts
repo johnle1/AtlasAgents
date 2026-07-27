@@ -11,7 +11,7 @@
  * new endpoint. This ensures the live session picks up changes immediately
  * without requiring a CLI restart.
  *
- * **Model selection delegation:** Agent and subsubsubagent model picking is
+ * **Model selection delegation:** Agent and subagent model picking is
  * delegated to {@link handleSetModel}, which may prompt interactively
  * if model choices need clarification.
  *
@@ -19,7 +19,7 @@
  * @see {@link config} for the persistent configuration structure
  */
 
-import { loadConfig, updateConfig } from "../config.js";
+import { loadConfig, updateConfig } from "../config/index.js";
 import type { PromptPort } from "../ui/promptPort.js";
 import type { Connection } from "../connection/index.js";
 import { getTheme } from "../theme/themeManager.js";
@@ -174,8 +174,8 @@ export type HandleSetDeps = {
  *   - `"password"` — agent server auth token
  *   - `"server"` — RSocket endpoint hostname (default: localhost)
  *   - `"port"` — RSocket endpoint port (default: 7000)
- *   - `"agent"` — primary subsubagent model selector
- *   - `"subagent"` — secondary subsubagent model selector
+ *   - `"agent"` — primary agent model selector
+ *   - `"subagent"` — secondary subagent model selector
  *   Pass empty string to show usage.
  * @param arg - Optional inline value for the setting. Ignored if the setting
  *   does not accept arguments (e.g., `agent`, `subagent`).

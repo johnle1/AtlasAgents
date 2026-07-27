@@ -4,7 +4,7 @@
  * @remarks
  * Produces one fully styled terminal line per array entry — including box-drawing
  * borders, centered welcome text, the pixel octopus from {@link LOGO_GRID}, and
- * agent/subsubagent model labels. Use this when you need raw ANSI strings (scripts,
+ * agent/subagent model labels. Use this when you need raw ANSI strings (scripts,
  * logs, or a non-Ink renderer). Prefer the Ink `Banner` component
  * (`../components/Banner.tsx`) inside the interactive TUI so colors go through
  * Ink’s attribute system.
@@ -16,7 +16,7 @@
  * @see {@link LOGO_GRID} for the pixel grid this paints via ANSI backgrounds.
  */
 
-import type { Config } from "../../config.js";
+import type { Config } from "../../config/index.js";
 import { visibleLength } from "../../diff/diffRenderer.js";
 import { getTheme } from "../../theme/themeManager.js";
 import { fg } from "../../theme/ansi256.js";
@@ -84,10 +84,10 @@ const borderedBlank = (borderColor: string, resetCode: string): string =>
  * 1. Top border with bold title + version
  * 2. Welcome text (centered)
  * 3. Pixel logo (centered)
- * 4. Advisor / subsubagent model lines (left-labeled, padded to the right border)
+ * 4. Agent / subagent model lines (left-labeled, padded to the right border)
  * 5. Bottom border
  *
- * Model names come from `configuration.subagentModel` / `configuration.subagentModel`
+ * Model names come from `configuration.subagentModel` / `configuration.subsubagentModel`
  * and fall back to `"not set"` when missing so the layout never shows empty labels.
  *
  * **Padding note:** padding for model lines uses {@link visibleLength} on the
@@ -97,14 +97,14 @@ const borderedBlank = (borderColor: string, resetCode: string): string =>
  *
  * Does not throw; missing models degrade to placeholders.
  *
- * @param configuration - App config providing current agent and subsubsubagent model names.
+ * @param configuration - App config providing current agent and subagent model names.
  * @param version - Semver (or build) string shown after `LoopyCode CLI v`.
  * @returns Ordered ANSI-styled lines ready to print with `console.log` or similar.
  *
  * @example
  * ```ts
  * import { buildBannerLines } from "./buildBannerLines.js";
- * import type { Config } from "../../config.js";
+ * import type { Config } from "../../config/index.js";
  *
  * const configuration = {
  *   subagentModel: "llama3.2:3b",

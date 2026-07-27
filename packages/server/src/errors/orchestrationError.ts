@@ -7,7 +7,7 @@ import { AppError } from "./appError.js";
  * Used for:
  * - Agent planning failures or invalid plans
  * - Orchestrator execution errors during task processing
- * - Subsubagent failures or coordination issues
+ * - Subagent failures or coordination issues
  * - Agent lifecycle management failures
  * - Orchestration pipeline breakdowns
  *
@@ -39,7 +39,7 @@ export class OrchestrationError extends AppError {
    * Creates an orchestration error with failure details.
    *
    * @param message - Description of what failed in the orchestration pipeline
-   *   (e.g., "Agent planning exceeded token limit", "Subsubagent execution failed")
+   *   (e.g., "Agent planning exceeded token limit", "Subagent execution failed")
    */
   constructor(message: string) {
     super(message, 500, "ORCHESTRATION_ERROR");

@@ -71,7 +71,7 @@ import type {
 import { Agent, fetch as undiciFetch } from "undici";
 import { AbortError } from "../errors/index.js";
 import { enrichOllamaFetchError } from "../orchestration/taskErrors.js";
-import { logger } from "../logger.js";
+import { logger } from "../utils/logger.js";
 import { OllamaError } from "./types.js";
 
 /** Default Ollama server URL when not specified in configuration. */

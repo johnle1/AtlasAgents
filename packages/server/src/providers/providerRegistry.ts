@@ -52,8 +52,8 @@ import type {
 } from "../orchestration/interfaces/ollamaInterfaces.js";
 import type { ChatOptions, Message } from "../orchestration/types.js";
 import type { ToolSchema } from "../orchestration/tools/types.js";
-import type { ConfigRole } from "../config/configManager.js";
-import { ConfigError } from "../config/configManager.js";
+import type { ConfigRole } from "../config/configManager/index.js";
+import { ConfigError } from "../config/configManager/index.js";
 import { OpenAiCompatibleAdapter } from "./openAiCompatibleAdapter.js";
 import { SingleModelAdmin } from "./openAiCompatibleAdmin.js";
 

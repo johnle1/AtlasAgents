@@ -114,27 +114,29 @@ export const useKeyboardInput = (
       // This is a convenience shortcut for exploring the workspace without
       // typing file commands. Only works when not busy to avoid interrupting tasks.
       if (keyInformation.ctrl && inputCharacter === "o" && !busy) {
-        void import("../../listExpandState.js").then(({ peekUnexpanded }) => {
-          const expandResult = peekUnexpanded();
-          if (expandResult.found && expandResult.entry) {
-            void fileProxy
-              .expandDirectory(
-                expandResult.entry.absolutePath,
-                expandResult.entry.indent,
-              )
-              .catch((expansionError) => {
-                // If expansion fails, show an error message in the history.
-                setHistory((previousHistory) => [
-                  ...previousHistory,
-                  {
-                    kind: "text",
-                    text: formatErrorMessage(expansionError),
-                    variant: "error",
-                  },
-                ]);
-              });
-          }
-        });
+        void import("../../state/listExpandState.js").then(
+          ({ peekUnexpanded }) => {
+            const expandResult = peekUnexpanded();
+            if (expandResult.found && expandResult.entry) {
+              void fileProxy
+                .expandDirectory(
+                  expandResult.entry.absolutePath,
+                  expandResult.entry.indent,
+                )
+                .catch((expansionError) => {
+                  // If expansion fails, show an error message in the history.
+                  setHistory((previousHistory) => [
+                    ...previousHistory,
+                    {
+                      kind: "text",
+                      text: formatErrorMessage(expansionError),
+                      variant: "error",
+                    },
+                  ]);
+                });
+            }
+          },
+        );
         return;
       }
 

@@ -7,7 +7,7 @@
  * token prints the current setting without writing config.
  */
 
-import { loadConfig, updateConfig } from "../config.js";
+import { loadConfig, updateConfig } from "../config/index.js";
 import { printSuccess, printLine } from "../renderer.js";
 
 /**
@@ -52,7 +52,7 @@ export const handleSpinner = (sub: string, arg: string): void => {
 };
 
 /**
- * Enables, disables, or reports agent/agent think-box visibility.
+ * Enables, disables, or reports agent/subagent think-box visibility.
  *
  * @remarks
  * Persists top-level `showThinkOutput` in config. When off, think frames are
@@ -71,7 +71,7 @@ export const handleThink = (sub: string, arg: string): void => {
 
   if (token === "on") {
     updateConfig({ showThinkOutput: true });
-    printSuccess("Think output enabled (agent/agent think boxes).");
+    printSuccess("Think output enabled (agent/subagent think boxes).");
     return;
   }
 

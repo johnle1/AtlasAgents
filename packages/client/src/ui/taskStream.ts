@@ -8,16 +8,14 @@
  */
 
 import type { Connection } from "../connection/index.js";
-import type { TaskFrame } from "../frames.js";
-import { loadConfig } from "../config.js";
-import {
-  formatAgentThinkForDisplay,
-} from "../renderer.js";
+import type { TaskFrame } from "../types/frames.js";
+import { loadConfig } from "../config/index.js";
+import { formatAgentThinkForDisplay } from "../renderer.js";
 import {
   formatModeNotice,
   parseTaskModifiers,
   type MaxSubagentsParam,
-} from "../taskModifiers.js";
+} from "../utils/taskModifiers.js";
 import {
   appendHistory,
   clearSubagentStatuses,
@@ -95,9 +93,7 @@ export const runTaskStream = async (
     if (!loadConfig().showThinkOutput) {
       return;
     }
-    const thinkBody = taskFrame.agent
-      ? formatAgentThinkForDisplay(taskFrame.text)
-      : formatAgentThinkForDisplay(taskFrame.text);
+    const thinkBody = formatAgentThinkForDisplay(taskFrame.text);
     appendHistory({
       kind: "think",
       text: thinkBody,

@@ -13,7 +13,7 @@
 
 import type { Message } from "../orchestration/types.js";
 import type { ToolSchema } from "../orchestration/tools/types.js";
-import { logger } from "../logger.js";
+import { logger } from "../utils/logger.js";
 
 /** Prefix used for synthesized tool call IDs when translating from Ollama format. */
 const TOOL_CALL_ID_PREFIX = "call_";

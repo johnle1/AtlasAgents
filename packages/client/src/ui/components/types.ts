@@ -14,7 +14,7 @@ import type {
   SpinnerState,
 } from "../types.js";
 
-/** Props for {@link SubagentStatusBox}; one status row per agent or agent. */
+/** Props for {@link SubagentStatusBox}; one status row per agent or subagent. */
 export type SubagentStatusBoxProps = SubagentStatusState;
 
 /** Props for {@link SubagentTaskBoard}. */

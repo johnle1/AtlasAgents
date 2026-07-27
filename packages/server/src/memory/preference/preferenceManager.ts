@@ -16,7 +16,7 @@
  * - Confidence updated to higher of the two
  *
  * **Consolidation (Weekly):**
- * - Subsubagent model merges duplicate rules when count ≥ 20
+ * - Agent model merges duplicate rules when count ≥ 20
  * - Removes redundant entries and resolves conflicts
  * - Scheduled by `scheduleConsolidation` every 7 days
  * - Can be triggered manually via `/consolidate` command
@@ -50,7 +50,7 @@ import {
   CONSOLIDATE_MIN_RULES,
 } from "./preferenceConstants.js";
 import { textSimilarity, extractJsonArray } from "./preferenceHelpers.js";
-import { logger } from "../../logger.js";
+import { logger } from "../../utils/logger.js";
 import { atomicWriteJson } from "../../utils/atomicWriteJson.js";
 import {
   normaliseRule,
@@ -251,7 +251,7 @@ export class PreferenceStore implements IPreferenceStore {
   };
 
   /**
-   * Merges duplicate rules using subsubagent model when count ≥ 20.
+   * Merges duplicate rules using agent model when count ≥ 20.
    *
    * @returns Resolves after consolidation attempt (no-op if below threshold or dependencies missing)
    * @throws If agent or config manager not provided in constructor, or if the
@@ -261,13 +261,13 @@ export class PreferenceStore implements IPreferenceStore {
    * **Process:**
    * 1. Requires both `ollama` and `config` dependencies (throws if missing)
    * 2. Skips if rule count < 20 (CONSOLIDATE_MIN_RULES)
-   * 3. Sends rules to subsubagent model with consolidation prompt
+   * 3. Sends rules to agent model with consolidation prompt
    * 4. Extracts JSON array from response (handles markdown fences)
    * 5. Validates each consolidated rule and assigns new UUIDs/timestamps
    * 6. Persists consolidated rules back to disk
    *
    * Logs warning and silently returns on JSON parse/validation errors — a bad
-   * subagent response should not crash the scheduler. Other failures (agent
+   * agent response should not crash the scheduler. Other failures (agent
    * unreachable, disk write failure) are logged and re-thrown.
    */
   consolidate = async (): Promise<void> => {
@@ -283,7 +283,7 @@ export class PreferenceStore implements IPreferenceStore {
         return;
       }
 
-      const model = await this.config.getSubagentModel();
+      const model = await this.config.getAgentModel();
       const temperature = await this.config.getAgentTemperature();
       const rulesJson = JSON.stringify(preferencesFile.rules, null, 2);
       const messages: Message[] = [
@@ -306,7 +306,7 @@ export class PreferenceStore implements IPreferenceStore {
       try {
         parsedRules = JSON.parse(extractJsonArray(rawAgentResponse)) as unknown;
       } catch {
-        // Malformed subagent output is expected occasionally; skip this run rather than throw.
+        // Malformed agent output is expected occasionally; skip this run rather than throw.
         logger.warn({}, "PreferenceStore consolidate: invalid JSON from agent");
         return;
       }

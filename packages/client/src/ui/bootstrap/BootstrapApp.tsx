@@ -15,13 +15,13 @@ import React, {
   useState,
 } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import type { CliOverrides } from "../../cliArgs.js";
-import { applyCliOverrides } from "../../cliArgs.js";
-import { loadConfig, type Config } from "../../config.js";
+import type { CliOverrides } from "../../cli/cliArgs.js";
+import { applyCliOverrides } from "../../cli/cliArgs.js";
+import { loadConfig, type Config } from "../../config/index.js";
 import { Connection } from "../../connection/index.js";
 import { CommandHandler } from "../../commands/index.js";
-import { SkillManager } from "../../skills.js";
-import { buildPromptLabel } from "../../pathDisplay.js";
+import { SkillManager } from "../../skills/skills.js";
+import { buildPromptLabel } from "../../utils/pathDisplay.js";
 import { LocalFileProxy } from "../../localFileProxy.js";
 import { createInkPromptPort } from "../promptPort.js";
 import { App } from "../App.js";
@@ -64,8 +64,10 @@ export type BootstrapAppProps = {
  *
  * @remarks
  * Transitions: `setup` → `connecting` → `ready`, or `connecting` → `error`
- * when the server is unreachable. There is no recovery from `error` except
- * restarting the CLI.
+ * when the server is unreachable. There is no in-app recovery from `error` —
+ * the CLI must be restarted, and if the failure was caused by changed server
+ * settings, restarted with `--address`/`--port`/`--password` (or `--reset`) to
+ * save the new ones first.
  */
 type BootstrapPhase = "setup" | "connecting" | "ready" | "error";
 
@@ -314,6 +316,15 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
     return (
       <Box flexDirection="column" paddingY={1}>
         <Text color="red">error: {connectionError}</Text>
+        {/* The /set commands that would fix this are unreachable from here —
+            they only exist once connected. Point at the offline flags instead,
+            at the exact moment the user needs them. */}
+        <Text dimColor>
+          If the server&apos;s address, port, or password changed, save the new
+          ones with:
+        </Text>
+        <Text dimColor> loopy --address &lt;ip&gt; --port &lt;n&gt; --password</Text>
+        <Text dimColor> loopy --reset (clear everything and start over)</Text>
         <Text dimColor>Press any key to exit</Text>
       </Box>
     );

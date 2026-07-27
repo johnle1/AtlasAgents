@@ -10,9 +10,9 @@
  */
 
 import type { Payload, RSocket } from "@rsocket/core";
-import type { TaskFrame } from "../frames.js";
-import { decodeFrame } from "../frames.js";
-import type { Config } from "../config.js";
+import type { TaskFrame } from "../types/frames.js";
+import { decodeFrame } from "../types/frames.js";
+import type { Config } from "../config/index.js";
 
 /**
  * Initial / refill credit window for RSocket stream backpressure.

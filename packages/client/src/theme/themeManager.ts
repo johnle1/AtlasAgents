@@ -10,7 +10,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { loadConfig, updateConfig } from "../config.js";
+import { loadConfig, updateConfig } from "../config/index.js";
 import { refreshInkBanner } from "../ui/uiBridge.js";
 import { THEMES, type Theme } from "./themes.js";
 

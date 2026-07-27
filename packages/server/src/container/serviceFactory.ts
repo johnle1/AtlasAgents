@@ -23,7 +23,7 @@ import { Agent } from "../orchestration/agent/agent.js";
 import { AgentOrchestrator } from "../orchestration/orchestrator/orchestrator.js";
 
 // ===== CONFIGURATION IMPORTS =====
-import { ConfigManager } from "../config/configManager.js";
+import { ConfigManager } from "../config/configManager/index.js";
 
 // ===== MEMORY AND CONTEXT IMPORTS =====
 import { ContextBuilder } from "../memory/context/contextBuilder.js";

@@ -31,7 +31,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { logger } from "../../logger.js";
+import { logger } from "../../utils/logger.js";
 
 /** Directory relative to root where snapshot files are stored. */
 const SNAPSHOTS_DIR = "user-data/snapshots";

@@ -7,7 +7,7 @@
  * after {@link ExperienceRecorder.finish}.
  *
  * **Three Rule Sources:**
- * 1. **Agent extraction** — LLM analyzes subsubagent behavior and outputs JSON rules
+ * 1. **Agent extraction** — LLM analyzes subagent behavior and outputs JSON rules
  * 2. **Fix rules** — Escalations converted to "When X → do Y" patterns (high confidence)
  * 3. **Style rules** — User edits converted to style/formatting preferences (language-scoped)
  *
@@ -16,13 +16,13 @@
  * 2. extract() calls private `run()` asynchronously
  * 3. run() skips failures with no escalations (no learning data)
  * 4. Builds comprehensive prompt with task, diffs, escalations, edits
- * 5. Queries subagent model for JSON array of rules
+ * 5. Queries agent model for JSON array of rules
  * 6. Validates and persists each rule to preference store
  * 7. Independently converts escalations and edits to fix/style rules
  * 8. Returns without awaiting (background learning)
  *
  * **Error Handling:**
- * - Logs but doesn't crash on subagent failures
+ * - Logs but doesn't crash on agent failures
  * - Invalid JSON gracefully degrades to escalation/edit rules only
  * - Preference store errors logged but don't block task completion
  *
@@ -55,7 +55,7 @@ import {
   topicsFromPath,
   truncate,
 } from "./patternHelpers.js";
-import { logger } from "../../logger.js";
+import { logger } from "../../utils/logger.js";
 
 /**
  * Extracts reusable preference rules from task experiences.
@@ -124,8 +124,8 @@ export class PatternExtractor implements IPatternExtractor {
    * 1. Early-exit for failed outcomes without escalations (nothing to learn)
    * 2. Builds human-readable context blocks: paths, subagent write diffs, escalations, user edits
    * 3. Constructs a prompt instructing the agent to return JSON array of preference objects
-   * 4. Queries the subagent model using configured model + temperature
-   * 5. Parses JSON array from the subagent response using {@link extractJsonArray}
+   * 4. Queries the agent model using configured model + temperature
+   * 5. Parses JSON array from the agent response using {@link extractJsonArray}
    * 6. Validates each rule and persists to the preference store
    * 7. Independently converts escalations to fix rules and user edits to style rules
    *
@@ -146,7 +146,7 @@ export class PatternExtractor implements IPatternExtractor {
 
     // Step 2: Summarize files read/written, subagent write diffs, escalations, user edits
     // This step builds a comprehensive but budgeted summary of the experience
-    // that will be sent to the subagent model. Each section is carefully truncated
+    // that will be sent to the agent model. Each section is carefully truncated
     // to avoid overwhelming the model while preserving the most relevant information.
     // The goal is to provide enough context for the agent to extract meaningful rules
     // without exceeding context window limits or including irrelevant details.
@@ -191,7 +191,7 @@ export class PatternExtractor implements IPatternExtractor {
       )
       .join("\n");
 
-    // Sample user edits to avoid overwhelming the subagent model
+    // Sample user edits to avoid overwhelming the agent model
     // The sampleUserEdits function intelligently selects a representative subset
     // of edits and tells us how many were omitted for transparency
     // This is important because there could be hundreds of user edits in a single session
@@ -211,7 +211,7 @@ export class PatternExtractor implements IPatternExtractor {
       omittedEdits > 0 ? `\n(... ${omittedEdits} more user edits omitted)` : "";
 
     // Step 3: Build user-visible prompt telling the agent what to extract
-    // This prompt provides the subagent model with a comprehensive summary of the
+    // This prompt provides the agent model with a comprehensive summary of the
     // task experience and instructs it to extract general, reusable rules.
     // The prompt is structured to be human-readable for debugging and model-comprehensible.
     const agentPrompt = [
@@ -248,10 +248,10 @@ export class PatternExtractor implements IPatternExtractor {
     ].join("\n");
 
     // Step 4: Read model configuration and prepare chat messages
-    // We need to configure the subagent model with the right parameters
+    // We need to configure the agent model with the right parameters
     // The model name determines which AI model to use (e.g., llama2, mistral)
     // The temperature controls randomness (0.0 = deterministic, 1.0 = creative)
-    const model = await this.deps.config.getSubagentModel();
+    const model = await this.deps.config.getAgentModel();
     const temperature = await this.deps.config.getAgentTemperature();
 
     // Construct the chat messages in the format expected by the Ollama client
@@ -300,7 +300,7 @@ export class PatternExtractor implements IPatternExtractor {
       // Step 6: If the agent returned a JSON array, validate and store
       // We validate each rule to ensure it meets our minimum requirements
       // This prevents malformed or empty rules from being stored
-      // Validation is crucial because the subagent output is untrusted and could be malformed
+      // Validation is crucial because the agent output is untrusted and could be malformed
       if (Array.isArray(parsedRules)) {
         for (const ruleItem of parsedRules) {
           // Validate shape — require a non-empty `text` string
@@ -350,13 +350,13 @@ export class PatternExtractor implements IPatternExtractor {
       }
     } catch (error) {
       // Step 5b: Fail the chat call gracefully and continue to other work
-      // If the subagent chat fails (network error, model unavailable, etc.),
+      // If the agent chat fails (network error, model unavailable, etc.),
       // we log the error but continue to process escalations and user edits.
       // This ensures we still capture some learning data even if the AI analysis fails.
       // We don't re-throw because this is a background process and failures shouldn't crash the system
       logger.error(
         { taskId: record.taskId, err: error },
-        "PatternExtractor subagent chat failed",
+        "PatternExtractor agent chat failed",
       );
     }
 
@@ -379,7 +379,7 @@ export class PatternExtractor implements IPatternExtractor {
         // The scope is "all" because failure patterns often transcend specific languages
         scope: "all",
         // High confidence because this is explicit human-provided guidance
-        // Unlike general subagent suggestions, escalation guidance comes from human intervention
+        // Unlike general agent suggestions, escalation guidance comes from human intervention
         confidence: "high",
         // Mark as a "fix" rule to indicate it's about resolving specific problems
         // This distinguishes it from style rules (source: "style") and general rules (source: "outcome")

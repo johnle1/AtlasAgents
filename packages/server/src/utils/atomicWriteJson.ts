@@ -17,6 +17,13 @@ import * as path from "node:path";
  * half-written file — a crash mid-write leaves the stale temp file behind but
  * never corrupts the real one.
  *
+ * The temp file is created with mode `0600` (owner read/write only); since
+ * `rename` replaces the destination's inode entirely (not just its
+ * contents), the destination ends up with that same restrictive mode too —
+ * including on the very first write after this behavior was added, even if
+ * an older, more permissive file was there before. This file holds
+ * `ServerConfig`, whose `providers` field carries third-party API keys.
+ *
  * @param destinationPath - Final file path to write.
  * @param data - JSON-serializable value to persist.
  * @param tempPrefix - Short label used in the temp filename (e.g. `"config"`),
@@ -37,6 +44,6 @@ export const atomicWriteJson = async (
 
   const tempPath = path.join(directory, `.${tempPrefix}-${randomUUID()}.tmp`);
   const jsonPayload = `${JSON.stringify(data, null, 2)}\n`;
-  await fs.writeFile(tempPath, jsonPayload, "utf-8");
+  await fs.writeFile(tempPath, jsonPayload, { encoding: "utf-8", mode: 0o600 });
   await fs.rename(tempPath, destinationPath);
 };

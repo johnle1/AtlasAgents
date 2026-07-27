@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { inTmux, isScreenReaderLikely } from "../terminalEnv.js";
-import { loadConfig } from "../../config.js";
+import { loadConfig } from "../../config/index.js";
 import type { StatusSpinnerProps as Props } from "./types.js";
 
 /** Dot animation patterns for tmux compatibility (tmux doesn't support ink-spinner). */
@@ -28,7 +28,7 @@ const TMUX_ANIMATION_MS = 750;
  * import { render } from "ink";
  * import { StatusSpinner } from "./Spinner.js";
  * 
- * const activeState = { active: true, mode: "thinking" as const, label: "Advisor" };
+ * const activeState = { active: true, mode: "thinking" as const, label: "Agent" };
  * render(<StatusSpinner state={activeState} />);
  * ```
  */

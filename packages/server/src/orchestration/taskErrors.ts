@@ -7,7 +7,7 @@
  * orchestrator failure messages with context and troubleshooting steps.
  */
 
-import { ConfigError } from "../config/configManager.js";
+import { ConfigError } from "../config/configManager/index.js";
 import { AppError } from "../errors/appError.js";
 import { OllamaError } from "../ollama/types.js";
 
@@ -185,10 +185,10 @@ export type OrchestratorFailureContext = {
   /** The orchestration phase where failure occurred */
   phase: string;
 
-  /** The subagent model being used (if applicable) */
+  /** The agent model being used (if applicable) */
   agentModel?: string;
 
-  /** The subsubagent model being used (if applicable) */
+  /** The subagent model being used (if applicable) */
   subagentModel?: string;
 };
 
@@ -230,11 +230,11 @@ export const formatOrchestratorFailure = (
     errorLines.push(`Network detail: ${networkCause}`);
   }
 
-  if (context.subagentModel) {
-    errorLines.push(`Agent model: ${context.subagentModel}`);
+  if (context.agentModel) {
+    errorLines.push(`Agent model: ${context.agentModel}`);
   }
   if (context.subagentModel && context.phase === "agent.pool") {
-    errorLines.push(`Subsubagent model: ${context.subagentModel}`);
+    errorLines.push(`Subagent model: ${context.subagentModel}`);
   }
 
   const isTimeout =

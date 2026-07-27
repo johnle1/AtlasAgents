@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import type { ConnectionDisconnectCleanupSetters } from "./types.js";
-import { stopAnimated } from "../../agentStatus.js";
+import { stopAnimated } from "../../state/agentStatus.js";
 import type { Connection, ConnectionStatus } from "../../connection/index.js";
 import {
   appendHistory,

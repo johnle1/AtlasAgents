@@ -9,7 +9,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { markExpanded, pushListDir } from "../listExpandState.js";
+import { markExpanded, pushListDir } from "../state/listExpandState.js";
 import { printListDir, printListDirEntries } from "../renderer.js";
 import { SKIP_DIR_NAMES } from "./constants.js";
 import { assertInsideRoot } from "./pathUtils.js";

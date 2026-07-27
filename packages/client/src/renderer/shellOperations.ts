@@ -7,7 +7,7 @@
  * limits keep runaway command output from flooding the Ink history.
  */
 
-import { beginBlockOutput } from "../agentStatus.js";
+import { beginBlockOutput } from "../state/agentStatus.js";
 import { getTheme } from "../theme/themeManager.js";
 import { appendBlock } from "./sink.js";
 import type { BashClass } from "./types.js";

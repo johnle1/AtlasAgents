@@ -6,7 +6,7 @@
  * or cleared entirely, based on task status frames incoming from the agent/subagents.
  */
 
-import type { AgentStage, TaskFrame } from "../frames.js";
+import type { AgentStage, TaskFrame } from "../types/frames.js";
 import type { SpinnerState } from "./types.js";
 
 /**
@@ -101,4 +101,3 @@ export const spinnerForStatusFrame = (
   // Clear spinner when agent has finished all steps
   return null;
 };
-

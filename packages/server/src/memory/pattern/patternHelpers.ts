@@ -72,7 +72,7 @@ export const extractJsonArray = (raw: string): string => {
  * Truncates a string to a maximum length with an ellipsis suffix.
  *
  * @remarks
- * Used to manage token budgets when sending experience data to the subagent model.
+ * Used to manage token budgets when sending experience data to the agent model.
  * If the text fits within the limit, returns it unchanged. Otherwise returns
  * the first `max` characters with a Unicode ellipsis (…) appended to indicate
  * truncation.
@@ -302,7 +302,7 @@ export const errorKeywords = (reason: string): string[] => {
  * Validates that the input is exactly one of the accepted confidence
  * strings (`"high"`, `"medium"`, `"low"`). If the value is missing, malformed,
  * or not one of the three accepted strings, falls back to the safe default
- * `"medium"`. Used by {@link PatternExtractor} to sanitize subagent output before
+ * `"medium"`. Used by {@link PatternExtractor} to sanitize agent output before
  * storing rules.
  *
  * @param raw - The untrusted value produced by the agent.

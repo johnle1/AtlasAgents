@@ -3,7 +3,7 @@
  *
  * @remarks
  * Defines token/character budgets for truncating experience data when
- * sending to the subagent model for rule extraction. Used by {@link PatternExtractor}
+ * sending to the agent model for rule extraction. Used by {@link PatternExtractor}
  * to manage token usage while preserving meaningful context.
  *
  * **Budgeting Strategy:**

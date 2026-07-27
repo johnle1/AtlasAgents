@@ -8,9 +8,9 @@
  */
 
 import type { DiffChunk } from "@loopycode/shared";
-import { beginBlockOutput } from "../agentStatus.js";
+import { beginBlockOutput } from "../state/agentStatus.js";
 import { renderDiffFromChunks } from "../diff/diffRenderer.js";
-import { formatDisplayPath } from "../pathDisplay.js";
+import { formatDisplayPath } from "../utils/pathDisplay.js";
 import { getTheme } from "../theme/themeManager.js";
 import { appendBlock, appendDiff } from "./sink.js";
 import type { DirEntry } from "./types.js";

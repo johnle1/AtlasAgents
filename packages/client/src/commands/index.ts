@@ -33,7 +33,7 @@
 
 import type { PromptPort } from "../ui/promptPort.js";
 import type { Connection } from "../connection/index.js";
-import type { SkillManager } from "../skills.js";
+import type { SkillManager } from "../skills/skills.js";
 import type { LocalFileProxy } from "../localFileProxy.js";
 import {
   handleAgent,

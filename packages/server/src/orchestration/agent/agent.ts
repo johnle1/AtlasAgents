@@ -72,7 +72,7 @@ import {
 } from "./agentTools.js";
 import { formatMcpData } from "../tools/tokenSaveToolHandler.js";
 import type { ToolSchema } from "../tools/types.js";
-import { logger } from "../../logger.js";
+import { logger } from "../../utils/logger.js";
 
 export { TaskSkippedError, PlanRevisionRequestedError } from "./agentErrors.js";
 
@@ -483,7 +483,7 @@ const evaluatePlanGaps = (
   }
 
   // Note: parallelismGaps computed for logging but NOT used to trigger re-prompts
-  // — we trust the subsubagent model's judgment on execution mode
+  // — we trust the subagent model's judgment on execution mode
   const hasValidationGaps = verificationGaps.hasGaps || commandGaps.hasGaps;
   const gapSummary = [
     verificationGaps.missingSummary,

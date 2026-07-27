@@ -4,7 +4,7 @@ import TextInput from "ink-text-input";
 import { resolvePrompt } from "../uiBridge.js";
 import { THEMES } from "../../theme/themes.js";
 import { setTheme } from "../../theme/themeManager.js";
-import { useAppContext } from "../../DataContext.js";
+import { useAppContext } from "../../state/DataContext.js";
 
 /**
  * Router-style overlay component that selects and renders the active modal prompt based on the server request type.
@@ -22,7 +22,7 @@ import { useAppContext } from "../../DataContext.js";
  * import React from "react";
  * import { render } from "ink";
  * import { PromptOverlay } from "./PromptOverlay.js";
- * 
+ *
  * // Note: Requires parent wrapper with active DataContext.
  * ```
  */

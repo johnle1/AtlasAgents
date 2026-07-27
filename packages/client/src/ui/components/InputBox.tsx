@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import TextInput from "ink-text-input";
-import { useAppContext } from "../../DataContext.js";
+import { useAppContext } from "../../state/DataContext.js";
 
 /**
  * Renders the primary user input terminal field.
@@ -16,7 +16,7 @@ import { useAppContext } from "../../DataContext.js";
  * import React from "react";
  * import { render } from "ink";
  * import { InputBox } from "./InputBox.js";
- * 
+ *
  * // Note: Requires parent wrapper with active DataContext.
  * ```
  */

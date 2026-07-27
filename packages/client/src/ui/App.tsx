@@ -10,7 +10,7 @@ import React, { useCallback, useEffect, useMemo } from "react";
 import { useApp, useInput } from "ink";
 import { Box, Static, Text } from "ink";
 
-import { AppProvider, useAppContext } from "../DataContext.js";
+import { AppProvider, useAppContext } from "../state/DataContext.js";
 import { HistoryView, renderHistoryItem } from "./components/HistoryView.js";
 import { StatusSpinner } from "./components/Spinner.js";
 import { ConnectionStatusLine } from "./components/ConnectionStatusLine.js";

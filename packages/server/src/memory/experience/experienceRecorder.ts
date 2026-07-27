@@ -47,7 +47,7 @@ import { EXPERIENCES_DIR, SNAPSHOTS_DIR } from "./experienceConstants.js";
 
 // ===== HELPER FUNCTIONS IMPORTS =====
 import { deriveOutcome } from "./experienceHelpers.js";
-import { logger } from "../../logger.js";
+import { logger } from "../../utils/logger.js";
 import { atomicWriteJson } from "../../utils/atomicWriteJson.js";
 
 export class ExperienceRecorder implements IExperienceRecorder {

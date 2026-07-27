@@ -6,7 +6,7 @@
  * {@link CLI_VERSION} so call sites only pass {@link Config}.
  */
 
-import type { Config } from "../config.js";
+import type { Config } from "../config/index.js";
 import { buildBannerLines as buildBannerLinesImpl } from "../ui/banner/buildBannerLines.js";
 import { CLI_VERSION } from "./version.js";
 

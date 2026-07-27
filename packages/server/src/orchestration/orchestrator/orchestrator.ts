@@ -1,5 +1,5 @@
 /**
- * Orchestrates end-user task execution through the agent-agent pipeline.
+ * Orchestrates end-user task execution through the agent-subagent pipeline.
  *
  * @remarks
  * This class conducts a complete task execution workflow including:
@@ -74,7 +74,7 @@ export class AgentOrchestrator {
   ) {}
 
   /**
-   * Runs the full agent-agent pipeline for a natural-language task.
+   * Runs the full agent-subagent pipeline for a natural-language task.
    *
    * @remarks
    * Delegates to runOrchestratorPipeline which handles all phases:
@@ -87,7 +87,7 @@ export class AgentOrchestrator {
    * @param emit - Callback to emit task frames (tokens, status, errors) to the client
    * @param signal - AbortSignal for cancellation support between subtasks or inside streams
    * @param perConn - Optional per-connection resources (workspace, terminal, plan broker)
-   * @param modelOverrides - Optional model selection overrides for agent and agent
+   * @param modelOverrides - Optional model selection overrides for agent and subagent
    * @param maxSubagents - Maximum number of concurrent subagent workers (default: 3)
    *
    @throws {@link AbortError} When the operation is cancelled via the AbortSignal

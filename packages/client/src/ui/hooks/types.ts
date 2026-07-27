@@ -7,7 +7,7 @@
  * command submission.
  */
 
-import type { AppContextValue } from "../../DataContext.js";
+import type { AppContextValue } from "../../state/DataContext.js";
 
 /**
  * State setters from {@link AppContextValue} that the bridge needs to update.

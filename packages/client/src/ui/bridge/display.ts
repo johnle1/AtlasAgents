@@ -6,7 +6,7 @@
  * alternate screen buffers, setting busy indicators, and modifying the active command line label.
  */
 
-import type { Config } from "../../config.js";
+import type { Config } from "../../config/index.js";
 import {
   getBridgeHooks,
   getTaskActiveValue,
