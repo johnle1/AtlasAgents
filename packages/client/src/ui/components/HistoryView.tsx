@@ -1,47 +1,48 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { HistoryItem } from "../types.js";
-import { formatAdvisorThinkForDisplay } from "../../renderer.js";
-import { useAppContext } from "../../DataContext.js";
+import { formatAgentThinkForDisplay } from "../../renderer.js";
+import { useAppContext } from "../../state/DataContext.js";
 
 /**
- * <Summary>
- * What it does:
- *   Detects whether a string contains ANSI escape codes for terminal coloring.
+ * Detects whether a text block contains standard ANSI escape character codes.
  *
- * How it does it (step by step):
- *   1. Use regex pattern to match ANSI escape sequences (ESC[...m format).
- *   2. Return true if any ANSI codes are found in the string.
+ * @remarks
+ * Used to check if color codes have already been applied to incoming server logs,
+ * preventing duplicate colorization wrappers which disrupt terminal layouts.
  *
- * Parameters:
- *   @param text - The string to check for ANSI escape codes.
+ * @param text - The raw string representation to analyze.
+ * @returns `true` if the text contains one or more ANSI escape segments, otherwise `false`.
  *
- * Returns:
- *   @returns True if string contains ANSI codes, false otherwise.
- * </Summary>
+ * @example
+ * ```ts
+ * const hasColor = hasAnsi("\x1b[31mError occurred\x1b[0m"); // returns true
+ * ```
  */
 const hasAnsi = (text: string): boolean => /\x1b\[[0-9;]*m/.test(text);
 
 /**
- * <Summary>
- * What it does:
- *   Renders a single history item based on its type (text, think, plan, diff, block).
+ * Maps a structured historical activity log entry to its corresponding Ink node representation.
  *
- * How it does it (step by step):
- *   1. Switch on the history item kind to determine rendering strategy.
- *   2. For text items: determine color based on variant and render with appropriate styling.
- *   3. For think items: show thinking indicator and formatted thought content.
- *   4. For plan items: display task, execution details, agent steps, and risks.
- *   5. For diff items: show file path and diff body.
- *   6. For block items: render lines joined by newlines.
+ * @remarks
+ * Supports formatting for various console events:
+ * - standard user/assistant messages (`text`)
+ * - dynamic thinking logs (`think`)
+ * - multi-step agent plans and risks (`plan`)
+ * - codebase changes (`diff`)
+ * - raw text log blocks (`block`)
  *
- * Parameters:
- *   @param item - The history item to render.
- *   @param key - Unique key for React rendering.
+ * @param item - The structured data model containing type and payloads of the event.
+ * @param key - A unique rendering key mapping to React's list reconciliation algorithm.
+ * @returns React node representing the formatted log view.
  *
- * Returns:
- *   @returns Rendered React element for the history item.
- * </Summary>
+ * @example
+ * ```tsx
+ * import { renderHistoryItem } from "./HistoryView.js";
+ *
+ * const textItem = { kind: "text" as const, text: "Completed compile step", variant: "success" };
+ * const node = renderHistoryItem(textItem, "item-1");
+ * ```
  */
 export const renderHistoryItem = (
   item: HistoryItem,
@@ -49,10 +50,10 @@ export const renderHistoryItem = (
 ): React.ReactNode => {
   switch (item.kind) {
     case "text": {
-      // Check if text already contains ANSI color codes
+      // Check if the server pre-colored this text stream. If so, we bypass the variant theme coloring to avoid corruption.
       const hasAnsiCodes = hasAnsi(item.text);
 
-      // Determine color based on text variant
+      // Resolve the terminal text color based on the semantic variant of the response payload.
       const color =
         item.variant === "error"
           ? "red"
@@ -73,16 +74,17 @@ export const renderHistoryItem = (
     case "think":
       return (
         <Box key={key} flexDirection="column" marginY={1}>
-          <Text dimColor>
-            {item.advisor ? "Advisor thinking…" : "thinking…"}
-          </Text>
+          {/* Label indicating whether the thought trace belongs to the coordinator or a worker */}
+          <Text dimColor>{item.agent ? "Agent thinking…" : "thinking…"}</Text>
           <Text>
-            {item.advisor ? formatAdvisorThinkForDisplay(item.text) : item.text}
+            {item.agent
+              ? formatAgentThinkForDisplay(item.text)
+              : formatAgentThinkForDisplay(item.text)}
           </Text>
         </Box>
       );
     case "plan": {
-      // Build execution label from mode or agent/execution info
+      // Draw execution summary, recalculating default values if mode labels are absent.
       const executionLabel =
         item.modeLabel ??
         `${item.agentCount} agent${item.agentCount === 1 ? "" : "s"} · ${item.execution}`;
@@ -94,6 +96,7 @@ export const renderHistoryItem = (
           <Text dimColor>{executionLabel}</Text>
 
           {/* ===== AGENT-SPECIFIC STEPS ===== */}
+          {/* Map active subagent workflows or fallback to sequential single-agent listings. */}
           {item.agents.length > 0
             ? item.agents.map((agent) => (
                 <Box key={`${key}-agent-${agent.id}`} flexDirection="column">
@@ -149,15 +152,20 @@ export const renderHistoryItem = (
 };
 
 /**
- * <Summary>
- * What it does:
- *   Renders the current streaming text output for real-time updates.
+ * Renders streaming/live textual updates originating from active background tasks.
  *
- * How it fits in the system:
- *   Displays streaming text (like live command output or model responses)
- *   as it arrives from the server. Provides immediate feedback during
- *   long-running operations.
- * </Summary>
+ * @remarks
+ * Pulls the live stream buffer from `useAppContext` and draws it directly to stdout.
+ * Facilitates immediate feedback for streaming execution payloads.
+ *
+ * @example
+ * ```tsx
+ * import React from "react";
+ * import { render } from "ink";
+ * import { HistoryView } from "./HistoryView.js";
+ *
+ * // Note: Requires parent wrapper with active DataContext.
+ * ```
  */
 export const HistoryView: React.FC = () => {
   const { streamingText } = useAppContext();

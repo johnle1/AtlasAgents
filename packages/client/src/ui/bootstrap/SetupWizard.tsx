@@ -10,7 +10,7 @@
 import React, { useState } from "react";
 import { Box, Text } from "ink";
 import TextInput from "ink-text-input";
-import { getDefaultConfig, saveConfig, type Config } from "../../config.js";
+import { loadConfig, saveConfig, type Config } from "../../config/index.js";
 
 /**
  * Callback props for {@link SetupWizard}.
@@ -53,15 +53,21 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
   const [portError, setPortError] = useState<string | null>(null);
 
   /**
-   * Merges wizard input with defaults, persists config, and notifies parent.
+   * Merges wizard input with the existing config, persists it, and notifies parent.
    *
    * @remarks
+   * Builds on {@link loadConfig} rather than the defaults so the wizard only
+   * ever writes `server`, `port`, and `password`. The wizard is no longer
+   * reached solely on a truly fresh install — `loopy --reset` clears the
+   * connection settings and lands here too — so starting from defaults would
+   * silently discard the user's theme, model choices, and workspace.
+   *
    * Port validation here mirrors the port step but is lenient: invalid
    * numeric input falls back to `7000` rather than blocking completion,
    * because the user already passed the strict port-step gate.
    */
   const finish = (passwordValue: string): void => {
-    const defaults = getDefaultConfig();
+    const existingConfig = loadConfig();
 
     const trimmedServerAddress = serverAddress.trim();
     const finalServerAddress =
@@ -82,7 +88,7 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
     }
 
     const config: Config = {
-      ...defaults,
+      ...existingConfig,
       server: finalServerAddress,
       port: finalServerPort,
       password: passwordValue,

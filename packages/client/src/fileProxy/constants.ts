@@ -1,104 +1,206 @@
 /**
- * <Summary>
- * What it does:
- *   Defines directory names that should be skipped during file system traversal.
+ * Static policy sets for traversal skips, quiet routes, and shell classification.
  *
- * Used by:
- *   - File traversal and search functions — skip these directories to avoid
- *     unnecessary processing of generated files and dependencies.
+ * @remarks
+ * Consumed by directory listing, {@link LocalFileProxy.handle} spinner logic, and
+ * {@link classifyCommand}. Edit carefully — classification is intentionally
+ * heuristic, not a full shell security sandbox.
+ */
+
+/**
+ * Directory basenames skipped while walking or listing the workspace.
  *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * @remarks
+ * Avoids drowning listings in dependency/build noise (`node_modules`, `.git`,
+ * `dist`, `.next`). Matching is by **entry name only**, not full path.
  */
 export const SKIP_DIR_NAMES = new Set([
-  "node_modules" /** Node.js dependency directory (contains thousands of files) */,
-  ".git" /** Git repository metadata directory */,
-  "dist" /** Build output directory (generated code) */,
-  ".next" /** Next.js build output directory (generated code) */,
+  "node_modules",
+  ".git",
+  "dist",
+  ".next",
 ]);
 
 /**
- * <Summary>
- * What it does:
- *   Defines proxy routes that should execute instantly without showing a working spinner.
+ * Proxy routes that complete so quickly that a working spinner would flicker.
  *
- * Used by:
- *   - Proxy request handlers — skip spinner animation for these fast metadata routes.
- *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * @remarks
+ * {@link LocalFileProxy.handle} skips `startWorking` / teardown animation for
+ * these metadata routes (`file.get_cwd`, `command.classify`).
  */
-export const QUIET_PROXY_ROUTES = new Set([
-  "file.get_cwd" /** Get current working directory (instant metadata operation) */,
-  "command.classify" /** Classify command safety level (instant analysis operation) */,
-]);
+export const QUIET_PROXY_ROUTES = new Set(["file.get_cwd", "command.classify"]);
 
 /**
- * <Summary>
- * What it does:
- *   Defines base shell commands that are considered safe to execute without user confirmation.
+ * Base executables treated as read-only → classification `"safe"`.
  *
- * Used by:
- *   - classifyCommand — checks if a command's base command is in this set to mark it as "safe".
- *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * @remarks
+ * Only the **first** whitespace token is matched (e.g. `ls`, `cat`). Pipelines
+ * or wrappers around dangerous tools are **not** fully modeled — unknown / mixed
+ * forms fall through to `"cautious"` or `"dangerous"` via token scans.
  */
 export const SAFE_BASE_COMMANDS = new Set([
-  "ls" /** List directory contents (read-only operation) */,
-  "cat" /** Display file contents (read-only operation) */,
-  "pwd" /** Print working directory (read-only operation) */,
-  "echo" /** Display text output (read-only operation) */,
-  "find" /** Search for files (read-only operation) */,
-  "grep" /** Search text in files (read-only operation) */,
-  "head" /** Display first lines of file (read-only operation) */,
-  "tail" /** Display last lines of file (read-only operation) */,
-  "wc" /** Count lines, words, characters (read-only operation) */,
+  "ls",
+  "find",
+  "cat",
+  "head",
+  "tail",
+  "grep",
+  "pwd",
+  "echo",
+  "wc",
 ]);
 
 /**
- * <Summary>
- * What it does:
- *   Defines git subcommands that are considered safe to execute without user confirmation.
+ * `git <subcommand>` values treated as read-only → `"safe"`.
  *
- * Used by:
- *   - classifyCommand — checks if a git command's subcommand is in this set to mark it as "safe".
- *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * @remarks
+ * Requires base command `git` plus a second token in this set (`status`, `log`,
+ * `diff`). Mutating git ops are left to the dangerous-token / cautious paths.
  */
-export const SAFE_GIT_SUBCOMMANDS = new Set([
-  "status" /** Show working tree status (read-only operation) */,
-  "log" /** Show commit logs (read-only operation) */,
-  "diff" /** Show changes between commits (read-only operation) */,
-]);
+export const SAFE_GIT_SUBCOMMANDS = new Set(["status", "log", "diff"]);
 
 /**
- * <Summary>
- * What it does:
- *   Defines command tokens and flags that indicate a command is potentially dangerous.
+ * Command tokens that force classification `"dangerous"`.
  *
- * Used by:
- *   - classifyCommand — checks if any token in the command matches this set to mark it as "dangerous".
+ * @remarks
+ * Matched as whole whitespace-separated tokens after lowercasing (e.g. `rm`,
+ * `-rf`, `--force`). Presence of any token here fails closed to requiring
+ * explicit user approval with a danger warning in the CLI.
  *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * Includes `find`'s action primaries (`-exec`, `-delete`, `-fprintf`, …).
+ * Those run commands or write/destroy files using only spaces — no shell
+ * metacharacter — so {@link SHELL_METACHARACTER_PATTERN} cannot catch them
+ * and `find` being in {@link SAFE_BASE_COMMANDS} would otherwise auto-approve
+ * e.g. `find . -maxdepth 0 -exec sh payload {} +`.
  */
 export const DANGEROUS_TOKENS = new Set([
-  "rm" /** Remove files or directories (destructive operation) */,
-  "rmdir" /** Remove empty directories (destructive operation) */,
-  "drop" /** Database drop command (destructive operation) */,
-  "truncate" /** Truncate files to zero size (destructive operation) */,
-  "reset" /** Git reset command (can discard changes) */,
-  "--hard" /** Git hard reset flag (destructive, discards all changes) */,
-  "--force" /** Force operation flag (bypasses safety checks) */,
-  "-rf" /** Recursive force flag for rm (destructive, no confirmation) */,
-  "-f" /** Force flag (bypasses safety checks) */,
-  "dd" /** Low-level disk write command (can overwrite data) */,
-  "mkfs" /** Make filesystem command (destructive, formats storage) */,
+  "rm",
+  "rmdir",
+  "-rf",
+  "-f",
+  "--force",
+  "--hard",
+  "drop",
+  "truncate",
+  "dd",
+  "mkfs",
+  "reset",
+  "chmod",
+  // find primaries that execute commands
+  "-exec",
+  "-execdir",
+  "-ok",
+  "-okdir",
+  // find primaries that destroy or write files
+  "-delete",
+  "-fprintf",
+  "-fprint",
+  "-fprint0",
+  "-fls",
 ]);
+
+/**
+ * `find` primaries that only match or print — safe to auto-approve.
+ *
+ * @remarks
+ * `find` is the one entry in {@link SAFE_BASE_COMMANDS} whose own flags can
+ * execute code, so it gets an allow-list rather than relying on the
+ * {@link DANGEROUS_TOKENS} deny-list alone. Any `-flag` not listed here fails
+ * closed to `"cautious"`, so a primary nobody thought of (or a new one added
+ * by a future `find` release) cannot silently inherit `"safe"`.
+ *
+ * `-printf`/`-ls` are included (they write to stdout); their `-fprintf`/`-fls`
+ * counterparts write to arbitrary files and are in {@link DANGEROUS_TOKENS}.
+ */
+export const SAFE_FIND_PRIMARIES = new Set([
+  // matching
+  "-name",
+  "-iname",
+  "-path",
+  "-ipath",
+  "-lname",
+  "-ilname",
+  "-regex",
+  "-iregex",
+  "-type",
+  "-xtype",
+  "-size",
+  "-empty",
+  "-perm",
+  "-user",
+  "-group",
+  "-uid",
+  "-gid",
+  "-nouser",
+  "-nogroup",
+  "-links",
+  "-inum",
+  "-samefile",
+  "-newer",
+  "-newermt",
+  "-anewer",
+  "-cnewer",
+  "-atime",
+  "-ctime",
+  "-mtime",
+  "-amin",
+  "-cmin",
+  "-mmin",
+  "-used",
+  // traversal control
+  "-maxdepth",
+  "-mindepth",
+  "-depth",
+  "-prune",
+  "-quit",
+  "-follow",
+  "-mount",
+  "-xdev",
+  "-noleaf",
+  "-ignore_readdir_race",
+  "-noignore_readdir_race",
+  // operators
+  "-a",
+  "-and",
+  "-o",
+  "-or",
+  "-not",
+  // stdout-only output
+  "-print",
+  "-print0",
+  "-printf",
+  "-ls",
+]);
+
+/**
+ * Shell metacharacters that can chain, redirect, or substitute a second,
+ * unvetted command onto an otherwise allow-listed base command (e.g.
+ * `echo x && rm -rf /`, `cat f | sh`, `echo x > ~/.bashrc`, `` `whoami` ``,
+ * `$(curl …)`). Any command containing one of these must never be
+ * classified `"safe"` purely from its first token.
+ *
+ * @remarks
+ * Deliberately does not distinguish quoted occurrences from real ones
+ * (e.g. `grep "a;b" file.txt` also matches) — consistent with this
+ * module's fail-closed-to-`"cautious"` philosophy rather than parsing
+ * quoting/escaping.
+ */
+export const SHELL_METACHARACTER_PATTERN = /[;&|`<>\n]|\$\(/;
+
+/**
+ * Argument shapes that point outside the workspace the agent is scoped to.
+ *
+ * @remarks
+ * `command.run` sets only `cwd` — unlike the `file.*` routes, it has no path
+ * confinement — so an allow-listed reader (`cat`, `grep`, `find`, …) given an
+ * absolute or traversing path reads anywhere the user can, returns the
+ * contents to the server, and (because `"safe"` commands print only a timing
+ * line) shows the user nothing. `cat /Users/you/.ssh/id_rsa` must therefore
+ * require approval rather than auto-run.
+ *
+ * Matches an absolute path (`/etc/passwd`), a home-relative path (`~/.aws`),
+ * a `..` traversal segment, or an absolute path tucked into a flag value
+ * (`--file=/etc/passwd`). Workspace-relative arguments (`src/a.ts`, `.`,
+ * `*.ts`) do not match and stay eligible for `"safe"`.
+ */
+export const ESCAPING_PATH_PATTERN = /^[/~]|^\.\.(?:\/|$)|\/\.\.(?:\/|$)|=[/~]/;

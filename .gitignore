@@ -143,10 +143,11 @@ vite.config.ts.timestamp-*
 .vite/
 
 #POC 
-Ollama/
-RSocket/
+/Ollama/
+/RSocket/
 
 # Deployment
 deploy.sh
 .deploy-staging/
 .DS_Store
+Deploy/

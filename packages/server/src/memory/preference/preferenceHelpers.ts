@@ -1,91 +1,72 @@
 /**
- * <Summary>
- * What it does:
- *   Helper functions for text processing and similarity comparison.
+ * Helper functions for text processing and similarity comparison.
  *
- * How it fits in the system:
- *   Provides utility functions for tokenizing text, calculating similarity,
- *   and extracting JSON arrays from advisor responses.
- * </Summary>
+ * @remarks
+ * Provides utilities for tokenizing text, calculating Jaccard similarity,
+ * and extracting JSON arrays from agent/LLM responses. Used by
+ * {@link PreferenceManager} for rule deduplication and consolidation.
  */
 
 import { STOP_WORDS } from "./preferenceConstants.js";
 
 /**
- * <Summary>
- * What it does:
- *   Tokenizes text into meaningful words for similarity comparison.
+ * Tokenizes text into meaningful words for similarity comparison.
  *
- * How it does it (step by step):
- *   1. Convert text to lowercase for case-insensitive comparison.
- *   2. Split on non-alphanumeric characters to extract words.
- *   3. Filter out short words (< 3 chars) and stop words.
- *   4. Return as Set for efficient lookup and deduplication.
+ * @param text - Input text to tokenize
+ * @returns Set of meaningful word tokens (deduped, no stop words or short words)
  *
- * Parameters:
- *   @param text - Input text to tokenize.
+ * @remarks
+ * Filters for tokens ≥ 3 characters and excludes stop words (the, and, is, etc.).
+ * Preserves technical symbols (C++, C#) by splitting on non-alphanumeric except +#.
+ * Case-insensitive. Returns as Set for O(1) lookup and automatic deduplication.
  *
- * Returns:
- *   @returns Set of meaningful word tokens.
- * </Summary>
+ * @example
+ * ```ts
+ * tokenise("Use TypeScript for debugging") // Set(3) {"use", "typescript", "debugging"}
+ * ```
  */
 export const tokenise = (text: string): Set<string> => {
-  // Step 1: Convert text to lowercase for case-insensitive comparison
-  // This ensures "TypeScript" and "typescript" are treated the same
-  // Step 2: Split on non-alphanumeric characters to extract words
-  // We preserve + and # as they're meaningful in technical terms (C++, C#, etc.)
+  // Split on non-alphanumeric (except +# for C++, C#); filter noise and stop words
   const words = text
     .toLowerCase()
     .split(/[^a-z0-9+#]+/g)
-    // Step 3: Filter out short words (< 3 chars) and stop words
-    // Short words are usually noise (e.g., "a", "an", "in")
-    // Stop words are common words that don't add meaning (e.g., "the", "and", "is")
     .filter((word) => word.length >= 3 && !STOP_WORDS.has(word));
-  // Step 4: Return as Set for efficient lookup and deduplication
-  // Sets automatically remove duplicates and provide O(1) lookup performance
   return new Set(words);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Calculates Jaccard similarity between two text strings using token sets.
+ * Calculates Jaccard similarity between two text strings.
  *
- * How it does it (step by step):
- *   1. Tokenize both texts into sets of meaningful words.
- *   2. Handle edge cases for empty sets (both empty = identical, one empty = no similarity).
- *   3. Count intersection (tokens present in both sets).
- *   4. Calculate union size (unique tokens across both sets).
- *   5. Return Jaccard index (intersection / union).
+ * @param textA - First text string
+ * @param textB - Second text string
+ * @returns Jaccard similarity coefficient (0–1, where 1 = identical tokens)
  *
- * Parameters:
- *   @param textA - First text string.
- *   @param textB - Second text string.
+ * @remarks
+ * **Algorithm:** Jaccard = |A ∩ B| / |A ∪ B| (shared tokens / unique tokens).
+ * Both empty strings return 1 (identical). One empty returns 0 (no similarity).
  *
- * Returns:
- *   @returns Jaccard similarity (0-1, where 1 = identical).
- * </Summary>
+ * Used by {@link PreferenceManager.add} to deduplicate rules via text similarity ≥ 0.8.
+ *
+ * @example
+ * ```ts
+ * textSimilarity("Use TypeScript", "Use TypeScript") // 1
+ * textSimilarity("Use TypeScript", "Use Python")     // 0.5
+ * textSimilarity("Use TypeScript", "Python")         // 0
+ * ```
  */
 export const textSimilarity = (textA: string, textB: string): number => {
-  // Step 1: Tokenize both texts into sets of meaningful words
-  // Converting to sets allows efficient set operations
   const tokenSetA = tokenise(textA);
   const tokenSetB = tokenise(textB);
 
-  // Step 2: Handle edge cases for empty sets
-  // Both empty = considered identical (both have no meaningful content)
-  // This is a reasonable assumption for empty strings
+  // Edge cases: both empty = identical; one empty = no similarity
   if (tokenSetA.size === 0 && tokenSetB.size === 0) {
     return 1;
   }
-  // One empty = no similarity (one has content, other doesn't)
-  // Empty vs non-empty should have zero similarity
   if (tokenSetA.size === 0 || tokenSetB.size === 0) {
     return 0;
   }
 
-  // Step 3: Count intersection (tokens present in both sets)
-  // Intersection represents shared vocabulary between the two texts
+  // Count shared tokens (intersection)
   let intersectionCount = 0;
   for (const word of tokenSetA) {
     if (tokenSetB.has(word)) {
@@ -93,62 +74,52 @@ export const textSimilarity = (textA: string, textB: string): number => {
     }
   }
 
-  // Step 4: Calculate union size (unique tokens across both sets)
-  // Union represents total unique vocabulary across both texts
-  // Formula: |A ∪ B| = |A| + |B| - |A ∩ B|
+  // Union = |A| + |B| - |A ∩ B|
   const unionSize = tokenSetA.size + tokenSetB.size - intersectionCount;
 
-  // Step 5: Return Jaccard index (intersection / union)
-  // Jaccard similarity = |A ∩ B| / |A ∪ B|
-  // Returns 0 if union is 0 (shouldn't happen given earlier checks)
+  // Return Jaccard index
   return unionSize === 0 ? 0 : intersectionCount / unionSize;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Extracts a JSON array string from a raw advisor/LLM response.
+ * Extracts a JSON array string from a raw agent/LLM response.
  *
- * How it does it (step by step):
- *   1. Trim surrounding whitespace from the raw response.
- *   2. Attempt to capture a fenced code block (```json or ```).
- *   3. If fenced block found, use its inner contents; otherwise use trimmed text.
- *   4. Find the first '[' and last ']' in the body.
- *   5. If both brackets exist and end > start, return the substring.
- *   6. Otherwise, return the full body for caller to handle.
+ * @param raw - Raw text returned by the agent/LLM
+ * @returns Extracted JSON array string (or full body if not found)
  *
- * Parameters:
- *   @param raw - Raw text returned by the advisor/LLM.
+ * @remarks
+ * **Process:**
+ * 1. Unwraps markdown code fences (```json ... ```)
+ * 2. Finds outermost `[` and `]` in the body
+ * 3. Returns substring between brackets, or full body if not found
  *
- * Returns:
- *   @returns Extracted JSON array text (or original body if not found).
- * </Summary>
+ * Handles agents that wrap JSON in markdown, leading/trailing whitespace,
+ * and relaxes to return full body if brackets not found (lets caller handle
+ * parse errors). Used by {@link PreferenceManager.consolidate}.
+ *
+ * @example
+ * ```ts
+ * extractJsonArray("```json\n[{...}]\n```")  // "[{...}]"
+ * extractJsonArray("[{...}]")                 // "[{...}]"
+ * extractJsonArray("some text [{...}]")       // "[{...}]"
+ * ```
  */
 export const extractJsonArray = (raw: string): string => {
-  // Step 1: Trim surrounding whitespace from the raw response
-  // LLM responses often have leading/trailing whitespace that interferes with parsing
   const trimmedResponse = raw.trim();
 
-  // Step 2: Attempt to capture a fenced code block (```json or ```)
-  // The regex is non-greedy and captures content between fences
-  // Handles both ```json and ``` formats, case-insensitive
+  // Unwrap markdown code fences (```json ... ``` or ``` ... ```)
   const codeFenceMatch = /^```(?:json)?\s*\r?\n?([\s\S]*?)\r?\n?```/i.exec(
     trimmedResponse,
   );
-
-  // Step 3: If fenced block found, use its inner contents; otherwise use trimmed text
-  // LLMs often wrap JSON in code blocks for formatting, so we extract the inner content
   const extractedBody = codeFenceMatch
     ? codeFenceMatch[1].trim()
     : trimmedResponse;
 
-  // Step 4: Find the first '[' and last ']' in the body
-  // This is a pragmatic way to extract the outermost JSON array in the body
+  // Find outermost array brackets
   const arrayStartIndex = extractedBody.indexOf("[");
   const arrayEndIndex = extractedBody.lastIndexOf("]");
 
-  // Step 5: If both brackets exist and end > start, return the substring
-  // This returns a string like "[ {...}, {...} ]" which callers can parse
+  // Return bracketed substring if found, else return full body
   if (
     arrayStartIndex !== -1 &&
     arrayEndIndex !== -1 &&
@@ -157,7 +128,5 @@ export const extractJsonArray = (raw: string): string => {
     return extractedBody.slice(arrayStartIndex, arrayEndIndex + 1);
   }
 
-  // Step 6: Otherwise, return the full body for caller to handle
-  // This is safer than throwing an error - let the caller decide how to handle it
   return extractedBody;
 };

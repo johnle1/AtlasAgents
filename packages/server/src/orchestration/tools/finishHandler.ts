@@ -1,93 +1,103 @@
 /**
- * <Summary>
- * What it does:
- *   Handler for finish tool execution.
+ * The `finish` tool: the only way a subagent successfully completes a subtask.
  *
- * How it does it (step by step):
- *   1. Check if files were written during task.
- *   2. If files written, verify at least one was verified.
- *   3. If no verification, return error requiring verification.
- *   4. Otherwise, emit done status.
- *   5. Return success result with summary.
+ * @remarks
+ * Gates completion behind two checks so the agent can't declare victory
+ * prematurely:
+ * 1. If nothing was written, all planned setup commands must have run.
+ * 2. If files were written, at least one of them must be verified — either
+ *    read back after writing, or confirmed by a passing `purpose: "verify"`
+ *    command.
  *
- * Parameters:
- *   @param tool - Tool call with task summary.
- *   @param ctx - Execution context.
- *
- * Returns:
- *   @returns Result indicating task completion or verification required.
- * </Summary>
+ * Either check failing returns corrective feedback instead of completing,
+ * pushing the agent to close the gap rather than silently finishing with
+ * unverified work.
  */
 
-import type { AgentToolCall } from "../toolProtocol.js";
 import type {
-  IToolHandler,
+  ToolHandler,
   ToolHandlerContext,
   ToolExecutionResult,
-} from "./toolHandler.js";
-import { ValidationError } from "../../errors/index.js";
-import { VERIFY_REQUIRED_MESSAGE } from "../commandClassifier.js";
+} from "./types.js";
+import { formatObservation } from "./toolHandler.js";
+import { VERIFY_REQUIRED_MESSAGE, normalizeCommand } from "../commandClassifier.js";
 
 /**
- * <Summary>
- * What it does:
- *   Formats a tool observation string for agent feedback.
+ * Tool handler for `finish`.
  *
- * How it does it (step by step):
- *   1. Combine tool name and JSON representation.
- *   2. Append content with newline separator.
- *
- * Parameters:
- *   @param tool - The tool call that was executed.
- *   @param content - The result or error message content.
- *
- * Returns:
- *   Formatted observation string.
- * </Summary>
+ * @example
+ * Agent calls `finish({ summary: "Added OAuth flow", keyFindings: ["uses PKCE"] })`
+ * — completes only if setup commands ran (when nothing was written) or the
+ * written files were verified (when something was written).
  */
-const formatObservation = (tool: AgentToolCall, content: string): string => {
-  // Step 1-2: Combine tool name, JSON, and content
-  return `[${tool.tool}] ${JSON.stringify(tool)}\n${content}`;
-};
+export const finishTool: ToolHandler = {
+  schema: {
+    type: "function",
+    function: {
+      name: "finish",
+      description:
+        "Complete the subtask. Requires prior verification of any written files.",
+      parameters: {
+        type: "object",
+        properties: {
+          summary: {
+            type: "string",
+            description: "What you accomplished",
+          },
+          keyFindings: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Short bullet points a dependent subtask needs to know",
+          },
+        },
+        required: ["summary"],
+      },
+    },
+  },
 
-export class FinishHandler implements IToolHandler {
-  /**
-   * <Summary>
-   * What it does:
-   *   Executes the finish tool.
-   *
-   * How it does it (step by step):
-   *   1. Validate tool type is finish.
-   *   2. Get trackers from context.
-   *   3. Check if files were written during task.
-   *   4. If files written, check for verification (file or command).
-   *   5. If no verification, return error requiring verification.
-   *   6. Emit done status to client.
-   *   7. Return success result with summary.
-   *
-   * Parameters:
-   *   @param tool - Tool call with task summary.
-   *   @param ctx - Execution context with dependencies.
-   *
-   * Returns:
-   *   Result indicating task completion or verification required.
-   * </Summary>
-   */
   async execute(
-    tool: AgentToolCall,
-    ctx: ToolHandlerContext,
+    finishArgs: Record<string, unknown>,
+    handlerContext: ToolHandlerContext,
   ): Promise<ToolExecutionResult> {
-    // Step 1: Validate tool type is finish
-    if (tool.tool !== "finish") {
-      throw new ValidationError(
-        `FinishHandler received wrong tool type: ${tool.tool}`,
+    const summary = String(finishArgs.summary ?? "");
+    const keyFindings = Array.isArray(finishArgs.keyFindings)
+      ? finishArgs.keyFindings
+          .map((finding) => String(finding).trim())
+          .filter((finding) => finding.length > 0)
+      : [];
+    const trackers = handlerContext.trackers;
+
+    // CHECK 1: If the subtask wrote nothing (e.g. a pure investigation or
+    // setup task), it must still have run every planned setup command —
+    // otherwise the agent may be finishing without having done the work
+    // the command plan called for.
+    if (trackers.filesWrittenThisTask.size === 0) {
+      const missingSetup = handlerContext.commandPlan.setupCommands.filter(
+        (command) =>
+          !trackers.completedSetupCommands.has(normalizeCommand(command)),
       );
+      if (missingSetup.length > 0) {
+        return {
+          done: false,
+          summary: "",
+          feedback: formatObservation(
+            "finish",
+            finishArgs,
+            [
+              "Run the setup commands from COMMAND PLAN before calling finish:",
+              ...missingSetup.map((command) => `  ${command}`),
+            ].join("\n"),
+          ),
+          escalationCount: handlerContext.escalationCount,
+        };
+      }
     }
 
-    // Step 2: Get trackers from context
-    const trackers = ctx.trackers;
-
-    // Step 3-5: Check if files were written and verify verification
+    // CHECK 2: If files were written, at least one verification signal is
+    // required — either a written file was read back (file verification) or
+    // a `purpose: "verify"` command passed (command verification). Prevents
+    // the agent from finishing with unverified changes.
     if (trackers.filesWrittenThisTask.size > 0) {
       const hasFileVerification = trackers.filesVerifiedThisTask.size > 0;
       const hasCommandVerification = trackers.verifyCommandPassed;
@@ -96,22 +106,23 @@ export class FinishHandler implements IToolHandler {
           done: false,
           summary: "",
           feedback: formatObservation(
-            tool,
+            "finish",
+            finishArgs,
             VERIFY_REQUIRED_MESSAGE(trackers.filesWrittenThisTask),
           ),
-          escalationCount: ctx.escalationCount,
+          escalationCount: handlerContext.escalationCount,
         };
       }
     }
 
-    // Step 6: Emit done status to client
-    ctx.emitAgentStatus("done", "✓", "Done");
-    // Step 7: Return success result with summary
+    handlerContext.emitSubagentStatus("done", "✓", "Done");
     return {
       done: true,
-      summary: tool.summary,
+      summary,
+      keyFindings,
       feedback: "",
-      escalationCount: ctx.escalationCount,
+      escalationCount: handlerContext.escalationCount,
+      ok: true,
     };
-  }
-}
+  },
+};

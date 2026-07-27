@@ -1,276 +1,161 @@
-import { beginBlockOutput } from "../agentStatus.js";
+/**
+ * Scrollback printers for classified shell (`command.run`) operations.
+ *
+ * @remarks
+ * Safe commands get accent color + compact timing; cautious/dangerous/background
+ * get secondary styling and fuller stdout/stderr after approval. Truncation
+ * limits keep runaway command output from flooding the Ink history.
+ */
+
+import { beginBlockOutput } from "../state/agentStatus.js";
 import { getTheme } from "../theme/themeManager.js";
 import { appendBlock } from "./sink.js";
+import type { BashClass } from "./types.js";
 
-/**
- * <Summary>
- * What it does:
- *   Defines the safety classification levels for shell commands.
- *
- * Used by:
- *   - printBash — uses this type to determine command styling.
- *   - commandClassifier — returns values of this type after command analysis.
- *
- * Produced by:
- *   - commandClassifier — returns the classification result as this type.
- * </Summary>
- */
-export type BashClass = "safe" | "cautious" | "dangerous" | "background";
-
-/**
- * <Summary>
- * What it does:
- *   The icon used to prefix bash/shell command operations in the output.
- *
- * Used by:
- *   - printBash — uses this icon to visually identify shell operations.
- *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
- */
+/** Shell-prompt glyph used by {@link printBash}. */
 const BASH_OPERATION_ICON = "$";
 
 /**
- * <Summary>
- * What it does:
- *   Displays a shell command with appropriate coloring based on its safety classification.
+ * Prints the command line about to run, colored by classification.
  *
- * How it does it (step by step):
- *   1. Get the current theme for text styling.
- *   2. Determine the appropriate color based on command classification.
- *   3. Use accent color for safe commands, secondary color for others.
- *   4. Build a styled line with the bash icon, operation label, and command.
- *   5. Append the styled line to the output block.
+ * @remarks
+ * `safe` uses accent color (trusted); other classes use secondary so they look
+ * less “endorsed” before the user approves.
  *
- * Parameters:
- *   @param command - The shell command to display.
- *   @param classification - The safety classification of the command.
+ * @param command - Full command string.
+ * @param classification - Risk / mode class from the file proxy.
  *
- * Returns:
- *   @returns Returns after displaying the bash command.
- * </Summary>
+ * @example
+ * ```ts
+ * printBash("git status", "safe");
+ * printBash("rm -rf build", "dangerous");
+ * ```
  */
 export const printBash = (command: string, classification: BashClass): void => {
-  // ===== STEP 1: Get theme for styling =====
-  // Step 1a: Get the current theme for text coloring and styling
   const theme = getTheme();
-
-  // ===== STEP 2: Determine appropriate color =====
-  // Step 2a: Check if the command is classified as safe
-  // Step 2b: Use accent color for safe commands to indicate they're trusted
-  // Step 2c: Use secondary color for other classifications (cautious, dangerous, background)
   const commandColor =
     classification === "safe" ? theme.textAccent : theme.textSecondary;
 
-  // ===== STEP 3: Build and display command line =====
-  // Step 3a: Build the styled operation line with bash icon, operation label, and command
-  // Step 3b: Apply the determined color to the operation text
-  // Step 3c: Apply theme reset at the end to prevent color bleeding
-  // Step 3d: Append the styled line to the output block for display
   appendBlock([
     `${commandColor}${BASH_OPERATION_ICON} Bash(${command})${theme.reset}`,
   ]);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays the result of a safe shell command execution with duration timing.
+ * Prints compact exit code + duration for a completed **safe** command.
  *
- * How it does it (step by step):
- *   1. Get the current theme for text styling.
- *   2. Convert the duration from milliseconds to seconds.
- *   3. Build a styled line with exit code and execution duration.
- *   4. Append the styled line to the output block.
+ * @param exitCode - Process exit status.
+ * @param durationMs - Wall time from start to finish, in milliseconds.
  *
- * Parameters:
- *   @param exitCode - The exit code returned by the shell command.
- *   @param durationMs - The execution duration in milliseconds.
- *
- * Returns:
- *   @returns Returns after displaying the command result.
- * </Summary>
+ * @example
+ * ```ts
+ * printBashResult(0, 1530); // → "exit 0 · 1.5s"
+ * ```
  */
 export const printBashResult = (exitCode: number, durationMs: number): void => {
-  // ===== STEP 1: Get theme for styling =====
-  // Step 1a: Get the current theme for text coloring and styling
   const theme = getTheme();
-
-  // ===== STEP 2: Convert duration to seconds =====
-  // Step 2a: Convert the duration from milliseconds to seconds
-  // Step 2b: Format to 1 decimal place for precision
   const durationSeconds = (durationMs / 1000).toFixed(1);
-
-  // ===== STEP 3: Build and display result line =====
-  // Step 3a: Build the styled result line with exit code and duration
-  // Step 3b: Use success color for the arrow and timing information
-  // Step 3c: Apply theme reset at the end to prevent color bleeding
-  // Step 3d: Append the styled line to the output block for display
   appendBlock([
     `  ${theme.success}→ exit ${exitCode} · ${durationSeconds}s${theme.reset}`,
   ]);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays a message indicating that a command was skipped by the user.
- *
- * How it does it (step by step):
- *   1. Get the current theme for text styling.
- *   2. Build a styled line with a cross icon and skipped message.
- *   3. Append the styled line to the output block.
- *
- * Returns:
- *   @returns Returns after displaying the skipped message.
- * </Summary>
+ * Prints that the user skipped running a command (run/skip prompt).
  */
 export const printSkipped = (): void => {
-  // ===== STEP 1: Get theme for styling =====
-  // Step 1a: Get the current theme for text coloring and styling
   const theme = getTheme();
-
-  // ===== STEP 2: Build and display skipped message =====
-  // Step 2a: Build the styled skipped message with a cross icon (✗)
-  // Step 2b: Use error color to indicate the command was not executed
-  // Step 2c: Apply theme reset at the end to prevent color bleeding
-  // Step 2d: Append the styled line to the output block for display
   appendBlock([
     `  ${theme.error}✗${theme.reset}  Skipped — command was not run.`,
   ]);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays a message indicating that a command was approved and is about to run.
- *
- * How it does it (step by step):
- *   1. Get the current theme for text styling.
- *   2. Build a styled line with a checkmark icon and running message.
- *   3. Append the styled line to the output block.
- *
- * Returns:
- *   @returns Returns after displaying the approval message.
- * </Summary>
+ * Prints that the user asked for changes instead of approving (run/skip or
+ * keep/undo prompts) — the action was not taken and feedback was sent back.
+ */
+export const printReviseRequested = (): void => {
+  const theme = getTheme();
+  appendBlock([
+    `  ${theme.textSecondary}↺${theme.reset}  Revise requested — not applied. Sending feedback...`,
+  ]);
+};
+
+/**
+ * Prints that the user approved and the command is starting.
  */
 export const printBashApproved = (): void => {
-  // ===== STEP 1: Get theme for styling =====
-  // Step 1a: Get the current theme for text coloring and styling
   const theme = getTheme();
-
-  // ===== STEP 2: Build and display approval message =====
-  // Step 2a: Build the styled approval message with a checkmark icon (✓)
-  // Step 2b: Use success color to indicate the command was approved
-  // Step 2c: Apply theme reset at the end to prevent color bleeding
-  // Step 2d: Append the styled line to the output block for display
   appendBlock([`  ${theme.success}✓${theme.reset}  Running…`]);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays the completion status of a command with its output (stdout/stderr).
+ * Prints post-run status plus truncated stdout/stderr for non-safe commands.
  *
- * How it does it (step by step):
- *   1. Begin a block output section for formatted display.
- *   2. Get the current theme for text styling.
- *   3. Build the completion line with exit code and success icon.
- *   4. Trim whitespace from stdout and stderr outputs.
- *   5. If stdout has content, display up to 8 lines of output.
- *   6. If stderr has content, display up to 4 lines of error output (independent of stdout).
- *   7. If both are empty and exit code is 0, display no output message.
- *   8. Append all lines to the output block.
+ * @remarks
+ * Stdout is capped at **8** lines, stderr at **4**, so noisy tools stay
+ * skimmable. When both streams are empty and `exitCode === 0`, shows
+ * `(no output)`.
  *
- * Parameters:
- *   @param exitCode - The exit code returned by the shell command.
- *   @param stdout - The standard output from the command.
- *   @param stderr - The standard error output from the command.
+ * @param exitCode - Process exit status.
+ * @param stdout - Captured standard output.
+ * @param stderr - Captured standard error (may include timeout markers).
  *
- * Returns:
- *   @returns Returns after displaying the command completion status.
- * </Summary>
+ * @example
+ * ```ts
+ * printBashRan(0, "ok\n", "");
+ * ```
  */
 export const printBashRan = (
   exitCode: number,
   stdout: string,
   stderr: string,
 ): void => {
-  // ===== STEP 1: Begin formatted output section =====
-  // Step 1a: Start a block output section for proper formatting and spacing
   beginBlockOutput();
-
-  // ===== STEP 2: Get theme for styling =====
-  // Step 2a: Get the current theme for text coloring and styling
   const theme = getTheme();
 
-  // ===== STEP 3: Build completion line =====
-  // Step 3a: Build the completion line with success icon and exit code
   const outputLines = [
     `  ${theme.success}✓${theme.reset}  Finished (exit ${exitCode}).`,
   ];
 
-  // ===== STEP 4: Process output streams =====
-  // Step 4a: Trim whitespace from stdout for cleaner display
   const stdoutTrimmed = stdout.trim();
-
-  // Step 4b: Trim whitespace from stderr for cleaner display
   const stderrTrimmed = stderr.trim();
 
-  // ===== STEP 5: Display stdout if present =====
-  // Step 5a: Check if stdout has content after trimming
   if (stdoutTrimmed.length > 0) {
-    // Step 5b: Split stdout into lines and display up to 8 lines
-    // Step 5c: Limit to 8 lines to prevent overwhelming output
-    // Step 5d: Apply secondary text color for the output content
+    // Cap lines — full dump belongs in an external viewer, not Ink scrollback.
     outputLines.push(
       `${theme.textSecondary}${stdoutTrimmed.split("\n").slice(0, 8).join("\n")}${theme.reset}`,
     );
   }
-  // ===== STEP 6: Display stderr if present =====
+
   if (stderrTrimmed.length > 0) {
     outputLines.push(
       `${theme.textSecondary}${stderrTrimmed.split("\n").slice(0, 4).join("\n")}${theme.reset}`,
     );
   }
-  // ===== STEP 7: Display no output message =====
-  // Step 7a: If both stdout and stderr are empty and exit code is 0, show no output message
-  if (stdoutTrimmed.length === 0 && stderrTrimmed.length === 0 && exitCode === 0) {
+
+  if (
+    stdoutTrimmed.length === 0 &&
+    stderrTrimmed.length === 0 &&
+    exitCode === 0
+  ) {
     outputLines.push(`${theme.textSecondary}  (no output)${theme.reset}`);
   }
 
-  // ===== STEP 8: Display output lines =====
-  // Step 8a: Append all styled lines to the output block for display
   appendBlock(outputLines);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays a success message for a completed operation.
+ * Prints a short success confirmation for a completed mutating op.
  *
- * How it does it (step by step):
- *   1. Get the current theme for text styling.
- *   2. Build a styled line with a checkmark icon and the success message.
- *   3. Append the styled line to the output block.
+ * @param message - e.g. `"Written."`, `"Deleted."`, workspace set text.
  *
- * Parameters:
- *   @param message - The success message to display.
- *
- * Returns:
- *   @returns Returns after displaying the success message.
- * </Summary>
+ * @example
+ * ```ts
+ * printSuccessOp("Written.");
+ * ```
  */
 export const printSuccessOp = (message: string): void => {
-  // ===== STEP 1: Get theme for styling =====
-  // Step 1a: Get the current theme for text coloring and styling
   const theme = getTheme();
-
-  // ===== STEP 2: Build and display success message =====
-  // Step 2a: Build the styled success message with a checkmark icon (✓)
-  // Step 2b: Use success color to indicate the operation completed successfully
-  // Step 2c: Apply theme reset at the end to prevent color bleeding
-  // Step 2d: Append the styled line to the output block for display
   appendBlock([`  ${theme.success}✓${theme.reset}  ${message}`]);
 };

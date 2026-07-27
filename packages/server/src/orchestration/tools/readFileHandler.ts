@@ -1,152 +1,76 @@
 /**
- * <Summary>
- * What it does:
- *   Handler for read_file tool execution.
+ * The `read_file` tool: lets a subagent read a file's full content from the workspace.
  *
- * How it does it (step by step):
- *   1. Emit reading status.
- *   2. Read file content from workspace.
- *   3. Track file as read.
- *   4. Mark file as verified if it was previously written.
- *   5. Return observation with file content.
- *
- * Parameters:
- *   @param tool - Tool call with path to read.
- *   @param ctx - Execution context.
- *
- * Returns:
- *   @returns Result with file content observation.
- * </Summary>
+ * @remarks
+ * Reading a file is a prerequisite for editing it — `edit_file` refuses to
+ * run against a path that hasn't been read this task, since its exact-match
+ * anchors must come from current file content, not the model's memory of it.
+ * Reading a file that was previously written by this same task also counts
+ * as verification (see `filesVerifiedThisTask`), satisfying the `finish`
+ * tool's require-verification check without needing a separate test run.
  */
 
-import type { AgentToolCall } from "../toolProtocol.js";
 import type {
-  IToolHandler,
+  ToolHandler,
   ToolHandlerContext,
   ToolExecutionResult,
-} from "./toolHandler.js";
-import type { WorkspaceManager } from "../../workspace/manager/workspaceManager.js";
-import type { IExperienceRecorder } from "../interfaces.js";
-import { ValidationError } from "../../errors/index.js";
+} from "./types.js";
+import { formatObservation, toolExecutionErrorResult } from "./toolHandler.js";
 
 /**
- * <Summary>
- * What it does:
- *   Formats a tool observation string for agent feedback.
+ * Tool handler for `read_file`.
  *
- * How it does it (step by step):
- *   1. Combine tool name and JSON representation.
- *   2. Append content with newline separator.
- *
- * Parameters:
- *   @param tool - The tool call that was executed.
- *   @param content - The result or error message content.
- *
- * Returns:
- *   Formatted observation string.
- * </Summary>
+ * @example
+ * Agent calls `read_file({ path: "src/App.tsx" })` → feedback contains the
+ * full file content, and `path` is recorded in `trackers.filesReadThisTask`
+ * so a later `edit_file` on the same path is permitted.
  */
-const formatObservation = (tool: AgentToolCall, content: string): string => {
-  // Step 1-2: Combine tool name, JSON, and content
-  return `[${tool.tool}] ${JSON.stringify(tool)}\n${content}`;
-};
+export const readFileTool: ToolHandler = {
+  schema: {
+    type: "function",
+    function: {
+      name: "read_file",
+      description: "Read the full content of a file from the workspace.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "Relative path from workspace root",
+          },
+        },
+        required: ["path"],
+      },
+    },
+  },
 
-/**
- * <Summary>
- * What it does:
- *   Handler for read_file tool execution.
- *
- * How it does it (step by step):
- *   1. Validate tool type is read_file.
- *   2. Create recorder context for logging.
- *   3. Get trackers from context.
- *   4. Emit reading status to client.
- *   5. Read file content from workspace.
- *   6. Track file as read.
- *   7. Mark file as verified if it was previously written.
- *   8. Return observation with file content.
- *   9. Handle errors and return error observation.
- *
- * Parameters:
- *   @param tool - Tool call with path to read.
- *   @param ctx - Execution context with dependencies.
- *
- * Returns:
- *   Result with file content observation.
- * </Summary>
- */
-export class ReadFileHandler implements IToolHandler {
-  /**
-   * <Summary>
-   * What it does:
-   *   Executes the read_file tool.
-   *
-   * How it does it (step by step):
-   *   1. Validate tool type is read_file.
-   *   2. Create recorder context for logging.
-   *   3. Get trackers from context.
-   *   4. Emit reading status to client.
-   *   5. Read file content from workspace.
-   *   6. Track file as read.
-   *   7. Mark file as verified if it was previously written.
-   *   8. Return observation with file content.
-   *   9. Handle errors and return error observation.
-   *
-   * Parameters:
-   *   @param tool - Tool call with path to read.
-   *   @param ctx - Execution context with dependencies.
-   *
-   * Returns:
-   *   Result with file content observation.
-   * </Summary>
-   */
   async execute(
-    tool: AgentToolCall,
-    ctx: ToolHandlerContext,
+    readFileArgs: Record<string, unknown>,
+    handlerContext: ToolHandlerContext,
   ): Promise<ToolExecutionResult> {
-    // Step 1: Validate tool type is read_file
-    if (tool.tool !== "read_file") {
-      throw new ValidationError(
-        `ReadFileHandler received wrong tool type: ${tool.tool}`,
-      );
-    }
-
-    // Step 2: Create recorder context for logging
-    const recorderContext = { recorder: ctx.recorder, taskId: ctx.taskId };
-    // Step 3: Get trackers from context
-    const trackers = ctx.trackers;
+    const path = String(readFileArgs.path ?? "");
+    const recorderContext = { recorder: handlerContext.recorder, taskId: handlerContext.taskId };
+    const trackers = handlerContext.trackers;
 
     try {
-      // Step 4: Emit reading status to client
-      ctx.emitAgentStatus("reading", "◌", `Reading ${tool.path}...`);
-      // Step 5: Read file content from workspace
-      const fileContent = await ctx.workspace.readFile(
-        tool.path,
-        recorderContext,
-      );
-      // Step 6: Track file as read
-      trackers.filesReadThisTask.add(tool.path);
-      // Step 7: Mark file as verified if it was previously written
-      if (trackers.filesWrittenThisTask.has(tool.path)) {
-        trackers.filesVerifiedThisTask.add(tool.path);
+      handlerContext.emitSubagentStatus("reading", "◌", `Reading ${path}...`);
+      const fileContent = await handlerContext.workspace.readFile(path, recorderContext);
+      trackers.filesReadThisTask.add(path);
+
+      // Reading back a file this task already wrote counts as verification —
+      // the agent has seen its own change land, without needing a test run.
+      if (trackers.filesWrittenThisTask.has(path)) {
+        trackers.filesVerifiedThisTask.add(path);
       }
-      // Step 8: Return observation with file content
+
       return {
         done: false,
         summary: "",
-        feedback: formatObservation(tool, fileContent),
-        escalationCount: ctx.escalationCount,
+        feedback: formatObservation("read_file", readFileArgs, fileContent),
+        escalationCount: handlerContext.escalationCount,
       };
     } catch (error) {
-      // Step 9: Handle errors and return error observation
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      return {
-        done: false,
-        summary: "",
-        feedback: formatObservation(tool, errorMessage),
-        escalationCount: ctx.escalationCount,
-      };
+      return toolExecutionErrorResult("read_file", readFileArgs, error, handlerContext.escalationCount);
     }
-  }
-}
+  },
+};

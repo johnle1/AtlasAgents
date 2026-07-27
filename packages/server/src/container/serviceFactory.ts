@@ -1,244 +1,140 @@
 /**
- * <Summary>
- * What it does:
- *   Factory for creating and initializing all application services.
+ * Factory for creating and initializing all application services.
  *
- * How it does it (step by step):
- *   1. Extract configuration options with sensible defaults.
- *   2. Initialize core infrastructure services (OLLAMA, config, preferences).
- *   3. Initialize memory and learning services (skills, session, patterns).
- *   4. Initialize context building with cache invalidation on model changes.
- *   5. Initialize orchestration services (advisor, orchestrator).
- *   6. Return object with all initialized services.
+ * @remarks
+ * This module provides the central composition point for the entire application
+ * service graph. It handles dependency injection and initialization order,
+ * ensuring all services are properly configured and wired together.
  *
- * How it fits in the system:
- *   Serves as the central service composition point, ensuring proper
- *   dependency injection and initialization order. All services are
- *   created here with their required dependencies, making the container
- * setup clean and maintainable.
+ * Services are organized by layer:
+ * - **Infrastructure**: OLLAMA client, configuration, preferences
+ * - **Memory & Learning**: Skills, sessions, patterns, experience
+ * - **Context**: Context builder for LLM prompts with caching
+ * - **Orchestration**: Agent planning and orchestrator execution
  *
- * Parameters:
- *   @param options - Configuration options for service setup.
- *
- * Returns:
- *   @returns All initialized application services.
- * </Summary>
+ * See {@link InitializedServices} for the complete set of services returned.
  */
 
+// ===== TYPE IMPORTS =====
+import type { InitializedServices, ServiceFactoryOptions } from "./types.js";
+
 // ===== ORCHESTRATION LAYER IMPORTS =====
-import { Advisor } from "../orchestration/advisor/advisor.js";
-import { AdvisorOrchestrator } from "../orchestration/orchestrator/orchestrator.js";
+import { Agent } from "../orchestration/agent/agent.js";
+import { AgentOrchestrator } from "../orchestration/orchestrator/orchestrator.js";
 
 // ===== CONFIGURATION IMPORTS =====
-import { ConfigManager } from "../config/configManager.js";
+import { ConfigManager } from "../config/configManager/index.js";
 
 // ===== MEMORY AND CONTEXT IMPORTS =====
 import { ContextBuilder } from "../memory/context/contextBuilder.js";
 import { ExperienceRecorder } from "../memory/experience/experienceRecorder.js";
 import { PatternExtractor } from "../memory/pattern/patternExtractor.js";
-import { PreferenceStore } from "../memory/preference/preferenceStore.js";
+import { PreferenceStore } from "../memory/preference/preferenceManager.js";
 import { SessionManager } from "../memory/session/sessionManager.js";
 
 // ===== OLLAMA CLIENT IMPORTS =====
 import { OllamaClient } from "../ollama/client.js";
 
+// ===== PROVIDER REGISTRY IMPORTS =====
+import { ProviderRegistry } from "../providers/providerRegistry.js";
+
 // ===== SKILLS MANAGEMENT IMPORTS =====
-import { SkillManager } from "../skills/manager/skillManager.js";
+import { SkillManager } from "../skills/skillManager.js";
 
 /**
- * <Summary>
- * What it does:
- *   Configuration options for service factory initialization.
+ * Creates and initializes all application services with proper dependency injection.
  *
- * How it fits in the system:
- *   Provides optional configuration overrides for service initialization.
- * All options have sensible defaults, allowing the factory to work
- * with minimal configuration.
+ * @remarks
+ * This factory sets up the complete service graph in the correct dependency order:
  *
- * Used by:
- *   - createServices — receives these options during initialization.
+ * 1. **Infrastructure**: OLLAMA client, configuration, preferences
+ * 2. **Memory Services**: Skills, sessions, patterns
+ * 3. **Experience**: Pattern extraction and experience recording
+ * 4. **Context**: Context builder with cache invalidation hook
+ * 5. **Orchestration**: Agent and orchestrator with all dependencies
  *
- * Produced by:
- *   - Container — provides options when calling createServices.
- * </Summary>
- */
-export type ServiceFactoryOptions = {
-  /**
-   * Root directory for data storage (preferences, sessions, patterns).
-   * Defaults to current working directory if not specified.
-   * Used for persistent data storage and file system operations.
-   */
-  dataRoot?: string;
-
-  /**
-   * Base URL for OLLAMA API endpoint.
-   * Defaults to OllamaClient's default URL if not specified.
-   * Used for LLM communication and model management.
-   */
-  ollamaBaseUrl?: string;
-};
-
-/**
- * <Summary>
- * What it does:
- *   Defines the complete set of initialized application services.
+ * All services are fully initialized and ready to use. The factory registers
+ * a callback with the config manager to invalidate context caches whenever
+ * the selected model changes, ensuring stale context windows aren't reused
+ * across model switches.
  *
- * How it fits in the system:
- *   This type represents all core services needed for the application
- *   to function. Services are organized by layer (infrastructure, memory,
- *   orchestration) and are fully initialized with their dependencies.
+ * @param options - Configuration options for service setup (all optional).
+ * @returns All initialized application services, ready for use.
  *
- * Used by:
- *   - createServices — returns objects of this type.
- *   - Container — receives and uses these services.
+ * @example
+ * ```ts
+ * Initialize with defaults
+ * const services = createServices();
  *
- * Produced by:
- *   - createServices — constructs and returns this type.
- * </Summary>
- */
-export type InitializedServices = {
-  /**
-   * OLLAMA client for model communication.
-   * Handles all interactions with the Ollama LLM service.
-   */
-  ollama: OllamaClient;
-
-  /**
-   * Configuration manager for server settings.
-   * Manages server-wide configuration and model settings.
-   */
-  config: ConfigManager;
-
-  /**
-   * Preference store for user preferences and memory.
-   * Persists user-specific preferences and learned patterns.
-   */
-  prefs: PreferenceStore;
-
-  /**
-   * Skill manager for loading and managing skills.
-   * Handles discovery, loading, and execution of user-defined skills.
-   */
-  skills: SkillManager;
-
-  /**
-   * Session manager for conversation state.
-   * Maintains conversation history and context across interactions.
-   */
-  session: SessionManager;
-
-  /**
-   * Pattern extractor for identifying code patterns.
-   * Analyzes code to identify recurring patterns and idioms.
-   */
-  patternExtractor: PatternExtractor;
-
-  /**
-   * Experience recorder for tracking agent learning.
-   * Records successful patterns, solutions, and outcomes.
-   */
-  experienceRecorder: ExperienceRecorder;
-
-  /**
-   * Context builder for preparing LLM context.
-   * Constructs appropriate context windows for LLM prompts.
-   */
-  contextBuilder: ContextBuilder;
-
-  /**
-   * Advisor for planning and agent coordination.
-   * Plans complex tasks and coordinates multiple agent instances.
-   */
-  advisor: Advisor;
-
-  /**
-   * Orchestrator for managing agent execution.
-   * Executes planned tasks and manages agent lifecycle.
-   */
-  orchestrator: AdvisorOrchestrator;
-};
-
-/**
- * <Summary>
- * What it does:
- *   Creates and initializes all application services with proper dependency injection.
+ * Use services
+ * const models = await services.ollama.listModels();
+ * const currentModel = services.config.getModel("agent");
+ * services.session.addMessage({
+ *   role: "user",
+ *   content: "Build a CLI tool"
+ * });
+ * ```
  *
- * How it does it (step by step):
- *   1. Extract data root directory from options or use current working directory.
- *   2. Initialize OLLAMA client for LLM communication.
- *   3. Initialize configuration manager for server settings.
- *   4. Initialize preference store with OLLAMA and config dependencies.
- *   5. Initialize skill manager for user-defined skills.
- *   6. Initialize session manager for conversation state.
- *   7. Initialize pattern extractor with OLLAMA, config, and preferences.
- *   8. Initialize experience recorder with pattern extractor and session manager.
- *   9. Initialize context builder with all required dependencies.
- *   10. Register model change callback for cache invalidation.
- *   11. Initialize advisor for planning and coordination.
- *   12. Initialize orchestrator with all required dependencies.
- *   13. Return object containing all initialized services.
+ * @example <caption>Custom configuration</caption>
+ * ```ts
+ * const services = createServices({
+ *   dataRoot: "/opt/app-data",
+ *   ollamaBaseUrl: "http://ollama.prod:11434"
+ * });
  *
- * Parameters:
- *   @param options - Configuration options for service setup.
- *
- * Returns:
- *   @returns All initialized application services.
- * </Summary>
+ * All services now use the custom paths and endpoints
+ * ```
  */
 export const createServices = (
   options: ServiceFactoryOptions = {},
 ): InitializedServices => {
-  // ===== STEP 1: EXTRACT DATA ROOT DIRECTORY =====
-  // Use provided data root or default to current working directory
-  // This directory is used for all persistent data storage
+  // Resolve data root directory — defaults to cwd if not provided
   const dataRootDirectory = options.dataRoot ?? process.cwd();
 
-  // ===== STEP 2: INITIALIZE CORE INFRASTRUCTURE SERVICES =====
-  // Step 2a: Initialize OLLAMA client for LLM communication
-  // Handles all interactions with the Ollama LLM service
+  // Initialize OLLAMA client for LLM communication.
+  // Configured with custom endpoint if provided, otherwise uses Ollama defaults.
   const ollamaClient = new OllamaClient({ baseUrl: options.ollamaBaseUrl });
 
-  // Step 2b: Initialize configuration manager for server settings
-  // Manages server-wide configuration and model settings
+  // Initialize configuration manager for server-wide settings and model selection.
   const configManager = new ConfigManager({ rootDir: dataRootDirectory });
 
-  // ===== STEP 3: INITIALIZE MEMORY AND LEARNING SERVICES =====
-  // Step 3a: Initialize preference store with OLLAMA and config dependencies
-  // Persists user-specific preferences and learned patterns
+  // Initialize provider registry: resolves each role (agent/subagent) to
+  // whichever provider it's currently configured to use — native Ollama, or
+  // any OpenAI-compatible backend (vLLM, Trainium, TPU) added via /providers.
+  const providerRegistry = new ProviderRegistry({
+    config: configManager,
+    ollamaClient,
+  });
+
+  // Initialize preference store with references to core services.
+  // Enables cache invalidation on configuration changes.
   const preferenceStore = new PreferenceStore(dataRootDirectory, {
     ollama: ollamaClient,
     config: configManager,
   });
 
-  // Step 3b: Initialize skill manager for user-defined skills
-  // Handles discovery, loading, and execution of skills
+  // Initialize skill manager to discover and load user-defined skills.
   const skillManager = new SkillManager({ rootDir: dataRootDirectory });
 
-  // Step 3c: Initialize session manager for conversation state
-  // Maintains conversation history and context
+  // Initialize session manager to track conversation history and context.
   const sessionManager = new SessionManager({ rootDir: dataRootDirectory });
 
-  // ===== STEP 4: INITIALIZE PATTERN EXTRACTION =====
-  // Initialize pattern extractor with OLLAMA, config, and preferences
-  // Analyzes code to identify recurring patterns and idioms
+  // Initialize pattern extractor to analyze code and identify recurring patterns.
   const patternExtractor = new PatternExtractor({
     ollama: ollamaClient,
     config: configManager,
     prefs: preferenceStore,
   });
 
-  // ===== STEP 5: INITIALIZE EXPERIENCE RECORDING =====
-  // Initialize experience recorder with pattern extractor and session manager
-  // Records successful patterns, solutions, and outcomes
+  // Initialize experience recorder to persist successful patterns and solutions.
+  // Used by orchestrator to improve decisions in future tasks.
   const experienceRecorder = new ExperienceRecorder({
     rootDir: dataRootDirectory,
     patternExtractor: patternExtractor,
     sessionManager: sessionManager,
   });
 
-  // ===== STEP 6: INITIALIZE CONTEXT BUILDING =====
-  // Initialize context builder with all required dependencies
-  // Constructs appropriate context windows for LLM prompts
+  // Initialize context builder with all dependencies for prompt construction.
   const contextBuilder = new ContextBuilder({
     prefs: preferenceStore,
     ollama: ollamaClient,
@@ -247,39 +143,38 @@ export const createServices = (
     session: sessionManager,
   });
 
-  // ===== STEP 7: REGISTER MODEL CHANGE CALLBACK =====
-  // Register cache invalidation callback when advisor model changes
-  // This ensures stale context windows are cleared when switching models
-  configManager.setOnModelChanged((previousModelName, role) => {
-    // Only clear cache if previous model was set (non-empty)
-    // First-time setup with empty previous model should not clear cache
+  // Register cache invalidation hook on model changes.
+  // Clears stale context windows when the selected model changes to prevent
+  // reusing cached context with a different model. Skips on initial setup
+  // (when previousModelName is empty).
+  configManager.setOnModelChanged((previousModelName) => {
     if (previousModelName.length > 0) {
       contextBuilder.clearContextWindowCache(previousModelName);
     }
   });
 
-  // ===== STEP 8: INITIALIZE ORCHESTRATION SERVICES =====
-  // Step 8a: Initialize advisor for planning and coordination
-  // Plans complex tasks and coordinates multiple agent instances
-  const advisor = new Advisor({ ollama: ollamaClient, config: configManager });
+  // Initialize agent for task planning and subagent coordination.
+  const agent = new Agent({
+    ollama: providerRegistry.getRoleClient("agent"),
+    config: configManager,
+  });
 
-  // Step 8b: Initialize orchestrator with all required dependencies
-  // Executes planned tasks and manages agent lifecycle
-  const orchestrator = new AdvisorOrchestrator({
+  // Initialize orchestrator — the primary engine for executing planned tasks.
+  // Coordinates all services to run subagent work and manage task lifecycle.
+  const orchestrator = new AgentOrchestrator({
     contextBuilder: contextBuilder,
     skillManager: skillManager,
     sessionManager: sessionManager,
     experienceRecorder: experienceRecorder,
-    advisor: advisor,
-    ollama: ollamaClient,
+    agent: agent,
+    providerRegistry: providerRegistry,
     config: configManager,
   });
 
-  // ===== STEP 9: RETURN ALL INITIALIZED SERVICES =====
-  // Return object containing all initialized services
-  // This provides the complete service graph for the application
+  // Return complete service graph with all initialized services.
   return {
     ollama: ollamaClient,
+    providerRegistry: providerRegistry,
     config: configManager,
     prefs: preferenceStore,
     skills: skillManager,
@@ -287,7 +182,7 @@ export const createServices = (
     patternExtractor: patternExtractor,
     experienceRecorder: experienceRecorder,
     contextBuilder: contextBuilder,
-    advisor: advisor,
+    agent: agent,
     orchestrator: orchestrator,
   };
 };

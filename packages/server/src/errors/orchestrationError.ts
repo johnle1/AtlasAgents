@@ -1,15 +1,46 @@
 import { AppError } from "./appError.js";
 
 /**
- * <Summary>
- * What it does:
- *   Error for orchestration failures.
+ * Thrown when agent orchestration or execution fails.
  *
- * How it fits in the system:
- *   Used when orchestration pipeline fails (advisor planning, agent execution, etc.).
- * </Summary>
+ * @remarks
+ * Used for:
+ * - Agent planning failures or invalid plans
+ * - Orchestrator execution errors during task processing
+ * - Subagent failures or coordination issues
+ * - Agent lifecycle management failures
+ * - Orchestration pipeline breakdowns
+ *
+ * Always returns HTTP 500 (Internal Server Error) status code, indicating
+ * a server-side failure in the orchestration system. Callers should not
+ * retry immediately; logs should be checked for root cause.
+ *
+ * This error wraps failures from the orchestration layer (agents, planning,
+ * coordination) to distinguish them from other server errors.
+ *
+ * @example
+ * ```ts
+ *  * Handle orchestration failures
+ * try {
+ *   const result = await orchestrator.execute(task);
+ * } catch (err) {
+ *   if (err instanceof OrchestrationError) {
+ *     logger.error("Orchestration failed", {
+ *       task: task.id,
+ *       error: err.message
+ *     });
+ *     * Alert on-call, do not retry
+ *   }
+ * }
+ * ```
  */
 export class OrchestrationError extends AppError {
+  /**
+   * Creates an orchestration error with failure details.
+   *
+   * @param message - Description of what failed in the orchestration pipeline
+   *   (e.g., "Agent planning exceeded token limit", "Subagent execution failed")
+   */
   constructor(message: string) {
     super(message, 500, "ORCHESTRATION_ERROR");
   }

@@ -1,179 +1,128 @@
-import type { AgentPlan, PlanExecution } from "@loopycode/shared";
-import type { MaxAgentsParam } from "./maxAgents.js";
-import type { AdvisorPlan, PlannedSubtask } from "./types.js";
+import type { SubagentPlan as SharedSubagentPlan, PlanExecution } from "@loopycode/shared";
+import type { MaxSubagentsParam } from "./maxSubagents.js";
+import type { SubagentPlan, PlannedSubtask } from "./types.js";
 
 /**
- * <Summary>
- * What it does:
- *   Converts a max_agents constraint into a human-readable mode label.
+ * Converts a max_agents constraint into a human-readable mode label.
  *
- * How it does it (step by step):
- *   1. Check if maxAgents is 1 (focus mode).
- *   2. Check if maxAgents is 2 (collab mode).
- *   3. Check if maxAgents is "max" (unlimited mode).
- *   4. Check if maxAgents is a specific number (custom cap).
- *   5. Return null for unrecognized values.
+ * @remarks
+ * Maps maxSubagents values to descriptive labels for display in status messages.
+ * Returns null for unrecognized values.
  *
- * Parameters:
- *   @param maxAgents - The max_agents constraint from configuration.
+ * @param maxSubagents - The max_agents constraint from configuration
  *
- * Returns:
- *   Human-readable mode label or null if unrecognized.
- * </Summary>
+ * @returns Human-readable mode label or null if unrecognized
  */
 export const modeLabelFromMaxAgents = (
-  maxAgents: MaxAgentsParam,
+  maxSubagents: MaxSubagentsParam,
 ): string | null => {
-  // Step 1: Check if maxAgents is 1 (focus mode)
-  if (maxAgents === 1) {
+  if (maxSubagents === 1) {
     return "focus mode";
   }
-  // Step 2: Check if maxAgents is 2 (collab mode)
-  if (maxAgents === 2) {
+  if (maxSubagents === 2) {
     return "collab mode";
   }
-  // Step 3: Check if maxAgents is "max" (unlimited mode)
-  if (maxAgents === "max") {
+  if (maxSubagents === "max") {
     return "max mode — no agent cap";
   }
-  // Step 4: Check if maxAgents is a specific number (custom cap)
-  if (typeof maxAgents === "number") {
-    return `up to ${maxAgents} agents`;
+  if (typeof maxSubagents === "number") {
+    return `up to ${maxSubagents} agents`;
   }
-  // Step 5: Return null for unrecognized values
   return null;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Determines the execution mode (parallel, sequential, or mixed) from subtask dependencies.
+ * Determines the execution mode (parallel, sequential, or mixed) from subtask dependencies.
  *
- * How it does it (step by step):
- *   1. Check if any subtask has no dependencies (parallel potential).
- *   2. Check if any subtask has dependencies (sequential potential).
- *   3. Return "mixed" if both parallel and sequential exist.
- *   4. Return "parallel" if only parallel exists.
- *   5. Return "sequential" if only sequential exists.
+ * @remarks
+ * Analyzes subtask dependencies to determine if tasks can run in parallel,
+ * must run sequentially, or have a mixed execution pattern. Used to display
+ * the execution strategy to users.
  *
- * Parameters:
- *   @param subtasks - List of planned subtasks with dependency information.
+ * @param subtasks - List of planned subtasks with dependency information
  *
- * Returns:
- *   Execution mode: "parallel", "sequential", or "mixed".
- * </Summary>
+ * @returns Execution mode: "parallel", "sequential", or "mixed"
  */
 export const deriveExecution = (subtasks: PlannedSubtask[]): PlanExecution => {
-  // Step 1: Check if any subtask has no dependencies (parallel potential)
   const hasParallel = subtasks.some(
     (subtask) => subtask.dependsOn.length === 0,
   );
-  // Step 2: Check if any subtask has dependencies (sequential potential)
   const hasSequential = subtasks.some(
     (subtask) => subtask.dependsOn.length > 0,
   );
-  // Step 3: Return "mixed" if both parallel and sequential exist
   if (hasParallel && hasSequential) {
     return "mixed";
   }
-  // Step 4: Return "parallel" if only parallel exists
   if (hasParallel) {
     return "parallel";
   }
-  // Step 5: Return "sequential" if only sequential exists
   return "sequential";
 };
 
 /**
- * <Summary>
- * What it does:
- *   Validates that the subtask dependency graph has no cycles.
+ * Validates that the subtask dependency graph has no cycles.
  *
- * How it does it (step by step):
- *   1. Initialize visited and visiting sets for DFS cycle detection.
- *   2. Build a map of subtasks by ID for quick lookup.
- *   3. Perform DFS from each subtask to detect cycles.
- *   4. Mark nodes as visiting during traversal, visited after completion.
- *   5. Return false if a cycle is detected (node revisited while visiting).
- *   6. Return true if all subtasks pass cycle check.
+ * @remarks
+ * Uses depth-first search (DFS) with visited and visiting sets to detect cycles.
+ * A cycle occurs when a subtask depends on another subtask that transitively
+ * depends back on it. Cycles would cause deadlock during execution.
  *
- * Parameters:
- *   @param subtasks - List of planned subtasks with dependency information.
+ * @param subtasks - List of planned subtasks with dependency information
  *
- * Returns:
- *   True if no cycles exist, false if a cycle is detected.
- * </Summary>
+ * @returns True if no cycles exist, false if a cycle is detected
  */
 export const validateNoCycles = (subtasks: PlannedSubtask[]): boolean => {
-  // Step 1: Initialize visited and visiting sets for DFS cycle detection
   const visitedSubtaskIds = new Set<number>();
   const visitingSubtaskIds = new Set<number>();
-  // Step 2: Build a map of subtasks by ID for quick lookup
   const subtaskById = new Map(subtasks.map((subtask) => [subtask.id, subtask]));
 
-  // Depth-first search to detect cycles in the dependency graph
   const depthFirstSearch = (subtaskId: number): boolean => {
-    // If we're already visiting this node, we found a cycle
     if (visitingSubtaskIds.has(subtaskId)) {
       return false;
     }
-    // If we've already visited this node, no cycle from this path
     if (visitedSubtaskIds.has(subtaskId)) {
       return true;
     }
-    // Mark this node as currently being visited
     visitingSubtaskIds.add(subtaskId);
-    // Get the subtask for this ID
     const subtask = subtaskById.get(subtaskId);
-    // If subtask doesn't exist, treat as valid (no dependencies to check)
     if (!subtask) {
       visitingSubtaskIds.delete(subtaskId);
       visitedSubtaskIds.add(subtaskId);
       return true;
     }
-    // Recursively check all dependencies for cycles
     for (const dependencyId of subtask.dependsOn) {
       if (!depthFirstSearch(dependencyId)) {
         return false;
       }
     }
-    // Mark this node as fully visited (no cycle found)
     visitingSubtaskIds.delete(subtaskId);
     visitedSubtaskIds.add(subtaskId);
     return true;
   };
 
-  // Step 6: Check all subtasks for cycles
   return subtasks.every((subtask) => depthFirstSearch(subtask.id));
 };
 
 /**
- * <Summary>
- * What it does:
- *   Converts subtasks into agent-level plans with inter-agent dependencies.
+ * Converts subtasks into agent-level plans with inter-agent dependencies.
  *
- * How it does it (step by step):
- *   1. Initialize a map to collect subtasks by agent ID.
- *   2. For each subtask, create or update its agent's plan entry.
- *   3. Add subtask text to the agent's steps list.
- *   4. For each subtask with dependencies, check cross-agent dependencies.
- *   5. Add agent-to-agent dependencies when subtasks depend on other agents.
- *   6. Return sorted array of agent plans by ID.
+ * @remarks
+ * Groups subtasks by agent ID and creates SubagentPlan objects with steps.
+ * Detects cross-agent dependencies when a subtask depends on a subtask
+ * assigned to a different agent. Returns sorted array of agent plans by ID.
  *
- * Parameters:
- *   @param subtasks - List of planned subtasks with agent assignments.
+ * @param subtasks - List of planned subtasks with agent assignments
  *
- * Returns:
- *   Array of AgentPlan objects with steps and inter-agent dependencies.
- * </Summary>
+ * @returns Array of SubagentPlan objects with steps and inter-agent dependencies
  */
-export const deriveAgentPlans = (subtasks: PlannedSubtask[]): AgentPlan[] => {
-  // Step 1: Initialize a map to collect subtasks by agent ID
-  const agentMap = new Map<number, AgentPlan>();
+export const deriveSubagentPlans = (subtasks: PlannedSubtask[]): SharedSubagentPlan[] => {
+  const agentMap = new Map<number, SharedSubagentPlan>();
 
-  // Step 2-3: For each subtask, create or update its agent's plan entry
+  // Build index for O(1) dependency lookups instead of O(n) .find() per edge
+  // This avoids O(n*e) scanning and reduces to O(n + e) total
+  const subtaskById = new Map(subtasks.map((subtask) => [subtask.id, subtask]));
+
   for (const subtask of subtasks) {
-    // Create agent plan entry if it doesn't exist
     if (!agentMap.has(subtask.agentId)) {
       agentMap.set(subtask.agentId, {
         id: subtask.agentId,
@@ -182,27 +131,19 @@ export const deriveAgentPlans = (subtasks: PlannedSubtask[]): AgentPlan[] => {
         dependsOn: [],
       });
     }
-    // Add subtask text to the agent's steps list
     agentMap.get(subtask.agentId)!.steps.push(subtask.text);
   }
 
-  // Step 4-5: For each subtask with dependencies, check cross-agent dependencies
   for (const subtask of subtasks) {
-    // Skip subtasks with no dependencies
     if (subtask.dependsOn.length === 0) {
       continue;
     }
-    // Get the agent for this subtask
     const agent = agentMap.get(subtask.agentId);
     if (!agent) {
       continue;
     }
-    // Check each dependency for cross-agent relationships
     for (const dependencyId of subtask.dependsOn) {
-      const dependencySubtask = subtasks.find(
-        (subtask) => subtask.id === dependencyId,
-      );
-      // If dependency belongs to a different agent, add inter-agent dependency
+      const dependencySubtask = subtaskById.get(dependencyId);
       if (dependencySubtask && dependencySubtask.agentId !== subtask.agentId) {
         if (!agent.dependsOn.includes(dependencySubtask.agentId)) {
           agent.dependsOn.push(dependencySubtask.agentId);
@@ -211,43 +152,33 @@ export const deriveAgentPlans = (subtasks: PlannedSubtask[]): AgentPlan[] => {
     }
   }
 
-  // Step 6: Return sorted array of agent plans by ID
   return [...agentMap.values()].sort(
     (agentPlanA, agentPlanB) => agentPlanA.id - agentPlanB.id,
   );
 };
 
 /**
- * <Summary>
- * What it does:
- *   Collapses all subtasks to be executed by a single agent sequentially.
+ * Collapses all subtasks to be executed by a single agent sequentially.
  *
- * How it does it (step by step):
- *   1. Sort subtasks by ID to maintain order.
- *   2. Map each subtask to agent ID 1 with label "all tasks".
- *   3. Set first subtask to have no dependencies.
- *   4. Set each subsequent subtask to depend on the previous one.
+ * @remarks
+ * Sorts subtasks by ID and assigns all to agent 1 with label "all tasks".
+ * Creates sequential dependencies where each subtask depends on the previous one.
+ * Used when maxSubagents is 1 (focus mode).
  *
- * Parameters:
- *   @param subtasks - List of planned subtasks to collapse.
+ * @param subtasks - List of planned subtasks to collapse
  *
- * Returns:
- *   New array of subtasks all assigned to agent 1 with sequential dependencies.
- * </Summary>
+ * @returns New array of subtasks all assigned to agent 1 with sequential dependencies
  */
 const collapseToSingleAgent = (
   subtasks: PlannedSubtask[],
 ): PlannedSubtask[] => {
-  // Step 1: Sort subtasks by ID to maintain order
   const sortedSubtasks = [...subtasks].sort(
     (subtaskA, subtaskB) => subtaskA.id - subtaskB.id,
   );
-  // Step 2-4: Map each subtask to agent 1 with sequential dependencies
   return sortedSubtasks.map((subtask, index) => ({
     ...subtask,
     agentId: 1,
     agentLabel: "all tasks",
-    // First subtask has no dependencies, others depend on previous
     dependsOn:
       index === 0
         ? []
@@ -256,108 +187,92 @@ const collapseToSingleAgent = (
 };
 
 /**
- * <Summary>
- * What it does:
- *   Collapses subtasks to use at most N agents, merging excess agents into the last one.
+ * Collapses subtasks to use at most N agents, merging excess agents into the last one.
  *
- * How it does it (step by step):
- *   1. Get sorted list of unique agent IDs from subtasks.
- *   2. Create helper function to get label for an agent ID.
- *   3. If unique agents <= N, just renumber them 1..N.
- *   4. Otherwise, keep first N-1 agents and merge the rest into agent N.
- *   5. Renumber kept agents to 1..N-1.
- *   6. Assign merged label to all overflow agents.
+ * @remarks
+ * If unique agents <= N, simply renumbers them 1..N. Otherwise, keeps first N-1
+ * agents and merges the rest into agent N. Used when maxSubagents is a custom numeric cap.
  *
- * Parameters:
- *   @param subtasks - List of planned subtasks to collapse.
- *   @param n - Maximum number of agents to use.
+ * @param subtasks - List of planned subtasks to collapse
+ * @param maxAgentCount - Maximum number of agents to use
  *
- * Returns:
- *   New array of subtasks with at most N unique agent IDs.
- * </Summary>
+ * @returns New array of subtasks with at most N unique agent IDs
  */
 const collapseToNAgents = (
   subtasks: PlannedSubtask[],
   maxAgentCount: number,
 ): PlannedSubtask[] => {
-  // Step 1: Get sorted list of unique agent IDs from subtasks
   const uniqueAgentIds = [
     ...new Set(subtasks.map((subtask) => subtask.agentId)),
   ].sort((agentIdA, agentIdB) => agentIdA - agentIdB);
-  // Step 2: Create helper function to get label for an agent ID
-  const getLabelForAgentId = (agentId: number): string =>
-    subtasks.find((subtask) => subtask.agentId === agentId)?.agentLabel ??
-    "tasks";
 
-  // Step 3: If unique agents <= N, just renumber them 1..N
+  // Cache agent labels once (O(n)) instead of calling .find() per subtask in the map loop
+  // This avoids O(n^2) scanning during remapping and reduces to O(n log n)
+  const labelByAgentId = new Map<number, string>();
+  for (const subtask of subtasks) {
+    if (!labelByAgentId.has(subtask.agentId)) {
+      labelByAgentId.set(subtask.agentId, subtask.agentLabel);
+    }
+  }
+  const getLabelForAgentId = (agentId: number): string =>
+    labelByAgentId.get(agentId) ?? "tasks";
+
   if (uniqueAgentIds.length <= maxAgentCount) {
+    const indexByAgentId = new Map(
+      uniqueAgentIds.map((agentId, index) => [agentId, index]),
+    );
     return subtasks.map((subtask) => ({
       ...subtask,
-      agentId: uniqueAgentIds.indexOf(subtask.agentId) + 1,
+      agentId: (indexByAgentId.get(subtask.agentId) ?? -1) + 1,
       agentLabel: getLabelForAgentId(subtask.agentId),
     }));
   }
 
-  // Step 4-6: Keep first N-1 agents and merge the rest into agent N
   const keptAgentIds = uniqueAgentIds.slice(0, maxAgentCount - 1);
+  const keptAgentIndexById = new Map(
+    keptAgentIds.map((agentId, index) => [agentId, index]),
+  );
   const mergedAgentLabel = getLabelForAgentId(
     uniqueAgentIds[maxAgentCount - 1] ??
       uniqueAgentIds[uniqueAgentIds.length - 1] ??
       1,
   );
   return subtasks.map((subtask) => {
-    // Renumber kept agents to 1..N-1
-    if (keptAgentIds.includes(subtask.agentId)) {
+    const keptIndex = keptAgentIndexById.get(subtask.agentId);
+    if (keptIndex !== undefined) {
       return {
         ...subtask,
-        agentId: keptAgentIds.indexOf(subtask.agentId) + 1,
+        agentId: keptIndex + 1,
         agentLabel: getLabelForAgentId(subtask.agentId),
       };
     }
-    // Assign merged label to all overflow agents
     return { ...subtask, agentId: maxAgentCount, agentLabel: mergedAgentLabel };
   });
 };
 
 /**
- * <Summary>
- * What it does:
- *   Collapses subtasks to use exactly 2 agents (setup and implementation).
+ * Collapses subtasks to use exactly 2 agents (setup and implementation).
  *
- * How it does it (step by step):
- *   1. Get sorted list of unique agent IDs from subtasks.
- *   2. If <= 2 agents, map first to agent 1 (setup) and rest to agent 2 (implementation).
- *   3. If > 2 agents, map first agent to agent 1 (setup) and all others to agent 2 (implementation).
+ * @remarks
+ * Maps the first agent to agent 1 (setup) and all other agents to agent 2 (implementation).
+ * Used when maxSubagents is 2 (collab mode). Preserves the original label for the first agent.
  *
- * Parameters:
- *   @param subtasks - List of planned subtasks to collapse.
+ * @param subtasks - List of planned subtasks to collapse
  *
- * Returns:
- *   New array of subtasks with exactly 2 agent IDs (1 and 2).
- * </Summary>
+ * @returns New array of subtasks with exactly 2 agent IDs (1 and 2)
  */
 const collapseToTwoAgents = (subtasks: PlannedSubtask[]): PlannedSubtask[] => {
-  // Step 1: Get sorted list of unique agent IDs from subtasks
   const uniqueAgentIds = [
     ...new Set(subtasks.map((subtask) => subtask.agentId)),
   ].sort((agentIdA, agentIdB) => agentIdA - agentIdB);
-  // Step 2: If <= 2 agents, map to 1 and 2 with appropriate labels
-  if (uniqueAgentIds.length <= 2) {
-    return subtasks.map((subtask) => ({
-      ...subtask,
-      agentId: subtask.agentId === uniqueAgentIds[0] ? 1 : 2,
-      agentLabel:
-        subtask.agentId === uniqueAgentIds[0]
-          ? (subtasks.find((subtask) => subtask.agentId === uniqueAgentIds[0])
-              ?.agentLabel ?? "setup")
-          : "implementation",
-    }));
-  }
-  // Step 3: If > 2 agents, map first to 1, rest to 2
+
   const firstAgentId = uniqueAgentIds[0] ?? 1;
+  // Look up firstAgentLabel once (O(n)) before the loop, then reuse it
+  // Avoids re-scanning subtasks inside the map callback (which would be O(n^2))
   const firstAgentLabel =
     subtasks.find((subtask) => subtask.agentId === firstAgentId)?.agentLabel ??
     "setup";
+
   return subtasks.map((subtask) => ({
     ...subtask,
     agentId: subtask.agentId === firstAgentId ? 1 : 2,
@@ -367,49 +282,44 @@ const collapseToTwoAgents = (subtasks: PlannedSubtask[]): PlannedSubtask[] => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Applies the max_agents constraint to an advisor plan, collapsing agents if needed.
+ * Applies the max_agents constraint to an agent plan, collapsing agents if needed.
  *
- * How it does it (step by step):
- *   1. Copy subtasks to avoid mutating original plan.
- *   2. Validate no cycles exist; if cycles found, linearize dependencies.
- *   3. If maxAgents is 1, collapse to single agent (sequential).
- *   4. If maxAgents is 2, collapse to two agents (collab mode).
- *   5. If maxAgents is "max", keep all agents as-is.
- *   6. If maxAgents is a number >= 3, collapse to at most that many agents.
- *   7. Otherwise, keep original agent count.
- *   8. Recalculate agent count and execution mode.
+ * @remarks
+ * Copies subtasks to avoid mutating the original plan. Validates no cycles exist;
+ * if cycles are found, linearizes dependencies. Then applies the max_agents constraint:
+ * - 1: collapse to single agent (sequential)
+ * - 2: collapse to two agents (collab mode)
+ * - "max": keep all agents as-is
+ * - number >= 3: collapse to at most that many agents
+ * Recalculates agent count and execution mode after applying constraints.
  *
- * Parameters:
- *   @param plan - The advisor plan to apply constraints to.
- *   @param maxAgents - The max_agents constraint from configuration.
+ * @param plan - The agent plan to apply constraints to
+ * @param maxSubagents - The max_agents constraint from configuration
  *
- * Returns:
- *   New advisor plan with agent count constraint applied.
- * </Summary>
+ * @returns New agent plan with agent count constraint applied
  */
+/** Counts distinct agent IDs among subtasks — single-pass O(n) helper to avoid repeating `new Set(...).size` inline. */
+const uniqueAgentCount = (subtasks: PlannedSubtask[]): number =>
+  new Set(subtasks.map((subtask) => subtask.agentId)).size;
+
 export const applyMaxAgentsConstraint = (
-  plan: AdvisorPlan,
-  maxAgents: MaxAgentsParam,
-): AdvisorPlan => {
-  // Step 1: Copy subtasks to avoid mutating original plan
+  plan: SubagentPlan,
+  maxSubagents: MaxSubagentsParam,
+): SubagentPlan => {
   let constrainedSubtasks = [...plan.subtasks];
 
-  // Step 2: Validate no cycles exist; if cycles found, linearize dependencies
+  // Linearize dependencies if cycles are detected (prevents deadlock)
   if (!validateNoCycles(constrainedSubtasks)) {
     const sortedSubtasks = [...constrainedSubtasks].sort(
       (subtaskA, subtaskB) => subtaskA.id - subtaskB.id,
     );
     constrainedSubtasks = sortedSubtasks.map((subtask, index) => ({
       ...subtask,
-      // Linearize: each subtask depends only on the previous one
       dependsOn: index === 0 ? [] : [sortedSubtasks[index - 1]!.id],
     }));
   }
 
-  // Step 3: If maxAgents is 1, collapse to single agent (sequential)
-  if (maxAgents === 1) {
+  if (maxSubagents === 1) {
     constrainedSubtasks = collapseToSingleAgent(constrainedSubtasks);
     return {
       ...plan,
@@ -419,8 +329,7 @@ export const applyMaxAgentsConstraint = (
     };
   }
 
-  // Step 4: If maxAgents is 2, collapse to two agents (collab mode)
-  if (maxAgents === 2) {
+  if (maxSubagents === 2) {
     constrainedSubtasks = collapseToTwoAgents(constrainedSubtasks);
     return {
       ...plan,
@@ -430,44 +339,31 @@ export const applyMaxAgentsConstraint = (
     };
   }
 
-  // Step 5: If maxAgents is "max", keep all agents as-is
-  if (maxAgents === "max") {
-    const uniqueAgentIds = new Set(
-      constrainedSubtasks.map((subtask) => subtask.agentId),
-    );
+  if (maxSubagents === "max") {
     return {
       ...plan,
       subtasks: constrainedSubtasks,
-      agentCount: uniqueAgentIds.size,
+      agentCount: uniqueAgentCount(constrainedSubtasks),
       execution: deriveExecution(constrainedSubtasks),
     };
   }
 
-  // Step 6: If maxAgents is a number >= 3, collapse to at most that many agents
-  if (typeof maxAgents === "number" && maxAgents >= 3) {
-    const uniqueAgentIds = new Set(
-      constrainedSubtasks.map((subtask) => subtask.agentId),
-    );
-    if (uniqueAgentIds.size > maxAgents) {
-      constrainedSubtasks = collapseToNAgents(constrainedSubtasks, maxAgents);
+  if (typeof maxSubagents === "number" && maxSubagents >= 3) {
+    if (uniqueAgentCount(constrainedSubtasks) > maxSubagents) {
+      constrainedSubtasks = collapseToNAgents(constrainedSubtasks, maxSubagents);
     }
     return {
       ...plan,
       subtasks: constrainedSubtasks,
-      agentCount: new Set(constrainedSubtasks.map((subtask) => subtask.agentId))
-        .size,
+      agentCount: uniqueAgentCount(constrainedSubtasks),
       execution: deriveExecution(constrainedSubtasks),
     };
   }
 
-  // Step 7: Otherwise, keep original agent count
-  const uniqueAgentIds = new Set(
-    constrainedSubtasks.map((subtask) => subtask.agentId),
-  );
   return {
     ...plan,
     subtasks: constrainedSubtasks,
-    agentCount: uniqueAgentIds.size,
+    agentCount: uniqueAgentCount(constrainedSubtasks),
     execution: deriveExecution(constrainedSubtasks),
   };
 };

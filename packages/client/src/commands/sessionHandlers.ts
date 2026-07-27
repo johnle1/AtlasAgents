@@ -1,10 +1,9 @@
 /**
- * Session-related command handlers.
+ * Session lifecycle slash commands: `/explore`, `/new`, `/exit`.
  *
- * This module handles commands for session management:
- * - /explore
- * - /new
- * - /exit
+ * @remarks
+ * These touch server session state or terminate the CLI process — they do not
+ * edit local workspace files.
  */
 
 import type { Connection } from "../connection/index.js";
@@ -14,44 +13,41 @@ import { formatErrorMessage } from "./utils.js";
 import { logger } from "../utils/logger.js";
 
 /**
- * <Summary>
- * What it does:
- *   Handles "/explore" to analyze and describe the current codebase.
+ * Runs `/explore` — streams a codebase overview from the server.
  *
- * How it does it (step by step):
- *   1. Sends explore request to server via streaming connection.
- *   2. Accumulates streaming tokens in a buffer.
- *   3. Updates streaming text UI with accumulated tokens.
- *   4. On completion, appends the exploration result to history.
- *   5. Handles and displays any errors that occur.
+ * @remarks
+ * Uses `Connection.sendStream({ kind: "explore" })`. Token frames update the
+ * live streaming UI; on completion the buffer is appended to history as an
+ * assistant message. Errors are printed and do not rethrow.
  *
- * Parameters:
- *   @param conn - RSocket connection for server communication.
+ * @param conn - Live RSocket connection.
  *
- * Returns:
- *   @returns called for side effects only.
- * </Summary>
+ * @example
+ * ```ts
+ * await handleExplore(connection);
+ * ```
  */
 export const handleExplore = async (conn: Connection): Promise<void> => {
   try {
     printLine("  Exploring codebase...");
     let explorationBuffer = "";
-    // Send explore request and stream the response
+
     await conn.sendStream({
       kind: "explore",
       payload: {},
       onFrame: async (frame) => {
         if (frame.kind === "token") {
-          // Accumulate streaming tokens
           explorationBuffer += frame.text;
+          // Progressive UI — same path as task token streaming.
           setStreamingText(explorationBuffer);
         } else if (frame.kind === "error") {
           printError(frame.message);
         }
       },
     });
+
+    // Clear live stream; history gets the full text once (if any).
     setStreamingText(null);
-    // Append exploration result to history if content was received
     if (explorationBuffer.length > 0) {
       appendLog(explorationBuffer, "assistant");
     }
@@ -61,21 +57,14 @@ export const handleExplore = async (conn: Connection): Promise<void> => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Handles "/new" to clear the current session and start fresh.
+ * Runs `/new` — clears server-side session state for a fresh conversation.
  *
- * How it does it (step by step):
- *   1. Sends session.clear command to server.
- *   2. Displays success message with server response or default.
- *   3. Handles and displays any errors that occur.
+ * @param conn - Live RSocket connection.
  *
- * Parameters:
- *   @param conn - RSocket connection for server communication.
- *
- * Returns:
- *   @returns called for side effects only.
- * </Summary>
+ * @example
+ * ```ts
+ * await handleNew(connection);
+ * ```
  */
 export const handleNew = async (conn: Connection): Promise<void> => {
   try {
@@ -90,29 +79,27 @@ export const handleNew = async (conn: Connection): Promise<void> => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Handles "/exit" by printing a goodbye message and exiting the process.
+ * Runs `/exit` — tears down the CLI via a custom hook or `process.exit(0)`.
  *
- * How it does it (step by step):
- *   1. Calls custom exit handler if provided.
- *   2. Otherwise prints a blank line and "Goodbye!" message.
- *   3. Calls process.exit(0) to terminate immediately.
+ * @remarks
+ * When `onExit` is provided (Ink / embedded hosts), it fully owns teardown and
+ * this function returns. The default path prints a goodbye banner and exits the
+ * Node process immediately (does not return).
  *
- * Parameters:
- *   @param onExit - Optional custom exit handler.
+ * @param onExit - Optional host-provided exit callback.
  *
- * Returns:
- *   @returns never returns, exits process.
- * </Summary>
+ * @example
+ * ```ts
+ * handleExit(() => app.quit());
+ * handleExit(undefined); // prints Goodbye! and exits
+ * ```
  */
 export const handleExit = (onExit: (() => void) | undefined): void => {
-  // Call custom exit handler if provided
   if (onExit) {
     onExit();
     return;
   }
-  // Default exit behavior: print goodbye message and exit process
+
   logger.blank();
   logger.info("  Goodbye!");
   logger.blank();

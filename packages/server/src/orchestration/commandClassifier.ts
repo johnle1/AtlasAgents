@@ -1,76 +1,56 @@
 /**
- * <Summary>
- * What it does:
- *   Helper functions for classifying shell commands by purpose (setup, verify, run-project)
- *   and validating agent think blocks for proper command planning.
+ * Helper functions for classifying shell commands and validating agent think blocks.
  *
- * How it fits in the system:
- *   Used by Agent.run to classify commands and enforce safety rules. Commands are
- *   classified based on the advisor's command plan to prevent agents from running
- *   dangerous commands (like dev servers) in the foreground.
- * </Summary>
+ * @remarks
+ * Used by Agent.run to classify commands by purpose (setup, verify, run-project)
+ * and enforce safety rules. Commands are classified based on the agent's command
+ * plan to prevent agents from running dangerous commands (like dev servers) in
+ * the foreground. Also validates that agent think blocks contain required fields
+ * for proper command planning.
  */
 
 import type { CommandPlan } from "./types.js";
 import type { CommandPurpose } from "./toolProtocol.js";
 
 /**
- * <Summary>
- * What it does:
- *   Normalizes a shell command string for consistent comparison.
+ * Normalizes a shell command string for consistent comparison.
  *
- * How it does it (step by step):
- *   1. Trim leading/trailing whitespace.
- *   2. Replace multiple spaces with single spaces.
- *   3. Convert to lowercase for case-insensitive matching.
+ * @remarks
+ * Trims leading/trailing whitespace, replaces multiple spaces with single spaces,
+ * and converts to lowercase for case-insensitive matching. This normalization
+ * ensures that commands like "npm test" and "NPM  TEST" are treated as equivalent.
  *
- * Parameters:
- *   @param command - The raw shell command string.
+ * @param command - The raw shell command string
  *
- * Returns:
- *   {string} — Normalized command string.
- * </Summary>
+ * @returns Normalized command string
  */
 export const normalizeCommand = (command: string): string =>
-  // Step 1-3: Normalize the command string
-  // Trim removes leading/trailing whitespace
-  // Regex replaces multiple spaces with single space
-  // toLowerCase enables case-insensitive matching
   command.trim().replace(/\s+/g, " ").toLowerCase();
 
 /**
- * <Summary>
- * What it does:
- *   Checks if a command matches a plan entry (exact or as prefix).
+ * Checks if a command matches a plan entry (exact or as prefix).
  *
- * How it does it (step by step):
- *   1. Normalize both the command and the entry.
- *   2. If the entry is empty after normalization, return false.
- *   3. Check for exact match or prefix match (entry followed by space).
+ * @remarks
+ * Normalizes both the command and entry for comparison. Returns true if they
+ * match exactly or if the command starts with the entry followed by a space.
+ * This prefix matching allows "npm test" to match "npm" (treats "npm " as prefix).
  *
- * Parameters:
- *   @param command - The shell command to check.
- *   @param entry - The plan entry to match against.
+ * @param command - The shell command to check
+ * @param entry - The plan entry to match against
  *
- * Returns:
- *   {boolean} — True if command matches entry exactly or as a prefix.
- * </Summary>
+ * @returns True if command matches entry exactly or as a prefix
  */
 export const commandMatchesPlanEntry = (
   command: string,
   entry: string,
 ): boolean => {
-  // Step 1: Normalize both the command and the entry
   const normalizedCommand = normalizeCommand(command);
   const normalizedEntry = normalizeCommand(entry);
 
-  // Step 2: If the entry is empty after normalization, return false
   if (normalizedEntry.length === 0) {
     return false;
   }
 
-  // Step 3: Check for exact match or prefix match (entry followed by space)
-  // Prefix match allows "npm test" to match "npm" (treats "npm " as prefix)
   return (
     normalizedCommand === normalizedEntry ||
     normalizedCommand.startsWith(`${normalizedEntry} `)
@@ -78,99 +58,69 @@ export const commandMatchesPlanEntry = (
 };
 
 /**
- * <Summary>
- * What it does:
- *   Checks if a command matches any entry in a list of plan entries.
+ * Checks if a command matches any entry in a list of plan entries.
  *
- * How it does it (step by step):
- *   1. Iterate through each entry in the entries array.
- *   2. Use commandMatchesPlanEntry to check for match.
- *   3. Return true if any entry matches.
+ * @remarks
+ * Iterates through the entries array and uses commandMatchesPlanEntry to check
+ * for matches. Returns true if any entry matches the command.
  *
- * Parameters:
- *   @param command - The shell command to check.
- *   @param entries - Array of plan entries to match against.
+ * @param command - The shell command to check
+ * @param entries - Array of plan entries to match against
  *
- * Returns:
- *   {boolean} — True if command matches any entry in the list.
- * </Summary>
+ * @returns True if command matches any entry in the list
  */
 const matchesAnyEntry = (command: string, entries: string[]): boolean =>
-  // Step 1-3: Check if command matches any entry in the list
-  // some() returns true if any entry matches the command
   entries.some((entry) => commandMatchesPlanEntry(command, entry));
 
 /**
- * <Summary>
- * What it does:
- *   Infers the purpose of a command based on the advisor's command plan.
+ * Infers the purpose of a command based on the agent's command plan.
  *
- * How it does it (step by step):
- *   1. Check if command matches run-project commands.
- *   2. Check if command matches verify commands.
- *   3. Default to setup if no other match.
+ * @remarks
+ * Checks if the command matches run-project commands (indefinite processes like dev servers),
+ * verify commands (test/validation commands), or defaults to setup (one-time
+ * environment preparation). This classification is used to enforce safety rules
+ * and prevent dangerous commands from running in the foreground.
  *
- * Parameters:
- *   @param command - The shell command to classify.
- *   @param plan - The advisor's command plan.
+ * @param command - The shell command to classify
+ * @param plan - The agent's command plan
  *
- * Returns:
- *   {CommandPurpose} — The inferred purpose: "run-project", "verify", or "setup".
- * </Summary>
+ * @returns The inferred purpose: "run-project", "verify", or "setup"
  */
 export const inferPurpose = (
   command: string,
   plan: CommandPlan,
 ): CommandPurpose => {
-  // Step 1: Check if command matches run-project commands
-  // These are commands that run indefinitely (dev servers, etc.)
   if (matchesAnyEntry(command, plan.runProjectCommands)) {
     return "run-project";
   }
 
-  // Step 2: Check if command matches verify commands
-  // These are commands that test/validate the work
   if (matchesAnyEntry(command, plan.verifyCommands)) {
     return "verify";
   }
 
-  // Step 3: Default to setup if no other match
-  // Setup commands are one-time operations that prepare the environment
   return "setup";
 };
 
 /**
- * <Summary>
- * What it does:
- *   Formats the command plan as a markdown block for display in agent prompts.
+ * Formats the command plan as a markdown block for display in agent prompts.
  *
- * How it does it (step by step):
- *   1. Define helper function to format command lists.
- *   2. Format each section (setup, verify, run-project) with its commands.
- *   3. Return the complete markdown block.
+ * @remarks
+ * Formats each section (setup, verify, run-project) with its commands as
+ * markdown bullet points. Empty sections display "(none)". The formatted block
+ * is included in agent prompts to guide command execution.
  *
- * Parameters:
- *   @param plan - The command plan to format.
+ * @param plan - The command plan to format
  *
- * Returns:
- *   {string} — Formatted markdown block showing the command plan.
- * </Summary>
+ * @returns Formatted markdown block showing the command plan
  */
 export const formatCommandPlanBlock = (plan: CommandPlan): string => {
-  /**
-   * Helper function to format a list of commands as markdown bullet points.
-   *
-   * @param items - Array of command strings.
-   * @returns Formatted bullet list or "(none)" if empty.
-   */
   const formatList = (items: string[]): string =>
     items.length > 0
       ? items.map((command) => `  - ${command}`).join("\n")
       : "  (none)";
 
-  // Step 1-3: Format each section and combine into markdown block
   return [
-    "[Advisor command plan]",
+    "[Agent command plan]",
     "Setup:",
     formatList(plan.setupCommands),
     "Verify (exit pass/fail):",
@@ -181,24 +131,17 @@ export const formatCommandPlanBlock = (plan: CommandPlan): string => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Generates a warning message when a run-project command is called without background flag.
+ * Generates a warning message when a run-project command is called without background flag.
  *
- * How it does it (step by step):
- *   1. Construct the message explaining why the command is blocked.
- *   2. Provide instructions for proper usage (background flag or verify commands).
- *   3. Return the formatted message string.
+ * @remarks
+ * Constructs a message explaining why the command is blocked (it would freeze the agent)
+ * and provides instructions for proper usage (add background flag or use verify commands).
  *
- * Parameters:
- *   @param command - The blocked command string.
+ * @param command - The blocked command string
  *
- * Returns:
- *   {string} — Warning message explaining the block and how to fix it.
- * </Summary>
+ * @returns Warning message explaining the block and how to fix it
  */
 export const RUN_PROJECT_BLOCK_MESSAGE = (command: string): string =>
-  // Step 1-3: Construct warning message with instructions
   [
     "This command runs forever and would freeze the agent:",
     `  ${command}`,
@@ -212,27 +155,20 @@ export const RUN_PROJECT_BLOCK_MESSAGE = (command: string): string =>
   ].join("\n");
 
 /**
- * <Summary>
- * What it does:
- *   Generates a message requiring verification before finish can be called.
+ * Generates a message requiring verification before finish can be called.
  *
- * How it does it (step by step):
- *   1. List the files that were written but not verified.
- *   2. Provide instructions for acceptable verification methods.
- *   3. Return the formatted message string.
+ * @remarks
+ * Lists the files that were written but not verified, and provides instructions
+ * for acceptable verification methods (re-reading files or running verify commands).
+ * Emphasizes that starting a server is not verification.
  *
- * Parameters:
- *   @param paths - Set of file paths that need verification.
+ * @param paths - Set of file paths that need verification
  *
- * Returns:
- *   {string} — Message explaining verification requirements.
- * </Summary>
+ * @returns Message explaining verification requirements
  */
 export const VERIFY_REQUIRED_MESSAGE = (paths: Set<string>): string => {
-  // Format the file list as a bullet-point list
   const pathList = [...paths].map((filePath) => `  ${filePath}`).join("\n");
 
-  // Step 1-3: Construct verification requirement message
   return [
     "You must verify your work before calling finish.",
     "",
@@ -248,45 +184,34 @@ export const VERIFY_REQUIRED_MESSAGE = (paths: Set<string>): string => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Error message when think block missing required run_command fields.
+ * Error message when think block missing required run_command fields.
  *
- * How it fits in the system:
- *   Displayed to agent when it calls run_command without proper think block
- *   documentation (purpose, exits, risk fields are required).
- * </Summary>
+ * @remarks
+ * Displayed to agent when it calls run_command without proper think block
+ * documentation. The agent must include purpose, exits, and risk fields in the
+ * think block for run_command calls.
  */
 export const RUN_COMMAND_THINK_MISSING_MESSAGE =
   "Your think block for run_command must include: purpose, exits, risk.\n" +
   "Re-think and call run_command again.";
 
 /**
- * <Summary>
- * What it does:
- *   Validates that a think block contains required run_command fields.
+ * Validates that a think block contains required run_command fields.
  *
- * How it does it (step by step):
- *   1. Check if thinkText exists and is non-empty.
- *   2. Check for purpose field with valid value (setup|verify|run-project).
- *   3. Check for exits field with valid value (yes|no).
- *   4. Check for risk field presence.
+ * @remarks
+ * Checks if the think block contains the required fields for run_command calls:
+ * purpose (setup|verify|run-project), exits (yes|no), and risk. Uses
+ * case-insensitive regex patterns to match field names and validate values.
  *
- * Parameters:
- *   @param thinkText - The think block text to validate.
+ * @param thinkText - The think block text to validate
  *
- * Returns:
- *   {boolean} — True if all required fields are present and valid.
- * </Summary>
+ * @returns True if all required fields are present and valid
  */
 export const hasRunCommandThinkFields = (thinkText: string | null): boolean => {
-  // Step 1: Check if thinkText exists and is non-empty
   if (!thinkText) {
     return false;
   }
 
-  // Step 2-4: Check for required fields using regex patterns
-  // Case-insensitive regex to match field names and validate values
   return (
     /purpose:\s*(setup|verify|run-project)/i.test(thinkText) &&
     /exits:\s*(yes|no)/i.test(thinkText) &&
@@ -295,24 +220,17 @@ export const hasRunCommandThinkFields = (thinkText: string | null): boolean => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Validates that a think block contains the command plan section.
+ * Validates that a think block contains the command plan section.
  *
- * How it does it (step by step):
- *   1. Check for "setup commands:" section header.
- *   2. Check for "verify commands:" section header.
- *   3. Check for "off-limits" keyword.
+ * @remarks
+ * Checks for the required section headers in the think block: "setup commands:",
+ * "verify commands:", and "off-limits". Uses case-insensitive regex patterns.
  *
- * Parameters:
- *   @param thinkText - The think block text to validate.
+ * @param thinkText - The think block text to validate
  *
- * Returns:
- *   {boolean} — True if all command plan sections are present.
- * </Summary>
+ * @returns True if all command plan sections are present
  */
 export const hasCommandPlanSection = (thinkText: string): boolean =>
-  // Step 1-3: Check for required section headers using case-insensitive regex
   /setup\s+commands:/i.test(thinkText) &&
   /verify\s+commands:/i.test(thinkText) &&
   /off-limits/i.test(thinkText);

@@ -1,145 +1,118 @@
 /**
- * <Summary>
- * What it does:
- *   Handler for edit_file tool execution.
+ * The `edit_file` tool: replaces an exact string match within a file the agent has already read.
  *
- * How it does it (step by step):
- *   1. Check if file was read before editing (required).
- *   2. Emit writing status.
- *   3. Edit file content in workspace.
- *   4. Track file as written if accepted.
- *   5. Return observation with diff or decline message.
- *
- * Parameters:
- *   @param tool - Tool call with path, old, and new content.
- *   @param ctx - Execution context.
- *
- * Returns:
- *   @returns Result with edit observation.
- * </Summary>
+ * @remarks
+ * Enforces a read-before-edit invariant: the model must have called
+ * `read_file` on the target path this task before it can edit it. This
+ * guards against edits anchored on stale or hallucinated file content — the
+ * `old` string must be copied from a real, current read, not guessed. Like
+ * `write_file`, edits go through the workspace's approval flow.
  */
 
-import type { AgentToolCall } from "../toolProtocol.js";
 import type {
-  IToolHandler,
+  ToolHandler,
   ToolHandlerContext,
   ToolExecutionResult,
+} from "./types.js";
+import {
+  formatObservation,
+  toolExecutionErrorResult,
+  userReviseMessage,
 } from "./toolHandler.js";
-import type { WorkspaceManager } from "../../workspace/manager/workspaceManager.js";
-import { ValidationError } from "../../errors/index.js";
+import { stripMarkdownFence } from "../toolProtocol.js";
 
 /**
- * <Summary>
- * What it does:
- *   Formats a tool observation string for agent feedback.
+ * Tool handler for `edit_file`.
  *
- * How it does it (step by step):
- *   1. Combine tool name and JSON representation.
- *   2. Append content with newline separator.
- *
- * Parameters:
- *   @param tool - The tool call that was executed.
- *   @param content - The result or error message content.
- *
- * Returns:
- *   Formatted observation string.
- * </Summary>
+ * @example
+ * Agent calls `read_file({ path: "src/App.tsx" })`, then
+ * `edit_file({ path: "src/App.tsx", old: "export default App;", new: "..." })`
+ * — the edit is rejected with a corrective message if `read_file` on that
+ * path wasn't called first this task.
  */
-const formatObservation = (tool: AgentToolCall, content: string): string => {
-  // Step 1-2: Combine tool name, JSON, and content
-  return `[${tool.tool}] ${JSON.stringify(tool)}\n${content}`;
-};
+export const editFileTool: ToolHandler = {
+  schema: {
+    type: "function",
+    function: {
+      name: "edit_file",
+      description:
+        "Replace an exact string in a file you have already read. The old string must match exactly once unless replace_all is true.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Relative path from workspace root" },
+          old: { type: "string", description: "Exact text to find" },
+          new: { type: "string", description: "Replacement text" },
+          replace_all: {
+            type: "boolean",
+            description: "Replace all occurrences when true",
+          },
+        },
+        required: ["path", "old", "new"],
+      },
+    },
+  },
 
-export class EditFileHandler implements IToolHandler {
-  /**
-   * <Summary>
-   * What it does:
-   *   Executes the edit_file tool.
-   *
-   * How it does it (step by step):
-   *   1. Validate tool type is edit_file.
-   *   2. Check if file was read before editing (required).
-   *   3. If not read, return error requiring read first.
-   *   4. Create recorder context for logging.
-   *   5. Emit writing status to client.
-   *   6. Edit file in workspace with confirmation.
-   *   7. Track file as written if accepted.
-   *   8. Return observation with diff or decline message.
-   *   9. Handle errors and return error observation.
-   *
-   * Parameters:
-   *   @param tool - Tool call with path, old, and new content.
-   *   @param ctx - Execution context with dependencies.
-   *
-   * Returns:
-   *   Result with edit observation.
-   * </Summary>
-   */
   async execute(
-    tool: AgentToolCall,
-    ctx: ToolHandlerContext,
+    editFileArgs: Record<string, unknown>,
+    handlerContext: ToolHandlerContext,
   ): Promise<ToolExecutionResult> {
-    // Step 1: Validate tool type is edit_file
-    if (tool.tool !== "edit_file") {
-      throw new ValidationError(
-        `EditFileHandler received wrong tool type: ${tool.tool}`,
-      );
-    }
+    const path = String(editFileArgs.path ?? "");
+    const oldText = String(editFileArgs.old ?? "");
+    // Models occasionally wrap replacement text in markdown fences out of
+    // habit; strip them since the raw text is what should land in the file.
+    const newText = stripMarkdownFence(String(editFileArgs.new ?? ""));
+    const replaceAll = editFileArgs.replace_all === true;
+    const trackers = handlerContext.trackers;
 
-    const trackers = ctx.trackers;
-
-    // Step 2-3: Check if file was read before editing (required)
-    if (!trackers.filesReadThisTask.has(tool.path)) {
+    // GUARD: Reject edits to files not read this task. The `old` anchor must
+    // come from a real, current read — otherwise the agent could be editing
+    // against stale or hallucinated content, silently corrupting the file.
+    if (!trackers.filesReadThisTask.has(path)) {
       return {
         done: false,
         summary: "",
         feedback: formatObservation(
-          tool,
-          `You must read_file("${tool.path}") before edit_file. Anchors must come from the file as it exists now.`,
+          "edit_file",
+          editFileArgs,
+          `You must read_file("${path}") before edit_file. Anchors must come from the file as it exists now.`,
         ),
-        escalationCount: ctx.escalationCount,
+        escalationCount: handlerContext.escalationCount,
       };
     }
 
-    // Step 4: Create recorder context for logging
-    const recorderContext = { recorder: ctx.recorder, taskId: ctx.taskId };
+    const recorderContext = { recorder: handlerContext.recorder, taskId: handlerContext.taskId };
 
     try {
-      // Step 5: Emit writing status to client
-      ctx.emitAgentStatus("writing", "◌", `Writing ${tool.path}...`);
-      // Step 6: Edit file in workspace with confirmation
-      const diff = await ctx.workspace.editFile(
-        tool.path,
-        tool.old,
-        tool.new,
-        tool.replace_all === true,
-        recorderContext,
+      handlerContext.emitSubagentStatus("writing", "◌", `Writing ${path}...`);
+      const outcome = await handlerContext.workspace.editFile(
+        path,
+        oldText,
+        newText,
+        { replaceAll, ctx: recorderContext },
       );
-      const editAccepted = diff !== undefined;
-      // Step 7: Track file as written if accepted
-      if (editAccepted) {
-        trackers.filesWrittenThisTask.add(tool.path);
+      if (outcome.accepted) {
+        trackers.filesWrittenThisTask.add(path);
       }
-      // Step 8: Return observation with diff or decline message
-      const resultBody = editAccepted
-        ? `accepted. Diff:\n${diff ?? ""}`
-        : "user declined";
+      // Three possible outcomes: accepted (show the diff), revised (user gave
+      // a reason — pass it back so the agent can adjust), or a bare decline.
+      const resultBody = outcome.accepted
+        ? `accepted. Diff:\n${outcome.diff}`
+        : outcome.feedback
+          ? userReviseMessage(
+              "accepting this edit",
+              "Do not repeat the same edit",
+              outcome.feedback,
+            )
+          : "user declined";
       return {
         done: false,
         summary: "",
-        feedback: formatObservation(tool, resultBody),
-        escalationCount: ctx.escalationCount,
+        feedback: formatObservation("edit_file", editFileArgs, resultBody),
+        escalationCount: handlerContext.escalationCount,
       };
     } catch (error) {
-      // Step 9: Handle errors and return error observation
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      return {
-        done: false,
-        summary: "",
-        feedback: formatObservation(tool, errorMessage),
-        escalationCount: ctx.escalationCount,
-      };
+      return toolExecutionErrorResult("edit_file", editFileArgs, error, handlerContext.escalationCount);
     }
-  }
-}
+  },
+};

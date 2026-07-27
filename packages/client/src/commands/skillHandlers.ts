@@ -1,42 +1,76 @@
 /**
- * Skill-related command handlers.
+ * Custom skill slash commands under `/skills`.
  *
- * This module handles commands for managing custom skills:
- * - /skills list, add, sync
+ * @remarks
+ * Skills are local markdown instruction packs. Prefer an injected
+ * {@link SkillManager} when present; otherwise fall back to module-level
+ * helpers and {@link Connection.syncSkills}.
  */
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   listSkills,
   addSkill,
   readAllSkills,
+  readSkillsFromDir,
   type SkillManager,
-} from "../skills.js";
+} from "../skills/skills.js";
 import { printSkills, printError, printSuccess } from "../renderer.js";
 import type { Connection } from "../connection/index.js";
 import { formatErrorMessage } from "./utils.js";
 
 /**
- * <Summary>
- * What it does:
- *   Handles "/skills list", "/skills add <name>", and "/skills sync"
- *   by routing to the appropriate skill operation.
+ * Resolves a user-supplied `/skills sync` path argument to an absolute path.
  *
- * How it does it (step by step):
- *   1. Routes based on subcommand (list, add, sync).
- *   2. For list: calls listSkills and prints via renderer.printSkills.
- *   3. For add: validates name, calls addSkill to create file and open editor.
- *   4. For sync: calls readAllSkills, then Connection.syncSkills to upload.
- *   5. Prints success or error messages for each operation.
+ * @remarks
+ * Expands a leading `~` to the home directory (shell-style), then resolves
+ * to absolute. Mirrors the path-handling convention used by `/workspace set`.
  *
- * Parameters:
- *   @param sub - Subcommand: "list", "add", or "sync".
- *   @param arg - Argument for add subcommand (skill name).
- *   @param skills - Optional SkillManager instance.
- *   @param conn - RSocket connection for syncing skills.
+ * @param rawPath - Trimmed, non-empty path argument from the user.
+ * @returns Absolute, resolved directory path.
+ */
+const resolveSyncPath = (rawPath: string): string => {
+  const expandedPath = rawPath.startsWith("~")
+    ? path.join(os.homedir(), rawPath.slice(1))
+    : rawPath;
+  return path.resolve(expandedPath);
+};
+
+/**
+ * Prints the outcome of a `/skills sync` after it has already run.
  *
- * Returns:
- *   @returns called for side effects only.
- * </Summary>
+ * @param syncedCount - Number of skills actually synced (0 means nothing to send).
+ */
+const printSyncResult = (syncedCount: number): void => {
+  if (syncedCount === 0) {
+    printError("No skills to sync. Use /skills add <name> first.");
+    return;
+  }
+  printSuccess(`Synced ${syncedCount} skill(s) to server.`);
+};
+
+/**
+ * Routes `/skills list | add <name> | sync`.
+ *
+ * @remarks
+ * - `list` — prints local skill names
+ * - `add` — creates a skill file (and typically opens an editor via create/add)
+ * - `sync` — uploads skill payloads to the server for agent/subagent use
+ *
+ * @param sub - Subcommand after `/skills`.
+ * @param arg - Skill name for `add`; optional source directory for `sync`.
+ * @param skills - Optional SkillManager; when set, `sync`/`list`/`create` use it.
+ * @param conn - Connection used by the no-manager sync fallback.
+ *
+ * @example
+ * ```ts
+ * await handleSkills("list", "", skills, connection);
+ * await handleSkills("add", "testing", skills, connection);
+ * await handleSkills("sync", "", skills, connection); // default ~/.agent-cli/skills/
+ * await handleSkills("sync", "/Users/john/my-skills", skills, connection);
+ * ```
  */
 export const handleSkills = async (
   sub: string,
@@ -46,7 +80,6 @@ export const handleSkills = async (
 ): Promise<void> => {
   switch (sub) {
     case "list":
-      // List available skills using SkillManager or module function
       printSkills(skills?.list() ?? listSkills());
       break;
     case "add": {
@@ -56,7 +89,6 @@ export const handleSkills = async (
         return;
       }
       try {
-        // Create skill using SkillManager or module function
         if (skills) {
           skills.create(skillName);
         } else {
@@ -69,38 +101,52 @@ export const handleSkills = async (
       break;
     }
     case "sync": {
-      // Use SkillManager if available
-      if (skills) {
+      // Optional path argument: sync from a custom directory instead of
+      // the default ~/.agent-cli/skills/. Empty arg keeps default behavior.
+      const rawPath = arg.trim();
+      let dirPath: string | undefined;
+      if (rawPath) {
+        dirPath = resolveSyncPath(rawPath);
         try {
-          const syncedCount = await skills.sync();
-          if (syncedCount === 0) {
-            printError("No skills to sync. Use /skills add <name> first.");
+          const stats = fs.statSync(dirPath);
+          if (!stats.isDirectory()) {
+            printError("Path is not a directory.");
             return;
           }
-          printSuccess(`Synced ${syncedCount} skill(s) to server.`);
+        } catch {
+          printError(`Directory not found: ${dirPath}`);
+          return;
+        }
+      }
+
+      if (skills) {
+        try {
+          const syncedCount = await skills.sync(dirPath);
+          printSyncResult(syncedCount);
         } catch (err) {
-          printError(
-            `Sync failed: ${formatErrorMessage(err)}`,
-          );
+          printError(`Sync failed: ${formatErrorMessage(err)}`);
         }
         break;
       }
-      // Fallback to module functions if no SkillManager
-      const skillList = readAllSkills();
+
+      // No SkillManager — read files from disk and push via Connection.
+      const skillList = dirPath ? readSkillsFromDir(dirPath) : readAllSkills();
       if (skillList.length === 0) {
         printError("No skills to sync. Use /skills add <name> first.");
         return;
       }
       try {
         await conn.syncSkills(skillList);
-        printSuccess(`Synced ${skillList.length} skill(s) to server.`);
+        printSyncResult(skillList.length);
       } catch (err) {
         printError(`Sync failed: ${formatErrorMessage(err)}`);
       }
       break;
     }
     default:
-      printError("Usage: /skills list | /skills add <name> | /skills sync");
+      printError(
+        "Usage: /skills list | /skills add <name> | /skills sync [path]",
+      );
       break;
   }
 };

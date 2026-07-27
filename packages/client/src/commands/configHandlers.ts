@@ -1,270 +1,300 @@
 /**
- * <Summary>
- * What it does:
- *   Provides command handlers for managing LoopyCode configuration settings
- *   including connection parameters, model selection, and agent concurrency.
+ * Handlers for configuration slash commands: `/agent`, `/set`, and `/config`.
  *
- * How it fits in the system:
- *   Sits between the CLI command parser (CommandHandler) and the config/storage
- *   layer. Centralises all configuration-related command logic so changes to
- *   config structure only require updates to this module.
- * </Summary>
+ * @remarks
+ * This module manages user-facing configuration updates in the LoopyCode CLI.
+ * All slash commands synchronously load and update the persistent config file,
+ * then print feedback to the user.
+ *
+ * **Connection reloading:** Transport settings (`password`, `server`, `port`)
+ * trigger {@link Connection.reload} to reconnect the RSocket client with the
+ * new endpoint. This ensures the live session picks up changes immediately
+ * without requiring a CLI restart.
+ *
+ * **Model selection delegation:** Agent and subagent model picking is
+ * delegated to {@link handleSetModel}, which may prompt interactively
+ * if model choices need clarification.
+ *
+ * @see {@link Connection} for reconnection semantics
+ * @see {@link config} for the persistent configuration structure
  */
 
-import { loadConfig, updateConfig } from "../config.js";
+import { loadConfig, updateConfig } from "../config/index.js";
 import type { PromptPort } from "../ui/promptPort.js";
 import type { Connection } from "../connection/index.js";
 import { getTheme } from "../theme/themeManager.js";
-import { printError, printSuccess } from "../renderer.js";
+import { printConfig, printError, printSuccess } from "../renderer.js";
 import { parsePort } from "./utils.js";
 import { logger } from "../utils/logger.js";
 
 /**
- * <Summary>
- * What it does:
- *   Handles the "/agent cap" command to set or display the maximum number
- *   of agents that can work on a task simultaneously.
+ * Handles the `/agent cap [n|::max]` command — sets or displays the
+ * maximum number of agents that can run in parallel.
  *
- * How it does it (step by step):
- *   1. Validates that the subcommand is either "cap" or empty string.
- *   2. If subcommand is invalid, prints usage error and returns.
- *   3. Extracts the cap argument from the arg parameter if subcommand is "cap".
- *   4. If no argument provided, loads current config and displays current cap.
- *   5. If argument is "::max", sets cap to unlimited (MAX_SAFE_INTEGER).
- *   6. Otherwise, parses argument as a number and validates it's finite.
- *   7. Ensures cap is at least 1 and floors decimal values.
- *   8. Updates config with new cap value and prints success message.
+ * @remarks
+ * The agent concurrency cap controls resource usage when multiple agents
+ * spawn in a single task. Higher caps enable more parallelism but consume
+ * more CPU/memory; lower caps serialize work but stay lean.
  *
- * Parameters:
- *   @param sub - The subcommand after "/agent" (e.g., "cap" or empty).
- *   @param arg - The argument value for the cap (number or "::max").
+ * **Invocation modes:**
+ * - `/agent` or `/agent cap` (no value) → display current `subagentCap`
+ * - `/agent cap 4` → set cap to 4
+ * - `/agent cap ::max` → set cap to `Number.MAX_SAFE_INTEGER` (unbounded)
+ * - `/agent <anything-else>` → print usage and return
  *
- * Returns:
- *   void — called for side effects only (config update and user feedback).
- * </Summary>
+ * **Parsing:** Non-`::max` values are parsed as integers, floored (so `3.9` becomes 3),
+ * and clamped to at least 1. Invalid input prints an error and returns early.
+ *
+ * @param sub - Subcommand after `/agent`. Should be `"cap"` for setting, or empty
+ *   to display. Any other value triggers an error.
+ * @param arg - The value to set when `sub === "cap"`. Ignored if `sub` is empty
+ *   or unrecognized.
+ *
+ * @example
+ * ```ts
+ * handleAgent("", "");          // prints "Agent cap: 3"
+ * handleAgent("cap", "");       // prints "Agent cap: 3"
+ * handleAgent("cap", "8");      // sets to 8, prints "Agent cap set to 8"
+ * handleAgent("cap", "::max");  // unbounded, prints "Agent cap set to unlimited"
+ * handleAgent("invalid", "");   // prints usage error
+ * ```
  */
 export const handleAgent = (sub: string, arg: string): void => {
-  // ===== STEP 1: Validate Subcommand =====
-  // Step 1a: Check if subcommand is either "cap" or empty string
-  // Step 1b: If subcommand is something else, show usage error
+  // Reject unknown subcommands — only "cap" is valid, or empty (display mode).
   if (sub !== "cap" && sub.length > 0) {
     printError("Usage: /agent cap [n]  ( default is 3; ::max for no cap)");
     return;
   }
 
-  // ===== STEP 2: Extract Cap Argument =====
-  // Step 2a: If subcommand is "cap", use the arg parameter
-  // Step 2b: Otherwise, treat as display mode (empty argument)
+  // Extract the cap value: present only when sub === "cap", otherwise display mode.
   const capArgument = sub === "cap" ? arg.trim() : "";
 
-  // ===== STEP 3: Handle Display Mode (No Argument) =====
-  // Step 3a: Check if no argument was provided
+  // Display mode: no value provided, show the current cap.
   if (capArgument.length === 0) {
-    // Step 3b: Load current configuration from disk
     const currentConfig = loadConfig();
-
-    // Step 3c: Display current agent cap to user
-    printSuccess(`Agent cap: ${currentConfig.agentCap} (use ::max for no cap)`);
+    printSuccess(`Agent cap: ${currentConfig.subagentCap} (use ::max for no cap)`);
     return;
   }
 
-  // ===== STEP 4: Handle Unlimited Cap (::max) =====
-  // Step 4a: Check if argument is the special "::max" token
+  // Handle the unbounded-cap sentinel before numeric parsing.
   if (capArgument === "::max") {
-    // Step 4b: Set cap to maximum safe integer (effectively unlimited)
-    updateConfig({ agentCap: Number.MAX_SAFE_INTEGER });
-
-    // Step 4c: Display success message to user
+    updateConfig({ subagentCap: Number.MAX_SAFE_INTEGER });
     printSuccess("Agent cap set to unlimited (::max)");
     return;
   }
 
-  // ===== STEP 5: Parse Numeric Cap Value =====
-  // Step 5a: Parse the argument as a base-10 integer
+  // Try to parse as an integer. parseInt doesn't distinguish "not a number"
+  // from parse failures, so we check isFinite to catch NaN.
   const parsedCapValue = parseInt(capArgument, 10);
-
-  // Step 5b: Validate that the parsed value is a finite number
   if (!Number.isFinite(parsedCapValue)) {
     printError("Agent cap must be a number.");
     return;
   }
 
-  // ===== STEP 6: Validate and Apply Cap Value =====
-  // Step 6a: Ensure cap is at least 1 (minimum of 1 agent required)
-  // Step 6b: Floor decimal values to get integer
+  // Enforce a minimum of 1 agent and floor fractional inputs. This ensures
+  // the cap never drops to 0 (deadlock) and treats "3.9" as 3 rather than
+  // truncating inconsistently later in the agent dispatcher.
   const finalCapValue = Math.max(1, Math.floor(parsedCapValue));
-
-  // Step 6c: Update configuration with the validated cap value
-  updateConfig({ agentCap: finalCapValue });
-
-  // Step 6d: Display success message showing the new cap
+  updateConfig({ subagentCap: finalCapValue });
   printSuccess(`Agent cap set to ${finalCapValue}`);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Handles the "/set" command to update configuration settings including
- *   password, server address, port number, and model selection for advisor/agent.
+ * Runtime dependencies that {@link handleSet} requires to complete its work.
  *
- * How it does it (step by step):
- *   1. Validates that a subcommand was provided (password, server, port, advisor, agent).
- *   2. If no subcommand, prints usage error and returns.
- *   3. For password: uses inline argument or prompts with masked input, updates config, reloads connection.
- *   4. For server: uses inline argument or prompts for host, updates config, reloads connection.
- *   5. For port: uses inline argument or prompts for port number, validates, updates config, reloads connection.
- *   6. For advisor/agent: delegates to handleSetModel for interactive model selection.
- *   7. For unknown subcommand: prints error message.
+ * @remarks
+ * These are passed as a single object to keep the function signature stable
+ * as features grow. The connection and prompt port are tightly coupled to
+ * the REPL environment, while `handleSetModel` is plugged in by the command
+ * router to avoid circular dependencies.
+ */
+export type HandleSetDeps = {
+  /**
+   * Live RSocket connection to the LoopyCode agent server.
+   *
+   * @remarks
+   * When password, server, or port settings change, this connection is
+   * reloaded to establish a new client session with the updated endpoint
+   * or credentials. Reloading happens synchronously after the config is
+   * persisted, so the next command uses the new transport settings.
+   *
+   * @see {@link Connection.reload}
+   */
+  connection: Connection;
+
+  /**
+   * Interactive prompt port for asking users for input.
+   *
+   * @remarks
+   * Used when `/set` is invoked without inline arguments. The port
+   * supports masking for password input (though it warns that masking
+   * may be limited in REPL mode). All prompts show a leading `  ` indent
+   * for visual consistency in the CLI.
+   */
+  prompts: PromptPort;
+
+  /**
+   * Callback to handle model selection for the agent or subagent role.
+   *
+   * @remarks
+   * Called when the user runs `/set agent` or `/set subagent`. Responsibility
+   * for the interactive flow (menu, validation, persistence) is delegated here
+   * to avoid circular imports and keep model-picking logic centralized in
+   * the model handlers module.
+   *
+   * @param role - Either `"agent"` or `"subagent"`, determining which config
+   *   field gets updated.
+   *
+   * @see {@link handleSetModel} in `modelSelectionHandlers.ts`
+   */
+  handleSetModel: (role: "agent" | "subagent") => Promise<void>;
+};
+
+/**
+ * Handles the `/set` command — persists configuration changes and reloads
+ * the connection if transport settings were modified.
  *
- * Parameters:
- *   @param sub - The subcommand after "/set" (password, server, port, advisor, agent).
- *   @param arg - The argument value for the subcommand (often empty for prompts).
- *   @param connection - The RSocket connection instance for reloading.
- *   @param prompts - The prompt interface for user input.
- *   @param handleSetModel - Callback to handle model selection.
+ * @remarks
+ * The `/set` command supports five settings: connection credentials (`password`,
+ * `server`, `port`) and model role selection (`agent`, `subagent`). Transport
+ * settings trigger an immediate {@link Connection.reload} to reconnect with the
+ * new endpoint or credentials, ensuring the next command sees the updated config.
+ * Model settings are delegated to {@link handleSetModel} for interactive selection.
  *
- * Returns:
- *   @returns Resolves when configuration update is complete.
- * </Summary>
+ * **Input modes:** Inline arguments are preferred (e.g., `/set port 7000`).
+ * If omitted, the user is prompted with defaults. Password input uses a masked
+ * prompt when available, though masking is limited in a REPL environment
+ * (a warning is displayed).
+ *
+ * **Validation:** Port values are validated via {@link parsePort} to ensure
+ * they are integers in the valid range (1–65535). Invalid input prints an
+ * error and returns without persisting.
+ *
+ * @param sub - Setting name. Must be one of:
+ *   - `"password"` — agent server auth token
+ *   - `"server"` — RSocket endpoint hostname (default: localhost)
+ *   - `"port"` — RSocket endpoint port (default: 7000)
+ *   - `"agent"` — primary agent model selector
+ *   - `"subagent"` — secondary subagent model selector
+ *   Pass empty string to show usage.
+ * @param arg - Optional inline value for the setting. Ignored if the setting
+ *   does not accept arguments (e.g., `agent`, `subagent`).
+ * @param deps - Runtime dependencies: connection, prompt helpers, and the
+ *   model-selection callback.
+ *
+ * @example
+ * ```ts
+ * // Inline argument
+ * await handleSet("port", "7000", deps);
+ *
+ * // Prompted (empty arg)
+ * await handleSet("server", "", deps);
+ *
+ * // Model selection (no arg used)
+ * await handleSet("agent", "", deps);
+ * ```
  */
 export const handleSet = async (
   sub: string,
   arg: string,
-  connection: Connection,
-  prompts: PromptPort,
-  handleSetModel: (role: "advisor" | "agent") => Promise<void>,
+  deps: HandleSetDeps,
 ): Promise<void> => {
-  // ===== STEP 1: Validate Subcommand =====
-  // Step 1a: Check if a subcommand was provided
+  const { connection, prompts, handleSetModel } = deps;
+
+  // Validate that a setting name was provided.
   if (!sub) {
-    // Step 1b: If no subcommand, print usage error and return
     printError(
-      "Usage: /set password [value] | /set server [host] | /set port [n] | /set advisor | /set agent",
+      "Usage: /set password [value] | /set server [host] | /set port [n] | /set agent | /set subagent",
     );
     return;
   }
 
-  // ===== STEP 2: Route to Subcommand Handler =====
-  // Step 2a: Switch on subcommand to determine which setting to update
   switch (sub) {
-    // ===== CASE: Password =====
     case "password": {
-      // ===== STEP 2a-i: Get Password Value =====
-      // Step 2a-i-1: Use inline argument if provided, otherwise start with empty string
+      // Try to use the inline value if present, otherwise prompt.
       let passwordValue = arg.trim().length > 0 ? arg.trim() : "";
 
-      // Step 2a-i-2: If no inline argument, prompt user for password
       if (!passwordValue) {
-        // Step 2a-i-3: Display warning about password visibility in REPL
+        // Warn the user that password echo may be visible in REPL mode,
+        // since the prompts library's masking works better with real terminals
+        // than with readline-based REPL input.
         logger.info(
           `${getTheme().textSecondary}  Password echo is visible in the REPL (masked input needs no readline).${getTheme().reset}`,
         );
-
-        // Step 2a-i-4: Prompt for password with masked input
         passwordValue = (
           await prompts.question("  New password: ", { masked: true })
         ).trimEnd();
       }
 
-      // ===== STEP 2a-ii: Update Configuration =====
-      // Step 2a-ii-1: Update config with new password value
+      // Persist the password and reload the connection to authenticate
+      // with the new credentials on the next request.
       const updatedConfig = updateConfig({ password: passwordValue });
-
-      // Step 2a-ii-2: Reload connection with new configuration
       await connection.reload(updatedConfig);
-
-      // Step 2a-ii-3: Display success message
       printSuccess("Password updated.");
       break;
     }
 
-    // ===== CASE: Server =====
     case "server": {
-      // ===== STEP 2b-i: Get Server Host Value =====
-      // Step 2b-i-1: Use inline argument if provided, otherwise start with empty string
+      // Extract the inline value or prompt if empty.
       let serverHost = arg.trim();
 
-      // Step 2b-i-2: If no inline argument, prompt user for server address
       if (!serverHost) {
-        // Step 2b-i-3: Prompt for server address with default hint
         const userInput = await prompts.question(
           "  Enter server address (default localhost): ",
         );
-
-        // Step 2b-i-4: Use trimmed input or default to localhost
+        // Default to localhost if the user enters nothing.
         serverHost = userInput.trim() || "localhost";
       }
 
-      // ===== STEP 2b-ii: Update Configuration =====
-      // Step 2b-ii-1: Update config with new server host
+      // Persist and reconnect with the new server address.
       const updatedConfig = updateConfig({ server: serverHost });
-
-      // Step 2b-ii-2: Reload connection with new configuration
       await connection.reload(updatedConfig);
-
-      // Step 2b-ii-3: Display success message with new server
       printSuccess(`Server set to ${serverHost}`);
       break;
     }
 
-    // ===== CASE: Port =====
     case "port": {
-      // ===== STEP 2c-i: Get Port Number Value =====
-      // Step 2c-i-1: Initialize port number as null (not yet determined)
       let portNumber: number | null = null;
-
-      // Step 2c-i-2: Get inline port argument
       const inlinePortArgument = arg.trim();
 
-      // Step 2c-i-3: If inline argument provided, parse it
       if (inlinePortArgument.length > 0) {
-        // Step 2c-i-4: Parse and validate the port number
+        // Validate the inline port string using parsePort, which checks bounds.
         portNumber = parsePort(inlinePortArgument);
       } else {
-        // Step 2c-i-5: Otherwise, prompt user for port number
+        // Prompt the user, defaulting to 7000 if they enter nothing.
         const userInput = await prompts.question(
           "  Enter port (default 7000): ",
         );
         const trimmedInput = userInput.trim();
-
-        // Step 2c-i-6: Use default 7000 if empty, otherwise parse input
+        // 7000 is the conventional LoopyCode agent server port; use it as default.
         portNumber = trimmedInput.length === 0 ? 7000 : parsePort(trimmedInput);
       }
 
-      // ===== STEP 2c-ii: Validate Port Number =====
-      // Step 2c-ii-1: Check if port parsing failed (returned null)
+      // Reject invalid ports (out of range, non-integer, etc.).
       if (portNumber === null) {
         printError("Port must be an integer between 1 and 65535.");
         return;
       }
 
-      // ===== STEP 2c-iii: Update Configuration =====
-      // Step 2c-iii-1: Update config with new port number
+      // Persist and reconnect with the new port.
       const updatedConfig = updateConfig({ port: portNumber });
-
-      // Step 2c-iii-2: Reload connection with new configuration
       await connection.reload(updatedConfig);
-
-      // Step 2c-iii-3: Display success message with new port
       printSuccess(`Port set to ${portNumber}`);
       break;
     }
 
-    // ===== CASE: Advisor or Agent Model =====
-    case "advisor":
-    case "agent": {
-      // ===== STEP 2d-i: Route to Model Picker =====
-      // Step 2d-i-1: Delegate to handleSetModel for interactive model selection
+    case "agent":
+    case "subagent": {
+      // Delegate the interactive model-selection flow to the model handlers,
+      // which own the logic for prompting and validating model choices.
       await handleSetModel(sub);
       break;
     }
 
-    // ===== CASE: Unknown Subcommand =====
     default: {
-      // ===== STEP 2e-i: Display Error =====
-      // Step 2e-i-1: Print error for unrecognized subcommand
+      // Reject unknown settings and remind the user of valid options.
       printError(
-        "Unknown /set subcommand. Use: password, server, port, advisor, or agent.",
+        "Unknown /set subcommand. Use: password, server, port, agent, or subagent.",
       );
       break;
     }
@@ -272,34 +302,31 @@ export const handleSet = async (
 };
 
 /**
- * <Summary>
- * What it does:
- *   Handles the "/config" command by loading the current configuration
- *   from disk and displaying it in a formatted table to the user.
+ * Handles the `/config` command — displays the current configuration state
+ * in a formatted table.
  *
- * How it does it (step by step):
- *   1. Loads the configuration object from config.json using loadConfig.
- *   2. Dynamically imports the printConfig function from renderer module.
- *   3. Calls printConfig with the loaded configuration object.
- *   4. The printConfig function formats and displays the config as a table.
+ * @remarks
+ * This is a read-only operation that loads the persistent configuration
+ * from disk and renders it in a human-readable format. Use this to inspect
+ * the current settings (model choices, port, server, password mask, etc.)
+ * without making changes. To modify any setting, use `/set`.
  *
- * Parameters:
- *   None.
+ * @example
+ * ```ts
+ * await handleConfig();
+ * prints a table like:
+ *  ┌─ LoopyCode Config ──────────────────────┐
+ *  │ agent: gemma4                           │
+ *  │ port: 7000                              │
+ *  │ ...                                     │
+ *  └─────────────────────────────────────────┘
+ * ```
  *
- * Returns:
- *   void — called for side effects only (displaying config to user).
- * </Summary>
+ * @see {@link handleSet} to update any of these values
  */
 export const handleConfig = async (): Promise<void> => {
-  // ===== STEP 1: Load Configuration =====
-  // Step 1a: Read current configuration from disk (config.json)
+  // Load the persistent config from disk (no live connection changes needed here).
   const currentConfig = loadConfig();
-
-  // ===== STEP 2: Display Configuration =====
-  // Step 2a: Dynamically import printConfig function from renderer module
-  // (dynamic import to avoid circular dependency issues)
-  const { printConfig } = await import("../renderer.js");
-
-  // Step 2b: Format and display configuration as a table to user
+  // Render the config as a formatted table.
   printConfig(currentConfig);
 };

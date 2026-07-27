@@ -1,82 +1,59 @@
+/**
+ * Generic themed line printers for status, errors, and successes.
+ *
+ * @remarks
+ * Builds ANSI with {@link getTheme}, then appends via the history
+ * {@link appendText} / {@link appendBlock} sinks.
+ */
+
 import { getTheme } from "../theme/themeManager.js";
 import { appendBlock, appendText } from "./sink.js";
 
 /**
- * <Summary>
- * What it does:
- *   Displays a plain text line as a system message.
+ * Prints a plain system log line (no icon).
  *
- * How it does it (step by step):
- *   1. Append the text to the output sink with "system" category.
+ * @param text - Message text (may already include indentation).
  *
- * Parameters:
- *   @param text - The text message to display.
- *
- * Returns:
- *   @returns Returns after displaying the text line.
- * </Summary>
+ * @example
+ * ```ts
+ * printLine("  Exploring codebase...");
+ * ```
  */
 export const printLine = (text: string): void => {
-  // ===== STEP 1: Display text line =====
-  // Step 1a: Append the text to the output sink with "system" category
-  // Step 1b: The system category determines how the text is formatted and handled
   appendText(text, "system");
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays an error message with error styling and icon.
+ * Prints an error block with a themed `error:` prefix.
  *
- * How it does it (step by step):
- *   1. Get the current theme for error styling.
- *   2. Build a styled error line with "error:" label and the error message.
- *   3. Append the styled line to the output block.
+ * @remarks
+ * Always ends with the theme reset sequence so subsequent history lines do not
+ * inherit the error color.
  *
- * Parameters:
- *   @param message - The error message to display.
+ * @param message - Human-readable failure text (no need to include `"error:"`).
  *
- * Returns:
- *   @returns Returns after displaying the error message.
- * </Summary>
+ * @example
+ * ```ts
+ * printError("Port must be an integer between 1 and 65535.");
+ * ```
  */
 export const printError = (message: string): void => {
-  // ===== STEP 1: Get theme for error styling =====
-  // Step 1a: Get the current theme for error color and styling
   const theme = getTheme();
-
-  // ===== STEP 2: Build and display error line =====
-  // Step 2a: Build a styled error line with "error:" label in error color
-  // Step 2b: Apply theme reset at the end to prevent color bleeding
-  // Step 2c: Append the styled line to the output block for display
+  // Reset after the label so the message body uses default fg, not error red.
   appendBlock([`${theme.error}  error:${theme.reset} ${message}`]);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Displays a success message with success styling and checkmark icon.
+ * Prints a success block with a themed checkmark.
  *
- * How it does it (step by step):
- *   1. Get the current theme for success styling.
- *   2. Build a styled success line with checkmark icon and the success message.
- *   3. Append the styled line to the output block.
+ * @param message - Confirmation text after the `✓`.
  *
- * Parameters:
- *   @param message - The success message to display.
- *
- * Returns:
- *   @returns Returns after displaying the success message.
- * </Summary>
+ * @example
+ * ```ts
+ * printSuccess("Password updated.");
+ * ```
  */
 export const printSuccess = (message: string): void => {
-  // ===== STEP 1: Get theme for success styling =====
-  // Step 1a: Get the current theme for success color and styling
   const theme = getTheme();
-
-  // ===== STEP 2: Build and display success line =====
-  // Step 2a: Build a styled success line with checkmark icon (✓) in success color
-  // Step 2b: Apply theme reset at the end to prevent color bleeding
-  // Step 2c: Append the styled line to the output block for display
   appendBlock([`${theme.success}  ✓${theme.reset} ${message}`]);
 };

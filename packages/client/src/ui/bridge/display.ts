@@ -1,159 +1,95 @@
 /**
- * <Summary>
- * What it does:
- *   Provides functions for managing the display state and terminal features
- *   in the Ink-based CLI UI through the bridge system.
+ * Display, busy state, prompt label, and alternate buffer management for the Ink CLI UI.
  *
- * How it fits in the system:
- *   These functions handle UI display aspects like busy state indicators, current
- *   working directory labels, banner refresh, and terminal alternate screen mode.
- *   They update the global application state through the bridge hooks system.
- * </Summary>
+ * @remarks
+ * This module controls terminal-level rendering behavior like toggling full-screen
+ * alternate screen buffers, setting busy indicators, and modifying the active command line label.
  */
 
-import type { Config } from "../../config.js";
-import { getBridgeHooks } from "./state.js";
+import type { Config } from "../../config/index.js";
+import {
+  getBridgeHooks,
+  getTaskActiveValue,
+  setTaskActiveValue,
+} from "./state.js";
 
 /**
- * <Summary>
- * What it does:
- *   Updates the global busy state to indicate if the application is currently
- *   processing a long-running operation.
+ * Sets whether the application is currently executing a backend task.
  *
- * How it does it (step by step):
- *   1. Gets the bridge hooks for state updates.
- *   2. Calls the onBusy hook with the new busy state.
- *   3. The hook updates the global state and triggers UI re-render.
- *
- * Parameters:
- *   @param busyState - True if application is busy, false if idle.
- *
- * Returns:
- *   void — called for side effects only.
- * </Summary>
+ * @param busyState - True if the application is busy, false otherwise.
  */
 export const setBusy = (busyState: boolean): void => {
-  // ===== STEP 1: Get Bridge Hooks =====
-  // Step 1a: Retrieve the bridge hooks for global state updates
   const bridgeHooks = getBridgeHooks();
-
-  // ===== STEP 2: Update Busy State =====
-  // Step 2a: Call the onBusy hook with the new busy state
-  // Step 2b: This updates the global state and triggers UI re-render
-  // Step 2c: UI components can show/hide busy indicators based on this
   bridgeHooks.onBusy?.(busyState);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Updates the current working directory label displayed in the CLI prompt.
+ * Toggles whether a task stream is currently active.
  *
- * How it does it (step by step):
- *   1. Gets the bridge hooks for state updates.
- *   2. Calls the onCwd hook with the new working directory path.
- *   3. The hook updates the prompt state and triggers UI re-render.
+ * @param isTaskActive - True if a task stream is running, false otherwise.
+ */
+export const setTaskActive = (isTaskActive: boolean): void => {
+  const bridgeHooks = getBridgeHooks();
+  setTaskActiveValue(isTaskActive);
+  bridgeHooks.onTaskActive?.(isTaskActive);
+};
+
+/**
+ * Retrieves the current state of whether a task is active.
  *
- * Parameters:
- *   @param currentWorkingDirectory - The current working directory path to display.
+ * @returns True if a task is active, false otherwise.
+ */
+export const getTaskActive = (): boolean => getTaskActiveValue();
+
+/**
+ * Checks if a task is currently active.
  *
- * Returns:
- *   void — called for side effects only.
- * </Summary>
+ * @returns True if a task is active, false otherwise.
+ */
+export const isTaskActive = (): boolean => getTaskActiveValue();
+
+/**
+ * Sets the working directory path label displayed in the terminal prompt.
+ *
+ * @param currentWorkingDirectory - The current working directory path to output.
  */
 export const setCwdLabel = (currentWorkingDirectory: string): void => {
-  // ===== STEP 1: Get Bridge Hooks =====
-  // Step 1a: Retrieve the bridge hooks for global state updates
   const bridgeHooks = getBridgeHooks();
-
-  // ===== STEP 2: Update Working Directory Label =====
-  // Step 2a: Call the onCwd hook with the new working directory
-  // Step 2b: This updates the prompt label to show the current directory
-  // Step 2c: The prompt component rebuilds the label with the new path
   bridgeHooks.onCwd?.(currentWorkingDirectory);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Triggers a refresh of the Ink banner with the current configuration.
+ * Forces a refresh of the main Ink UI banner elements using the provided config.
  *
- * How it does it (step by step):
- *   1. Gets the bridge hooks for state updates.
- *   2. Calls the onBannerRefresh hook with the current configuration.
- *   3. The hook rebuilds the banner lines and updates the global state.
- *
- * Parameters:
- *   @param configuration - The current application configuration.
- *
- * Returns:
- *   void — called for side effects only.
- * </Summary>
+ * @param configuration - The active CLI configuration.
  */
 export const refreshInkBanner = (configuration: Config): void => {
-  // ===== STEP 1: Get Bridge Hooks =====
-  // Step 1a: Retrieve the bridge hooks for global state updates
   const bridgeHooks = getBridgeHooks();
-
-  // ===== STEP 2: Trigger Banner Refresh =====
-  // Step 2a: Call the onBannerRefresh hook with the configuration
-  // Step 2b: This triggers the banner to rebuild with new configuration
-  // Step 2c: The banner component recreates the display with updated config
   bridgeHooks.onBannerRefresh?.(configuration);
 };
 
 /**
- * <Summary>
- * What it does:
- *   Enters terminal alternate screen mode for full-screen UI display.
+ * Enters the terminal alternate screen buffer, hiding scrollback.
  *
- * How it does it (step by step):
- *   1. Checks if the output is a TTY (interactive terminal).
- *   2. If not a TTY, returns early (alternate screen not supported).
- * 3. Writes ANSI escape sequences to enable alternate screen mode.
- *   4. This hides the terminal scrollback and provides a clean display area.
- *
- * Returns:
- *   void — called for side effects only.
- * </Summary>
+ * @remarks
+ * Writes ANSI escape sequences to stdout. Only executes if stdout is a TTY.
+ * Useful for building full-screen immersive UI layouts.
  */
 export const enterAlternateScreen = (): void => {
-  // ===== STEP 1: Check for TTY Support =====
-  // Step 1a: Check if stdout is a TTY (interactive terminal)
-  // Step 1b: Alternate screen mode is only supported in interactive terminals
   if (!process.stdout.isTTY) return;
-
-  // ===== STEP 2: Enable Alternate Screen Mode =====
-  // Step 2a: Write ANSI escape sequence to enable alternate screen buffer
-  // Step 2b: \x1b[?1049h enables the alternate screen buffer (DECCKM)
-  // Step 2c: \x1b[?25l hides the cursor in the alternate screen
+  // \x1b[?1049h: switch to alternate screen; \x1b[?25l: hide terminal cursor
   process.stdout.write("\x1b[?1049h\x1b[?25l");
 };
 
 /**
- * <Summary>
- * What it does:
- *   Exits terminal alternate screen mode and returns to normal terminal display.
+ * Exits the terminal alternate screen buffer, restoring normal shell scrollback.
  *
- * How it does it (step by step):
- *   1. Checks if the output is a TTY (interactive terminal).
- *   2. If not a TTY, returns early (alternate screen not supported).
- *   3. Writes ANSI escape sequences to disable alternate screen mode.
- *   4. This restores the normal terminal display with scrollback.
- *
- * Returns:
- *   void — called for side effects only.
- * </Summary>
+ * @remarks
+ * Writes ANSI escape sequences to stdout. Only executes if stdout is a TTY.
  */
 export const exitAlternateScreen = (): void => {
-  // ===== STEP 1: Check for TTY Support =====
-  // Step 1a: Check if stdout is a TTY (interactive terminal)
-  // Step 1b: Alternate screen mode is only supported in interactive terminals
   if (!process.stdout.isTTY) return;
-
-  // ===== STEP 2: Disable Alternate Screen Mode =====
-  // Step 2a: Write ANSI escape sequence to disable alternate screen buffer
-  // Step 2b: \x1b[?25h shows the cursor in the alternate screen
-  // Step 2c: \x1b[?1049l disables the alternate screen buffer (DECCKM)
+  // \x1b[?25h: show terminal cursor; \x1b[?1049l: restore normal screen buffer
   process.stdout.write("\x1b[?25h\x1b[?1049l");
 };
+

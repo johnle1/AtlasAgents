@@ -1,47 +1,54 @@
 /**
- * <Summary>
- * What it does:
- *   Constants for preference store configuration and text processing.
+ * Configuration constants for preference rule storage and management.
  *
- * How it fits in the system:
- *   Provides configuration values for similarity thresholds, consolidation rules,
- *   and stop words for text processing used throughout the preference store.
- * </Summary>
+ * @remarks
+ * Defines paths, thresholds, and limits for the preference store.
+ * Used by {@link PreferenceStore} for deduplication, consolidation,
+ * and rule lifecycle management.
  */
 
 /**
- * <Summary>
- * What it does:
- *   Default file path for storing user preference rules relative to the project root.
+ * Default file path for persisting preference rules.
  *
- * How it fits in the system:
- *   Used by the PreferenceStore constructor to determine where to persist rules.
- *   The file is stored under user-data/ to keep user-generated data separate from source code.
- * </Summary>
+ * @remarks
+ * Relative to the data root directory (typically the project root).
+ * Stored under `user-data/` to keep user-generated data separate from source code.
+ *
+ * @defaultValue "user-data/preferences.json"
  */
 export const DEFAULT_FILE = "user-data/preferences.json";
 
 /**
- * <Summary>
- * What it does:
- *   Jaccard similarity threshold for detecting duplicate preference rules.
+ * Jaccard similarity threshold for detecting duplicate rules.
  *
- * How it fits in the system:
- *   When adding a new rule, the store checks if an existing rule has similarity >= 0.8.
- *   If so, the new rule is merged into the existing one instead of creating a duplicate.
- * </Summary>
+ * @remarks
+ * When adding a new rule, {@link PreferenceStore.add} compares it against
+ * existing rules using Jaccard similarity. If similarity ≥ this threshold,
+ * the new rule is merged (not added as duplicate).
+ *
+ * **Value: 0.8**
+ * - Catches rephrased versions of the same rule
+ * - Avoids false negatives from minor wording changes
+ * - Merges increment `timesApplied` counter
+ *
+ * @defaultValue 0.8
  */
 export const SIMILARITY_THRESHOLD = 0.8;
 
 /**
- * <Summary>
- * What it does:
- *   Minimum number of rules required before consolidation is triggered.
+ * Minimum rule count before triggering agent-driven consolidation.
  *
- * How it fits in the system:
- *   Consolidation uses an AI advisor to merge duplicate rules, which is expensive.
- *   This threshold ensures consolidation only runs when there are enough rules to benefit.
- * </Summary>
+ * @remarks
+ * {@link scheduleConsolidation} and manual `/consolidate` commands only
+ * run the agent consolidation when rule count ≥ this threshold.
+ * Consolidation uses the agent model (expensive), so batching is important.
+ *
+ * **Value: 20**
+ * - Avoids frequent expensive agent calls
+ * - Allows deduplication to reduce count naturally
+ * - Triggered weekly by background scheduler
+ *
+ * @defaultValue 20
  */
 export const CONSOLIDATE_MIN_RULES = 20;
 

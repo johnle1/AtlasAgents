@@ -1,52 +1,48 @@
 /**
- * <Summary>
- * What it does:
- *   Constants for context builder configuration and keyword processing.
+ * Configuration constants for the context building system.
  *
- * How it fits in the system:
- *   Provides configuration values for context window sizing, stop words for
- *   text processing, and task type keywords for keyword extraction.
- *   These constants are used throughout the context building system to
- *   ensure consistent behavior and optimize keyword extraction quality.
- * </Summary>
+ * @remarks
+ * Defines fallback values, stop words for keyword filtering, and task type
+ * keywords used during context construction. These ensure consistent behavior
+ * across context builder operations and preference rule matching.
  */
 
 /**
- * <Summary>
- * What it does:
- *   Fallback context window size (tokens) when Ollama does not return context_length.
+ * Fallback context window size (tokens) when model metadata is unavailable.
  *
- * How it fits in the system:
- *   Used by resolveContextLength() as the last resort if model metadata is missing or incomplete.
- *   In normal operation, getContextWindow() queries Ollama.showModel() and dynamically caches the actual value.
- *   This value represents a safe default for modern LLMs (128k tokens) that should
- *   work for most models when their actual context window cannot be determined.
+ * @remarks
+ * Used by `contextHelpers.resolveContextLength()` as a last-resort fallback
+ * when Ollama does not return `context_length` metadata for a model.
  *
- * Why this value:
- *   - 128k tokens is a common context window for modern LLMs (e.g., Claude, GPT-4)
- *   - Provides enough space for complex tasks without being overly conservative
- *   - Will be overridden by actual model context windows when available
- * </Summary>
+ * In normal operation, `ContextBuilder.getContextWindow()` queries Ollama's
+ * model API and caches the actual value, overriding this constant.
+ *
+ * **Why 128,000 tokens?**
+ * - Covers modern large context window models (Claude 3, GPT-4, Llama 3)
+ * - Provides ample space for complex tasks (even after 20% memory budget reservation)
+ * - Conservative default that works across model sizes
+ * - Typically overridden by actual model capability within seconds of first use
+ *
+ * @defaultValue 128000
  */
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
 
 /**
- * <Summary>
- * What it does:
- *   Set of common English stop words to ignore during keyword extraction.
+ * Stop words to filter during keyword extraction.
  *
- * How it fits in the system:
- *   Used by extractKeywords to filter out noise words that don't contribute
- *   to meaningful keyword matching (e.g., "the", "and", "for").
- *   These words appear frequently in English text but carry little semantic
- *   value for matching user preferences or detecting task types.
+ * @remarks
+ * Common English words that appear frequently but carry little semantic value
+ * for preference rule matching. Filtering these improves matching accuracy by
+ * focusing on meaningful technical and domain-specific terms.
  *
- * Why filter stop words:
- *   - Reduces noise in keyword matching
- *   - Improves accuracy of preference rule matching
- *   - Focuses on meaningful technical and domain-specific terms
- *   - Prevents common words from triggering irrelevant rules
- * </Summary>
+ * Used by `contextHelpers.extractKeywords()` to produce a cleaner set of
+ * task-relevant keywords from user task descriptions.
+ *
+ * **Benefits:**
+ * - Reduces noise in keyword matching
+ * - Improves accuracy of preference rule selection
+ * - Focuses on meaningful technical terminology
+ * - Prevents common words from triggering irrelevant rules
  */
 export const HIGHLIGHT_WORDS = new Set([
   "the",
@@ -127,23 +123,22 @@ export const HIGHLIGHT_WORDS = new Set([
 ]);
 
 /**
- * <Summary>
- * What it does:
- *   Set of task type words for keyword extraction.
+ * Task type keywords recognized during context building.
  *
- * How it fits in the system:
- *   Used by extractKeywords to identify and add task type keywords
- *   (e.g., "refactor", "fix", "add", "test") to the keyword set.
- *   These words represent common software development task types and
- *   are used to match relevant preference rules and trigger appropriate
- *   agent behaviors.
+ * @remarks
+ * Words identifying common software development activities that trigger
+ * task-specific preference rules and fix rules.
  *
- * Why these task types:
- *   - Covers the most common software development activities
- *   - Enables the system to understand user intent
- *   - Helps match tasks with relevant preference rules
- *   - Improves context relevance for agent planning
- * </Summary>
+ * Used by `contextHelpers.extractKeywords()` to categorize user tasks and
+ * match them to relevant preference rules. For example, tasks containing
+ * "test" will match rules tagged with the "test" topic.
+ *
+ * **Coverage:**
+ * - Development activities: add, create, implement, build, remove, delete, update
+ * - Quality/maintenance: test, debug, refactor, optimize, document, review
+ * - System operations: migrate, explain
+ *
+ * These cover most common scenarios; extend as needed for domain-specific tasks.
  */
 export const TASK_TYPE_WORDS = new Set([
   "refactor",

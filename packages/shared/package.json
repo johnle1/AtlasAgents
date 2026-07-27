@@ -12,6 +12,14 @@
     "build": "tsc -p tsconfig.json"
   },
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnle1/LoopyCode.git",
+    "directory": "packages/shared"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "diff": "^9.0.0",
     "picocolors": "^1.1.1"

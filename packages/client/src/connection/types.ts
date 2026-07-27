@@ -1,164 +1,229 @@
-import {
-  decodeFrame,
-  type InstalledModel,
-  type PullProgress,
-  type TaskFrame,
-} from "../frames.js";
+/**
+ * Shared TypeScript contracts for the client ↔ server RSocket transport.
+ *
+ * @remarks
+ * These types describe connection status callbacks, command request/response
+ * envelopes, memory/skill payloads, and streaming task bodies. Import them
+ * from `connection/index.js` (or this file) when wiring UI, CLI commands, or
+ * tests against the {@link Connection} facade.
+ *
+ * Wire frames for individual stream items (`TaskFrame`, `PullProgress`) live in
+ * `../frames.js` and are re-exported here for convenience.
+ */
 
-export type { PullProgress, TaskFrame } from "../frames.js";
-export type { InstalledModel } from "../frames.js";
+export type { PullProgress, TaskFrame } from "../types/frames.js";
+export type { InstalledModel } from "../types/frames.js";
 
 /**
- * <Summary>
- * What it does:
- *   Represents one topic in the user's server-side preference store.
+ * One topic in the server-side user preference (“memory”) store.
  *
- * Used by:
- *   - Connection.getMemory — returned in the array of memory entries.
- *   - renderer.printMemory — displays each entry to the user.
+ * @remarks
+ * Memory is learned preference text, not chat history. Each entry groups rules
+ * under a topic key the agent/subagent can cite later (for example coding style
+ * or project layout preferences).
  *
- * Produced by:
- *   - Server /memory endpoint — fetched via requestResponse.
- * </Summary>
+ * @example
+ * ```ts
+ * const entry: MemoryEntry = {
+ *   topic: "coding-style",
+ *   rules: ["Prefer named exports", "Avoid default exports in packages"],
+ * };
+ * ```
  */
 export interface MemoryEntry {
-  /** Topic name e.g. "coding-style" or "project-structure". */
+  /**
+   * Stable topic key shown in `/memory` UIs and passed to `memory.forget`.
+   *
+   * @remarks
+   * Examples: `"coding-style"`, `"project-structure"`. Treat as opaque string —
+   * exact match is required when forgetting a topic.
+   */
   topic: string;
 
-  /** Array of preference rules the server learned for this topic. */
+  /** Preference sentences associated with {@link topic}; order is display-only. */
   rules: string[];
 }
 
 /**
- * <Summary>
- * What it does:
- *   Represents one skill file to be synced to the server.
+ * One local skill file to upload via `skills.sync`.
  *
- * Used by:
- *   - Connection.syncSkills — accepts an array of these in the request body.
- *   - skills.readAllSkills — produces an array of these from local .md files.
+ * @remarks
+ * Skills are markdown instruction packs the server exposes to the agent and
+ * subagent during task execution. `name` is the basename (no extension); `content`
+ * is the full markdown body.
  *
- * Produced by:
- *   - skills.readAllSkills — reads ~/.agent-cli/skills/*.md into this shape.
- * </Summary>
+ * @example
+ * ```ts
+ * const skill: SkillPayload = {
+ *   name: "testing",
+ *   content: "# Testing\nPrefer Vitest and table-driven cases.\n",
+ * };
+ * ```
  */
 export interface SkillPayload {
-  /** Skill file basename without extension e.g. "coding". */
+  /**
+   * Skill basename without extension (e.g. `"coding"` for `coding.md`).
+   *
+   * @remarks
+   * Must be unique within a sync batch; the server keys skills by this name.
+   */
   name: string;
 
-  /** Full markdown content of the skill file. */
+  /** Full markdown body of the skill file. */
   content: string;
 }
 
 /**
- * <Summary>
- * What it does:
- *   Describes the four possible states of the RSocket TCP connection.
+ * Lifecycle state of the client’s single RSocket TCP session.
  *
- * Used by:
- *   - Connection — tracks its internal state and emits to listeners.
- *   - renderer.printConnectionStatus — maps each state to a display label.
- *   - index.ts — subscribes to print status changes in the CLI.
+ * @remarks
+ * Typical progression: `Disconnected` → `Connecting` → `Connected`. After an
+ * unexpected close (unless reconnect is suppressed), status becomes
+ * `Reconnecting` until a successful handshake returns to `Connected`, or the
+ * process gives up and stays `Disconnected`.
  *
- * Produced by:
- *   - Connection.emitStatus — sets the current value.
- * </Summary>
+ * - `Disconnected` — no live socket; auto-reconnect may still be scheduled.
+ * - `Connecting` — first handshake in progress (manual `connect()` / startup).
+ * - `Connected` — handshake done; health checks run while in this state.
+ * - `Reconnecting` — waiting out backoff (or actively retrying) after a drop.
+ *
+ * @example
+ * ```ts
+ * const status: ConnectionStatus = "Connected";
+ * ```
  */
 export type ConnectionStatus =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "reconnecting";
+  | "Disconnected"
+  | "Connecting"
+  | "Connected"
+  | "Reconnecting";
 
 /**
- * <Summary>
- * What it does:
- *   Callback signature for connection status change notifications.
+ * Listener invoked whenever {@link ConnectionStatus} changes.
  *
- * Used by:
- *   - Connection.onConnectionStatus — registers listeners of this type.
- *   - ConnectionStatusLine — renders status label updates in the Ink UI.
+ * @remarks
+ * Register via `Connection.onConnectionStatus`. The listener is called once
+ * immediately with the **current** status so UIs can paint without waiting for
+ * the next transition, then again on every distinct status change.
  *
- * Produced by:
- *   - Callers pass a function matching this signature to onConnectionStatus.
- * </Summary>
+ * @param status - New connection status after a transition (or the current one
+ *   on first registration).
+ *
+ * @example
+ * ```ts
+ * const onStatus: StatusListener = (status) => {
+ *   console.log("connection:", status);
+ * };
+ * ```
  */
 export type StatusListener = (status: ConnectionStatus) => void;
 
 /**
- * <Summary>
- * What it does:
- *   Describes the JSON envelope the server sends back for requestResponse commands.
+ * JSON envelope returned by the server for `requestResponse` commands.
  *
- * Used by:
- *   - Connection.sendCommand — parses the server response into this shape.
+ * @remarks
+ * Application success is signaled by `ok: true` with an optional `data`
+ * payload (shape depends on the command route). Failures set `ok: false` and
+ * populate `error`. Transport / parse errors may throw before this envelope
+ * exists — callers of `sendCommand` convert `ok: false` into thrown `Error`s.
  *
- * Produced by:
- *   - Part 6 server — every command response uses this envelope.
- * </Summary>
+ * @example
+ * ```ts
+ * const ok: CommandResponseEnvelope = { ok: true, data: { models: [] } };
+ * const fail: CommandResponseEnvelope = { ok: false, error: "unauthorized" };
+ * ```
  */
 export type CommandResponseEnvelope = {
-  /** Whether the command succeeded. */
+  /** `true` when the command handler succeeded; `false` for application errors. */
   ok: boolean;
 
-  /** Result payload on success, shape depends on command type. */
+  /**
+   * Success payload. Present when `ok` is true; omitted or unused on failure.
+   * Concrete type is command-specific (callers cast via generics on `sendCommand`).
+   */
   data?: unknown;
 
-  /** Human-readable error message on failure. */
+  /** Human-readable failure reason when `ok` is false. */
   error?: string;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Describes the JSON body sent as requestStream data for task execution.
+ * JSON body sent on `requestStream` when executing a user task.
  *
- * Used by:
- *   - Connection.sendTask — builds this object and serialises it to Buffer.
+ * @remarks
+ * Distinguishes streaming work from one-shot commands via `kind: "task"`.
+ * Temperatures follow the usual sampling scale: `0` is deterministic; higher
+ * values increase randomness. Model names must match what the server’s Ollama
+ * instance has installed.
  *
- * Produced by:
- *   - Connection.sendTask — constructed from user input and config settings.
- * </Summary>
+ * @example
+ * ```ts
+ * const payload: TaskStreamPayload = {
+ *   kind: "task",
+ *   text: "Add unit tests for the banner layout helpers",
+ *   subagentModel: "gemma3:27b",
+ *   subsubagentModel: "gemma3:4b",
+ *   agentTemp: 0.2,
+ *   subagentTemp: 0.3,
+ * };
+ * ```
  */
 export type TaskStreamPayload = {
-  /** Discriminator so the server knows this is a task, not a command. */
+  /** Discriminator so the server treats this stream as task execution. */
   kind: "task";
 
-  /** The user's task description. */
+  /** Natural-language task description from the user. */
   text: string;
 
-  /** Ollama model name for the advisor role e.g. "gemma3:27b". */
-  advisorModel: string;
+  /** Ollama model id for the agent role (planning / orchestration). */
+  subagentModel: string;
 
-  /** Ollama model name for the agent role e.g. "gemma3:4b". */
-  agentModel: string;
+  /** Ollama model id for the subagent role (tool use / edits). */
+  subsubagentModel: string;
 
-  /** Sampling temperature for advisor (0.0–1.0). */
-  advisorTemp: number;
+  /** Provider serving the agent role (e.g. "ollama", "vllm-gpu"). */
+  agentProvider: string;
 
-  /** Sampling temperature for agent (0.0–1.0). */
+  /** Provider serving the subagent role (e.g. "ollama", "vllm-gpu"). */
+  subagentProvider: string;
+
+  /** Agent sampling temperature in roughly `0.0`–`1.0`. */
   agentTemp: number;
+
+  /** Subagent sampling temperature in roughly `0.0`–`1.0`. */
+  subagentTemp: number;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Describes the JSON body sent as requestResponse data for non-task commands.
+ * JSON body sent on `requestResponse` for non-streaming commands.
  *
- * Used by:
- *   - Connection.sendCommand — builds this envelope before sending.
+ * @remarks
+ * Every command shares `kind: "command"` plus a route `type` string
+ * (for example `"models.list"`, `"memory.get"`, `"skills.sync"`). `payload` is
+ * command-specific JSON; use `{}` when the route needs no body.
  *
- * Produced by:
- *   - Connection.sendCommand — constructed from the type string and caller payload.
- * </Summary>
+ * @example
+ * ```ts
+ * const req: CommandRequestPayload = {
+ *   kind: "command",
+ *   type: "memory.forget",
+ *   payload: { topic: "coding-style" },
+ * };
+ * ```
  */
 export type CommandRequestPayload = {
-  /** Discriminator so the server knows this is a command, not a task. */
+  /** Discriminator so the server treats this as a command, not a task stream. */
   kind: "command";
 
-  /** Route string e.g. "models.list", "memory.get", "skills.sync". */
+  /**
+   * Server route id, e.g. `"models.list"`, `"memory.get"`, `"plan.respond"`.
+   *
+   * @remarks
+   * Unknown routes should fail with `ok: false` from the server rather than a
+   * silent no-op.
+   */
   type: string;
 
-  /** Arbitrary JSON payload specific to the command type. */
+  /** Command-specific JSON; may be an empty object. */
   payload: unknown;
 };

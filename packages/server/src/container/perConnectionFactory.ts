@@ -1,29 +1,13 @@
 /**
- * <Summary>
- * What it does:
- *   Factory for creating per-connection resources for specific clients.
+ * Factory for creating and initializing per-connection resources.
  *
- * How it does it (step by step):
- *   1. Create stream transports for plan review communication.
- *   2. Initialize plan review broker with plan transport.
- *   3. Initialize workspace manager and bind to requester ID.
- *   4. Initialize terminal executor and bind to requester ID.
- *   5. Return object with all per-connection resources and utilities.
+ * @remarks
+ * This module provides the factory function for instantiating all resources
+ * needed for a single client connection. Resources are isolated per connection
+ * to prevent cross-client interference and enable multiple simultaneous clients
+ * with separate workspaces, terminals, and plan review sessions.
  *
- * How it fits in the system:
- *   Creates isolated state for each client connection, enabling multiple
- *   simultaneous clients with separate workspaces, terminals, and plan review
- * sessions. Each connection gets its own instances to prevent cross-client
- * interference.
- *
- * Parameters:
- *   @param dependencies - Dependencies for creating per-connection resources.
- *   @param requesterId - Unique identifier for the requesting client.
- *   @param emit - Function to emit task frames to the client.
- *
- * Returns:
- *   @returns Object containing connection-specific resources.
- * </Summary>
+ * See {@link PerConnectionFactory} for the container that uses this factory.
  */
 
 // ===== TRANSPORT LAYER IMPORTS =====
@@ -31,121 +15,88 @@ import { createStreamTransports } from "../transport/rsocketPlanReviewTransport.
 
 // ===== TYPE DEFINITION IMPORTS =====
 import type { TaskFrame } from "../transport/frames.js";
-import type { PerConnection } from "./types.js";
+import type { PerConnection, PerConnectionFactoryDeps } from "./types.js";
 
 // ===== WORKSPACE LAYER IMPORTS =====
 import { PlanReviewBroker } from "../workspace/review/planReviewBroker.js";
 import { WorkspaceManager } from "../workspace/manager/workspaceManager.js";
 import { TerminalExecutor } from "../workspace/execution/terminalExecutor.js";
 
-// ===== CLIENT COMMUNICATION IMPORTS =====
-import { ClientBridge } from "../transport/clientBridge.js";
-
 /**
- * <Summary>
- * What it does:
- *   Defines the dependencies required to create per-connection resources.
+ * Creates all per-connection resources for a specific client session.
  *
- * How it fits in the system:
- *   Provides the shared infrastructure that per-connection instances need
- *   to communicate with clients. The clientBridge is shared across all
- *   connections but each connection gets its own bound instance.
+ * @remarks
+ * This factory instantiates isolated state for one client connection, including
+ * workspace management, terminal execution, and plan review coordination.
+ * Each resource is bound to the requester ID to route responses correctly and
+ * prevent cross-client interference.
  *
- * Used by:
- *   - createPerConnection — receives these dependencies to create connection resources.
+ * The steps are:
+ * 1. Create stream transports for bidirectional plan review communication
+ * 2. Initialize plan review broker with the plan transport
+ * 3. Create workspace manager and bind it to the requester ID
+ * 4. Create terminal executor and bind it to the requester ID
+ * 5. Return a complete {@link PerConnection} object
  *
- * Produced by:
- *   - Container — provides these dependencies when calling createPerConnection.
- * </Summary>
- */
-export type PerConnectionFactoryDeps = {
-  /**
-   * Client bridge for communication with connected clients.
-   * Provides methods to send commands and receive responses from clients.
-   * Each connection binds to a specific requester ID for isolation.
-   */
-  clientBridge: ClientBridge;
-};
-
-/**
- * <Summary>
- * What it does:
- *   Factory function that creates per-connection resources for a specific client.
+ * @param dependencies - Shared dependencies (client bridge) needed for connection creation.
+ * @param requesterId - Unique identifier for this client connection.
+ *   Used to route all responses back to the correct client.
+ * @param emit - Function to send task frames back to the client.
+ *   Called whenever the connection needs to push data to the client
+ *   (plan updates, terminal output, etc.).
+ * @returns A fully initialized PerConnection object with all resources
+ *   and utilities for managing this client's session.
  *
- * How it does it (step by step):
- *   1. Extract clientBridge from dependencies.
- *   2. Create stream transports for plan review communication.
- *   3. Initialize plan review broker with plan transport.
- *   4. Initialize workspace manager with client bridge.
- *   5. Bind workspace manager to the specific requester ID.
- *   6. Initialize terminal executor with client bridge.
- *   7. Bind terminal executor to the specific requester ID.
- *   8. Return object containing all connection-specific resources and utilities.
+ * @example
+ * ```ts
+ * In the container initialization:
+ * const deps: PerConnectionFactoryDeps = { clientBridge };
+ * const connection = createPerConnection(deps, "user_123", (frame) => {
+ *    Send frame back to client via WebSocket or HTTP
+ *   ws.send(JSON.stringify(frame));
+ * });
  *
- * Parameters:
- *   @param dependencies - Shared dependencies for connection creation.
- *   @param requesterId - Unique identifier for the requesting client.
- *   @param emit - Function to emit task frames to the client.
- *
- * Returns:
- *   @returns Object containing all connection-specific resources.
- * </Summary>
+ * Connection now has isolated workspace and terminal:
+ * await connection.workspace.readFile("src/index.ts");
+ * await connection.terminal.runCommand("npm run build");
+ * ```
  */
 export const createPerConnection = (
   dependencies: PerConnectionFactoryDeps,
   requesterId: string,
   emit: (frame: TaskFrame) => void,
 ): PerConnection => {
-  // ===== STEP 1: EXTRACT DEPENDENCIES =====
-  // Extract clientBridge from the dependencies object
-  // This provides the shared communication infrastructure for this connection
+  // Extract clientBridge from dependencies for workspace and terminal initialization
   const { clientBridge } = dependencies;
 
-  // ===== STEP 2: CREATE STREAM TRANSPORTS =====
-  // Create stream transports for plan review communication
-  // This establishes bidirectional communication channels for plan review workflows
-  // The emit function allows sending frames back to the specific client
+  // Create bidirectional stream transports for plan review communication.
+  // The emit function ensures frames are sent to the correct client.
   const streamTransports = createStreamTransports(emit);
 
-  // ===== STEP 3: INITIALIZE PLAN REVIEW BROKER =====
-  // Create plan review broker with the plan transport
-  // This manages the plan review workflow, handling plan proposals and feedback
+  // Initialize plan review broker with the stream transport so plan reviews
+  // can be conducted asynchronously between client and agent.
   const planBroker = new PlanReviewBroker({
     transport: streamTransports.plan,
   });
 
-  // ===== STEP 4: INITIALIZE WORKSPACE MANAGER =====
-  // Create workspace manager with client bridge for communication
-  // This handles file system operations, git commands, and workspace state
+  // Create workspace manager with access to clientBridge for file operations.
+  // Binding to requesterId ensures all operations are associated with this connection.
   const workspaceManager = new WorkspaceManager(clientBridge);
-
-  // ===== STEP 5: BIND WORKSPACE TO REQUESTER =====
-  // Bind the workspace manager to the specific requester ID
-  // This ensures all workspace operations are associated with this connection
-  // and enables proper routing of responses back to the correct client
   workspaceManager.bindRequester(requesterId);
 
-  // ===== STEP 6: INITIALIZE TERMINAL EXECUTOR =====
-  // Create terminal executor with client bridge for communication
-  // This handles shell command execution and terminal session management
+  // Create terminal executor with access to clientBridge for command execution.
+  // Binding to requesterId ensures terminal output goes to the correct client.
   const terminalExecutor = new TerminalExecutor(clientBridge);
-
-  // ===== STEP 7: BIND TERMINAL TO REQUESTER =====
-  // Bind the terminal executor to the specific requester ID
-  // This ensures terminal output and commands are routed to the correct client
   terminalExecutor.bindRequester(requesterId);
 
-  // ===== STEP 8: RETURN PER-CONNECTION RESOURCES =====
-  // Return object containing all connection-specific resources and utility functions
-  // This provides the complete interface for managing this client's session
+  // Return complete per-connection resources with utilities for stream management.
+  // This includes service instances (planBroker, workspace, terminal) and
+  // utility functions for plan resolution and reconnection.
   return {
-    // Core service instances for this connection
-    planBroker, // Plan review workflow management
-    workspace: workspaceManager, // Workspace and file system operations
-    terminal: terminalExecutor, // Terminal command execution
-
-    // Utility functions for stream management
-    resolvePlan: streamTransports.resolvePlan, // Plan resolution helper
-    rebindStreamEmit: streamTransports.rebindEmit, // Stream rebinding for reconnection
+    planBroker,
+    workspace: workspaceManager,
+    terminal: terminalExecutor,
+    resolvePlan: streamTransports.resolvePlan,
+    rebindStreamEmit: streamTransports.rebindEmit,
   };
 };

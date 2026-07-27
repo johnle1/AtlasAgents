@@ -1,23 +1,30 @@
 /**
- * <Summary>
- * What it does:
- *   React hook that handles keyboard input events for the Ink-based CLI UI,
- *   including navigation through command history, autocomplete suggestions,
- * and special keyboard shortcuts (Ctrl+C, Ctrl+L, Ctrl+O).
+ * Keyboard input hook for CLI interactions and commands.
  *
- * How it fits in the system:
- *   This hook processes all keyboard events from the Ink useInput hook and
- *   dispatches them to the appropriate handlers based on the current application
- *   state. It manages keyboard navigation through autocomplete menus and command
- *   history, as well as handling special key combinations for exit, clear, and
- *   directory expansion.
- * </Summary>
+ * @remarks
+ * This hook returns a callback function that can be passed to Ink's `useInput` hook.
+ * It handles all keyboard input for the CLI, including:
+ *
+ * - **Ctrl+C**: Interrupt current task (requires double-press if task is running)
+ * - **Ctrl+L**: Clear screen (exits and re-enters the CLI)
+ * - **Ctrl+O**: Expand next folder in directory tree display
+ * - **Arrow keys**: Navigate command history or autocomplete suggestions
+ * - **Tab**: Autocomplete the current command
+ *
+ * The handler respects UI state — it ignores input when approval/prompt overlays
+ * are active, and blocks text input during task execution.
+ *
+ * @example
+ * ```tsx
+ * const keyboardHandler = useKeyboardInput(context, { exit });
+ * useInput(keyboardHandler);
+ * ```
  */
 
 import { useCallback } from "react";
 
 import { formatErrorMessage } from "../../commands/utils.js";
-import type { AppContextValue } from "../../DataContext.js";
+import type { KeyboardInputContext, KeyboardInputHandlers } from "./types.js";
 import {
   commandRequiresArgs,
   getCommandSuggestions,
@@ -28,74 +35,16 @@ import {
 } from "../constants.js";
 
 /**
- * <Summary>
- * What it does:
- *   Defines the subset of AppContextValue needed for keyboard input handling.
+ * React hook that returns a keyboard input handler callback for Ink's `useInput`.
  *
- * Used by:
- *   - useKeyboardInput hook — receives these dependencies.
+ * @remarks
+ * The returned callback is invoked by Ink for every key event. It uses
+ * `useCallback` to maintain a stable reference across re-renders, preventing
+ * the `useInput` hook from re-subscribing unnecessarily.
  *
- * Produced by:
- *   - AppContext — provides these state values and setter functions.
- * </Summary>
- */
-type KeyboardInputContext = Pick<
-  AppContextValue,
-  | "approval"
-  | "promptReq"
-  | "busy"
-  | "inputHistory"
-  | "histIdx"
-  | "input"
-  | "activeIndex"
-  | "scrollOffset"
-  | "setSigintBusy"
-  | "onSaveHistory"
-  | "fileProxy"
-  | "setHistory"
-  | "setActiveIndex"
-  | "setScrollOffset"
-  | "setInput"
-  | "setHistIdx"
->;
-
-/**
- * <Summary>
- * What it does:
- *   Defines the external handlers that keyboard input can invoke.
- *
- * Used by:
- *   - useKeyboardInput hook — receives these handlers.
- *
- * Produced by:
- *   - AppContent component — provides these handler functions.
- * </Summary>
- */
-type KeyboardInputHandlers = {
-  /** Function to exit the application. */
-  exit: () => void;
-};
-
-/**
- * <Summary>
- * What it does:
- *   Creates a keyboard input handler that processes keystrokes and updates
- *   application state accordingly.
- *
- * How it does it (step by step):
- *   1. Checks if approval or prompt is active (blocks input if so).
- *   2. Handles special key combinations (Ctrl+C, Ctrl+L, Ctrl+O).
- *   3. Handles autocomplete navigation (up/down arrows, tab).
- *   4. Handles command history navigation (up/down arrows).
- *   5. Updates input, active index, scroll offset, and history index.
- *
- * Parameters:
- *   @param keyboardInputDependencies - State and setters from context.
- *   @param keyboardInputHandlers - External handlers like exit.
- *
- * Returns:
- *   @returns The keyboard input handler function.
- * </Summary>
+ * @param context - Selected app state values and setters.
+ * @param handlers - External functions for application actions.
+ * @returns The key handler callback.
  */
 export const useKeyboardInput = (
   {
@@ -128,146 +77,123 @@ export const useKeyboardInput = (
         tab?: boolean;
       },
     ) => {
-      // ===== STEP 1: Check for Blocking UI States =====
-      // Step 1a: Check if approval menu or prompt overlay is active
-      // Step 1b: If so, block keyboard input to prevent interference
+      // Ignore main input keys when blocking overlay prompt/approval dialogs are active.
+      // These overlays have their own keyboard handlers and should receive all input.
       if (approval || promptReq) return;
 
-      // ===== STEP 2: Handle Ctrl+C (Exit/Interrupt) =====
-      // Step 2a: Check for Ctrl+C key combination
+      // Handle SIGINT / interrupt (Ctrl+C)
       if (keyInformation.ctrl && inputCharacter === "c") {
-        // ===== STEP 2a-i: Handle Exit During Busy State =====
-        // Step 2a-i-1: If application is busy, require double Ctrl+C
         if (busy) {
-          // Step 2a-i-1-a: Increment SIGINT counter
+          // If task is running, require a second Ctrl+C to force exit.
+          // This prevents accidental task interruption. The first press shows
+          // a warning message ("Press Ctrl+C again to exit").
           setSigintBusy((sigintCounter) => {
-            // Step 2a-i-1-a-1: Check if this is the second Ctrl+C
             if (sigintCounter + 1 >= 2) {
-              // Step 2a-i-1-a-1-1: Save input history before exit
               onSaveHistory(inputHistory);
-              // Step 2a-i-1-a-1-2: Exit the application
               exit();
             }
-            // Step 2a-i-1-a-2: Return incremented counter
             return sigintCounter + 1;
           });
         } else {
-          // ===== STEP 2a-ii: Handle Exit When Not Busy =====
-          // Step 2a-ii-1: Save input history before exit
+          // If no task is running, exit immediately on first Ctrl+C.
           onSaveHistory(inputHistory);
-          // Step 2a-ii-2: Exit the application immediately
           exit();
         }
         return;
       }
 
-      // ===== STEP 3: Handle Ctrl+L (Clear Screen) =====
-      // Step 3a: Check for Ctrl+L key combination
+      // Ctrl+L: Clear screen by exiting the CLI. Ink handles the reprint gracefully
+      // when the user restarts, so this effectively clears the terminal.
       if (keyInformation.ctrl && inputCharacter === "l") {
-        // Step 3a-i: Save input history before clearing screen
         onSaveHistory(inputHistory);
-        // Step 3a-ii: Exit to clear the screen (Ink will re-render)
         exit();
         return;
       }
 
-      // ===== STEP 4: Handle Ctrl+O (Expand Directory) =====
-      // Step 4a: Check for Ctrl+O key combination
+      // Ctrl+O: Expand the next folder in the directory tree display.
+      // This is a convenience shortcut for exploring the workspace without
+      // typing file commands. Only works when not busy to avoid interrupting tasks.
       if (keyInformation.ctrl && inputCharacter === "o" && !busy) {
-        // Step 4a-i: Dynamically import listExpandState module
-        // Step 4a-i-1: This is a lazy import to avoid loading when not needed
-        void import("../../listExpandState.js").then(({ peekUnexpanded }) => {
-          // Step 4a-i-1-a: Get the next unexpanded directory entry
-          const expandResult = peekUnexpanded();
-          // Step 4a-i-1-b: If an entry was found, expand it
-          if (expandResult.found && expandResult.entry) {
-            // Step 4a-i-1-b-1: Expand the directory through file proxy
-            void fileProxy
-              .expandDirectory(
-                expandResult.entry.absolutePath,
-                expandResult.entry.indent,
-              )
-              .catch((expansionError) => {
-                // Step 4a-i-1-b-1-a: Handle expansion errors
-                // Step 4a-i-1-b-1-a-1: Display error message in history
-                setHistory((previousHistory) => [
-                  ...previousHistory,
-                  {
-                    kind: "text",
-                    text: formatErrorMessage(expansionError),
-                    variant: "error",
-                  },
-                ]);
-              });
-          }
-        });
+        void import("../../state/listExpandState.js").then(
+          ({ peekUnexpanded }) => {
+            const expandResult = peekUnexpanded();
+            if (expandResult.found && expandResult.entry) {
+              void fileProxy
+                .expandDirectory(
+                  expandResult.entry.absolutePath,
+                  expandResult.entry.indent,
+                )
+                .catch((expansionError) => {
+                  // If expansion fails, show an error message in the history.
+                  setHistory((previousHistory) => [
+                    ...previousHistory,
+                    {
+                      kind: "text",
+                      text: formatErrorMessage(expansionError),
+                      variant: "error",
+                    },
+                  ]);
+                });
+            }
+          },
+        );
         return;
       }
 
-      // ===== STEP 5: Block Input During Busy State =====
-      // Step 5a: If application is busy, block all other input
+      // Prevent key inputs from modifying text state during active task execution.
+      // This blocks autocomplete, history navigation, and text editing while a
+      // task is running to avoid confusing the user or corrupting input state.
       if (busy) return;
 
-      // ===== STEP 6: Get Command Autocomplete Suggestions =====
-      // Step 6a: Fetch command suggestions for current input
       const commandSuggestions = getCommandSuggestions(input);
 
-      // ===== STEP 7: Handle Autocomplete Navigation =====
-      // Step 7a: If suggestions are available, handle autocomplete navigation
+      // Handle autocomplete navigation if there are matching suggestions.
+      // Arrow keys move the selection through the suggestion list, Tab fills
+      // the selected command into the input field.
       if (commandSuggestions.length > 0) {
-        // ===== STEP 7a-i: Handle Up Arrow (Previous Suggestion) =====
         if (keyInformation.upArrow) {
-          // Step 7a-i-1: Update active index to previous suggestion
           setActiveIndex((previousActiveIndex) => {
-            // Step 7a-i-1-a: Calculate new index (wrap around to last if at first)
+            // Wrap around to the last item if at the top
             const newActiveIndex =
               previousActiveIndex <= 0
                 ? commandSuggestions.length - 1
                 : previousActiveIndex - 1;
 
-            // Step 7a-i-1-b: Adjust scroll offset if needed
-            // Step 7a-i-1-b-1: If new index is above visible range, scroll up
+            // Adjust scroll offset if the new selection is above the visible window.
+            // This keeps the selected item visible when navigating up.
             if (newActiveIndex < scrollOffset) {
               setScrollOffset(newActiveIndex);
             }
-
-            // Step 7a-i-1-c: Return the new active index
             return newActiveIndex;
           });
           return;
         }
 
-        // ===== STEP 7a-ii: Handle Down Arrow (Next Suggestion) =====
         if (keyInformation.downArrow) {
-          // Step 7a-ii-1: Update active index to next suggestion
           setActiveIndex((previousActiveIndex) => {
-            // Step 7a-ii-1-a: Calculate new index (wrap around to first if at last)
+            // Wrap around to the first item if at the bottom
             const newActiveIndex =
               previousActiveIndex >= commandSuggestions.length - 1
                 ? 0
                 : previousActiveIndex + 1;
 
-            // Step 7a-ii-1-b: Adjust scroll offset if needed
-            // Step 7a-ii-1-b-1: If new index is below visible range, scroll down
+            // Adjust scroll offset if the new selection is below the visible window.
+            // We trigger scroll a bit before the bottom to show the next item coming.
             if (newActiveIndex >= scrollOffset + AUTOCOMPLETE_VISIBLE_COUNT) {
               setScrollOffset(
                 newActiveIndex - AUTOCOMPLETE_SCROLL_TRIGGER_OFFSET,
               );
             }
-
-            // Step 7a-ii-1-c: Return the new active index
             return newActiveIndex;
           });
           return;
         }
 
-        // ===== STEP 7a-iii: Handle Tab (Autocomplete) =====
         if (keyInformation.tab) {
-          // Step 7a-iii-1: Get the currently selected suggestion
+          // Fill the input with the selected command, adding a trailing space
+          // if the command requires arguments (e.g., /file needs a path).
           const selectedSuggestion = commandSuggestions[activeIndex];
           if (selectedSuggestion) {
-            // Step 7a-iii-1-a: Apply autocomplete to input
-            // Step 7a-iii-1-a-1: Append space if command requires arguments
             setInput(
               selectedSuggestion.command +
                 (commandRequiresArgs(selectedSuggestion.command) ? " " : ""),
@@ -276,43 +202,33 @@ export const useKeyboardInput = (
           return;
         }
       } else {
-        // ===== STEP 7b: Handle Command History Navigation =====
-        // Step 7b-a: Navigate through command history when no suggestions
-
-        // ===== STEP 7b-a-i: Handle Up Arrow (Previous History Entry) =====
+        // No autocomplete suggestions: fall back to line input history navigation.
+        // Arrow keys navigate through previously submitted commands.
         if (keyInformation.upArrow && inputHistory.length > 0) {
-          // Step 7b-a-i-1: Calculate the next history index
+          // Start from the most recent command if not already navigating history.
           const nextHistoryIndex =
             histIdx < 0 ? inputHistory.length - 1 : Math.max(0, histIdx - 1);
 
-          // Step 7b-a-i-2: Bounds check before array access
           if (nextHistoryIndex >= 0 && nextHistoryIndex < inputHistory.length) {
-            // Step 7b-a-i-2-a: Update history index
             setHistIdx(nextHistoryIndex);
-            // Step 7b-a-i-2-b: Set input to the history entry
             setInput(inputHistory[nextHistoryIndex]);
           }
           return;
         }
 
-        // ===== STEP 7b-a-ii: Handle Down Arrow (Next History Entry) =====
         if (keyInformation.downArrow && histIdx >= 0) {
-          // Step 7b-a-ii-1: Calculate the next history index
           const nextHistoryIndex = histIdx + 1;
 
-          // Step 7b-a-ii-2: Check if we've gone past the end
+          // If we go past the end of history, clear the input and reset the index.
+          // This allows the user to type a new command after navigating history.
           if (nextHistoryIndex >= inputHistory.length) {
-            // Step 7b-a-ii-2-a: Reset to empty input (after last entry)
             setHistIdx(-1);
             setInput("");
           } else if (
-            // Step 7b-a-ii-3: Bounds check before array access
             nextHistoryIndex >= 0 &&
             nextHistoryIndex < inputHistory.length
           ) {
-            // Step 7b-a-ii-3-a: Update history index
             setHistIdx(nextHistoryIndex);
-            // Step 7b-a-ii-3-b: Set input to the history entry
             setInput(inputHistory[nextHistoryIndex]);
           }
         }

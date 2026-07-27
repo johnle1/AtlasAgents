@@ -1,67 +1,64 @@
+/**
+ * Workspace path sandbox helpers for the file proxy.
+ *
+ * @remarks
+ * All absolute paths used for read/write/delete/cd must pass
+ * {@link assertInsideRoot}. Relative resolution goes through
+ * {@link resolveAbsolutePath}, which also rejects absolute caller inputs so the
+ * agent cannot point outside the workspace via `/etc/...`.
+ */
+
 import * as path from "node:path";
 
 /**
- * <Summary>
- * What it does:
- *   Validates that a given path is inside the workspace root directory, throwing an error if it escapes.
+ * Throws if `candidate` is outside `workspaceRoot`.
  *
- * How it does it (step by step):
- *   1. Calculate the relative path from the workspace root to the candidate path.
- *   2. Check if the relative path starts with ".." (directory traversal on same volume).
- *   3. Check if the relative path is absolute (cross-drive escape on Windows).
- *   4. If either condition is true, throw an error indicating the path escapes the workspace.
- *   5. If neither condition is true, the path is safe and the function returns normally.
+ * @remarks
+ * Uses `path.relative(workspaceRoot, candidate)`:
+ * - a result starting with `..` means the candidate is an ancestor (traversal)
+ * - an absolute relative result on Windows means a different drive / root escape
  *
- * Parameters:
- *   @param workspaceRoot - The root directory of the workspace that serves as the security boundary.
- *   @param candidate - The path to validate (can be absolute or relative).
+ * Call after `path.resolve` / `path.join` so symlinks and `..` segments are
+ * normalized first (callers are responsible for resolving).
  *
- * Returns:
- *   @returns Returns normally if the path is safe, throws an error if the path escapes the workspace.
+ * @param workspaceRoot - Absolute sandbox root.
+ * @param candidate - Absolute path to validate.
+ * @throws {@link Error} With message `Path escapes workspace root: …`.
  *
- * Throws:
- *   @throws {Error} — When the candidate path escapes the workspace root.
- * </Summary>
+ * @example
+ * ```ts
+ * assertInsideRoot("/proj", "/proj/src/a.ts"); // ok
+ * assertInsideRoot("/proj", "/etc/passwd"); // throws
+ * ```
  */
 export const assertInsideRoot = (
   workspaceRoot: string,
   candidate: string,
 ): void => {
-  // ===== STEP 1: Calculate relative path =====
-  // Step 1a: Calculate the relative path from workspace root to the candidate path
-  // Step 1b: This helps detect if the candidate path goes outside the workspace
   const relativePathFromRoot = path.relative(workspaceRoot, candidate);
 
-  // ===== STEP 2: Check for directory traversal =====
-  // Step 2a: Check if the relative path starts with ".." (indicates going up directory levels)
-  // Step 2b: This would mean the path escapes the workspace root (e.g., ../../etc/passwd)
-  // Step 2c: Also check if the relative path is absolute (indicates completely different location)
+  // `..` → walked above root; absolute relative → different Windows drive/root.
   if (
     relativePathFromRoot.startsWith("..") ||
     path.isAbsolute(relativePathFromRoot)
   ) {
-    // ===== STEP 3: Throw security error =====
-    // Step 3a: Throw an error indicating the path attempts to escape the workspace
-    // Step 3b: This prevents directory traversal attacks and unauthorized file access
     throw new Error(`Path escapes workspace root: ${candidate}`);
   }
 };
 
 /**
- * <Summary>
- * What it does:
- *   Rejects empty or whitespace-only path strings with a clear error.
+ * Trims a path/pattern field and rejects empty values.
  *
- * Parameters:
- *   @param value - Raw path or pattern from a request body.
- *   @param {string} [field] — Field name for the error message.
+ * @param value - Raw string from a request body.
+ * @param field - Name used in the error message (default `"path"`).
+ * @returns Trimmed non-empty string.
+ * @throws {@link Error} When empty after trim (`"<field> is required"`).
  *
- * Returns:
- *   @returns Trimmed non-empty path.
- *
- * Throws:
- *   @throws {Error} — When value is empty after trimming.
- * </Summary>
+ * @example
+ * ```ts
+ * requireNonEmptyPath("  src/a.ts  "); // "src/a.ts"
+ * requireNonEmptyPath("  ", "pattern"); // throws "pattern is required"
+ * ```
  */
 export const requireNonEmptyPath = (value: string, field = "path"): string => {
   const trimmed = value.trim();
@@ -72,27 +69,24 @@ export const requireNonEmptyPath = (value: string, field = "path"): string => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Resolves a relative path to an absolute path and validates it stays inside the workspace root.
+ * Joins `relativePath` to `currentDir`, then asserts the result is under root.
  *
- * How it does it (step by step):
- *   1. Reject absolute paths from callers (must be relative to currentDir).
- *   2. Join with currentDir and resolve to absolute form.
- *   3. Validate the resolved path is inside the workspace root.
- *   4. Return the validated absolute path.
+ * @remarks
+ * Absolute `relativePath` values are rejected so clients cannot bypass the cwd
+ * sandbox with filesystem-absolute paths. Prefer this over raw `path.resolve`
+ * in handlers.
  *
- * Parameters:
- *   @param workspaceRoot - The root directory of the workspace that serves as the security boundary.
- *   @param currentDir - The current working directory (used for resolving relative paths).
- *   @param relativePath - Path relative to currentDir (absolute paths are rejected).
+ * @param workspaceRoot - Absolute sandbox root.
+ * @param currentDir - Absolute cwd used as the join base.
+ * @param relativePath - Path relative to `currentDir` only.
+ * @returns Absolute path guaranteed inside `workspaceRoot`.
+ * @throws {@link Error} When `relativePath` is absolute or the result escapes.
  *
- * Returns:
- *   @returns The validated absolute path guaranteed to be inside the workspace root.
- *
- * Throws:
- *   @throws {Error} — When an absolute path is supplied or the resolved path escapes the workspace.
- * </Summary>
+ * @example
+ * ```ts
+ * resolveAbsolutePath("/proj", "/proj/src", "utils/a.ts");
+ * // → "/proj/src/utils/a.ts"
+ * ```
  */
 export const resolveAbsolutePath = (
   workspaceRoot: string,

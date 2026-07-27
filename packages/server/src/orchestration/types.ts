@@ -1,214 +1,266 @@
 /**
- * <Summary>
- * What it does:
- *   Shared TypeScript shapes for the orchestration layer (Advisor, Agent,
- *   AdvisorOrchestrator) and their Ollama message payloads.
+ * Shared TypeScript shapes for the orchestration layer.
  *
- * Used by:
- *   - Advisor, Agent, AdvisorOrchestrator — message arrays and plan parsing.
- *   - interfaces.ts — method signatures on IOllamaClient and collaborators.
- *
- * Produced by:
- *   - Advisor.plan — builds AdvisorPlan from model JSON.
- *   - AdvisorOrchestrator.runTask — builds OrchestrationOutcome for recording.
- * </Summary>
+ * @remarks
+ * Defines interfaces and types used by Agent, Subagent, and AgentOrchestrator
+ * for message arrays, plan parsing, and Ollama message payloads. These shapes
+ * are used throughout the orchestration layer to ensure type safety and
+ * consistency.
  */
 
 /**
- * <Summary>
- * What it does:
- *   Represents one authenticated RSocket session for orchestration logging
- *   and future per-user policy; mirrors Router.Session shape.
+ * Represents one authenticated RSocket session for orchestration logging.
  *
- * Used by:
- *   - AdvisorOrchestrator.runTask — first parameter.
- *
- * Produced by:
- *   - RSocketServer — same fields as packages/server/src/routing/router.ts Session.
- * </Summary>
+ * @remarks
+ * Mirrors Router.Session shape. Used for per-user policy and logging.
+ * Passed as the first parameter to AgentOrchestrator.runTask.
  */
 export interface SessionInfo {
-  /** Resolved user id after AuthMiddleware.validate. */
-  userId: string
+  /** Resolved user id after AuthMiddleware.validate */
+  userId: string;
 
-  /** Stable id for this TCP/RSocket connection. */
-  requesterId: string
-}
-
-/** Per-task model settings from the CLI (overrides server config when set). */
-export type TaskModelOverrides = {
-  advisorModel?: string
-  agentModel?: string
-  advisorTemp?: number
-  agentTemp?: number
-  /** When true, agent logs raw turns and parsed tools to stderr. */
-  debug?: boolean
+  /** Stable id for this TCP/RSocket connection */
+  requesterId: string;
 }
 
 /**
- * <Summary>
- * What it does:
- *   One chat message in an Ollama /api/chat request body.
+ * Per-task model settings from the CLI.
  *
- * Used by:
- *   - IOllamaClient.chat, IOllamaClient.chatStream — messages array.
- *   - Advisor.plan, Advisor.advise, Agent.run — conversation construction.
+ * @remarks
+ * Overrides server config when set. Allows users to specify different models
+ * for agent and subagent, adjust temperature, enable native tool_calls, and
+ * enable debug logging for a single task.
+ */
+export type TaskModelOverrides = {
+  /** Override agent model */
+  agentModel?: string;
+  /** Override subagent model */
+  subagentModel?: string;
+  /** Override the provider serving the agent role (e.g. "ollama", "vllm-gpu") */
+  agentProvider?: string;
+  /** Override the provider serving the subagent role */
+  subagentProvider?: string;
+  /** Override agent temperature */
+  agentTemp?: number;
+  /** Override subagent temperature */
+  subagentTemp?: number;
+  /** When true, use native Ollama tool_calls for the agent model */
+  agentModelSupportsTools?: boolean;
+  /** When true, use native Ollama tool_calls for the subagent model */
+  subagentModelSupportsTools?: boolean;
+  /** When true, subagent logs raw turns and parsed tools to stderr */
+  debug?: boolean;
+};
+
+/**
+ * One chat message in an Ollama /api/chat request body.
  *
- * Produced by:
- *   - Advisor, Agent — assemble role/content pairs before calling Ollama.
- * </Summary>
+ * @remarks
+ * Used by IOllamaClient.chat and IOllamaClient.chatStream for the messages array.
+ * Also used by Agent.plan, Agent.advise, and Agent.run for conversation
+ * construction. Supports native tool_calls on assistant turns and tool results.
  */
 export interface Message {
-  /** Message role for the chat API. */
-  role: 'system' | 'user' | 'assistant'
+  /** Message role for the chat API */
+  role: "system" | "user" | "assistant" | "tool";
 
-  /** Plain text body for this turn. */
-  content: string
+  /** Plain text body for this turn */
+  content: string;
+
+  /** Native tool calls on assistant turns (Ollama /api/chat) */
+  tool_calls?: {
+    function: { name: string; arguments: Record<string, unknown> };
+  }[];
+
+  /** Tool name when role is tool (Ollama tool result shape) */
+  tool_name?: string;
 }
 
 /**
- * <Summary>
- * What it does:
- *   Sampling options forwarded to Ollama for one generation.
+ * Sampling options forwarded to Ollama for one generation.
  *
- * Used by:
- *   - IOllamaClient.chat, IOllamaClient.chatStream — options argument.
- *
- * Produced by:
- *   - Advisor, Agent — from IConfigManager temperature getters.
- * </Summary>
+ * @remarks
+ * Used by IOllamaClient.chat and IOllamaClient.chatStream as the options argument.
+ * Includes temperature, abort signal, and thinking/reasoning token options for
+ * models that support them.
  */
 export interface ChatOptions {
-  /** Sampling temperature (0 = deterministic, higher = more random). */
-  temperature: number
+  /** Sampling temperature (0 = deterministic, higher = more random) */
+  temperature: number;
+  /** When aborted, in-flight Ollama streaming requests are cancelled */
+  signal?: AbortSignal;
+  /**
+   * When true, chatStream also yields reasoning tokens from message.thinking.
+   * Used by the agent for models that emit plans in the thinking channel.
+   * Automatically sets Ollama's `think` request field when unset.
+   */
+  includeThinking?: boolean;
+  /**
+   * Ollama think parameter (boolean or level). When includeThinking is true and
+   * think is unset, the client defaults to `true`.
+   */
+  think?: boolean | "low" | "medium" | "high" | "max";
 }
 
 /**
- * <Summary>
- * What it does:
- *   One node in the advisor-produced execution DAG; dependsOn lists
- *   prerequisite subtask ids that must finish before this one runs.
+ * One node in the agent-produced execution DAG.
  *
- * Used by:
- *   - AdvisorOrchestrator — topological waves and context stitching.
- *
- * Produced by:
- *   - Advisor.plan — parsed from strict JSON model output.
- * </Summary>
+ * @remarks
+ * Represents a single subtask with dependencies. The dependsOn array lists
+ * prerequisite subtask ids that must finish before this one runs. Used by
+ * AgentOrchestrator for topological waves and context stitching.
  */
 export interface PlannedSubtask {
-  /** Stable positive integer id unique within one plan. */
-  id: number
+  /** Stable positive integer id unique within one plan */
+  id: number;
 
-  /** Action description for the agent. */
-  text: string
+  /** Action description for the agent */
+  text: string;
 
-  /** Prerequisite subtask ids; empty means this subtask can run in the first wave. */
-  dependsOn: number[]
+  /** Prerequisite subtask ids; empty means this subtask can run in the first wave */
+  dependsOn: number[];
 
-  /** Agent group id for UI and status display. */
-  agentId: number
+  /** Agent group id for UI and status display */
+  agentId: number;
 
-  /** Human label for the agent group (setup, implementation, etc.). */
-  agentLabel: string
+  /** Human label for the agent group (setup, implementation, etc.) */
+  agentLabel: string;
 }
 
 /**
- * <Summary>
- * What it does:
- *   Full decomposition of a user task into ordered DAG nodes for execution.
+ * Shell commands parsed from agent-think COMMAND PLAN.
  *
- * Used by:
- *   - AdvisorOrchestrator — drives waves of Agent.run calls.
- *
- * Produced by:
- *   - Advisor.plan — after JSON parse and validation.
- * </Summary>
+ * @remarks
+ * Used for run_command classification. Contains lists of setup commands,
+ * verify commands, and run-project commands (indefinite processes like dev servers).
  */
-/** Shell commands parsed from advisor-think COMMAND PLAN (used for run_command classification). */
 export interface CommandPlan {
+  /** Commands for one-time environment setup */
   setupCommands: string[];
+  /** Commands for test/validation that exit pass/fail */
   verifyCommands: string[];
+  /** Commands that run indefinitely (must use background: true) */
   runProjectCommands: string[];
 }
 
+/**
+ * Returns an empty command plan with no commands.
+ *
+ * @remarks
+ * Used as a default value when no command plan is available.
+ *
+ * @returns Empty command plan
+ */
 export const emptyCommandPlan = (): CommandPlan => ({
   setupCommands: [],
   verifyCommands: [],
   runProjectCommands: [],
 });
 
-export interface AdvisorPlan {
-  /** Ordered list of planned subtasks (order is not execution order; dependsOn is). */
-  subtasks: PlannedSubtask[]
+/**
+ * Full decomposition of a user task into ordered DAG nodes for execution.
+ *
+ * @remarks
+ * Produced by Agent.plan after JSON parse and validation. Used by
+ * AgentOrchestrator to drive waves of Subagent.run calls. Contains subtasks,
+ * risks, command plan, execution mode, and agent count.
+ */
+export interface SubagentPlan {
+  /** Ordered list of planned subtasks (order is not execution order; dependsOn is) */
+  subtasks: PlannedSubtask[];
 
-  /** Risks parsed from advisor-think VERIFY section (may be empty). */
-  risks: string[]
+  /** Risks parsed from agent-think VERIFY section (may be empty) */
+  risks: string[];
 
-  /** Commands for setup / verify / run-project classification (from advisor-think). */
-  commandPlan: CommandPlan
+  /** Commands for setup / verify / run-project classification (from agent-think) */
+  commandPlan: CommandPlan;
 
-  /** How subtasks run relative to each other. */
-  execution: 'parallel' | 'sequential' | 'mixed'
+  /** How subtasks run relative to each other */
+  execution: "parallel" | "sequential" | "mixed";
 
-  /** Unique agent group count in this plan. */
-  agentCount: number
+  /** Unique agent group count in this plan */
+  agentCount: number;
 }
 
-/** User choice after viewing the plan panel (not agent execution turns). */
-export type PlanDecision = "implement" | "skip" | "edit"
+/**
+ * User choice after viewing the plan panel (not subagent execution turns).
+ *
+ * @remarks
+ * Determines whether to implement the plan as-is, skip it entirely,
+ * or edit the steps before implementation.
+ */
+export type PlanDecision = "implement" | "skip" | "edit";
 
 /**
- * Client answer for confirm-plan. `steps` = final plan line strings (subtask descriptions).
+ * Client answer for confirm-plan.
+ *
+ * @remarks
+ * Contains the user's decision and, for an "edit" decision, the user's
+ * free-text feedback about the plan (not edited step text — the agent
+ * re-plans using this feedback rather than having its plan rewritten by hand).
  */
 export type PlanReviewResponse = {
-  decision: PlanDecision
-  steps?: string[]
+  /** User's decision about the plan */
+  decision: PlanDecision;
+  /** Free-text feedback the user typed when decision is "edit" */
+  feedback?: string;
+};
+
+/**
+ * Structured result from an agent subtask finish tool call.
+ *
+ * @remarks
+ * Used by Agent.combine to format prior work for the final answer, and by
+ * IExperienceRecorder.finish for persistence. Contains summary, key findings,
+ * files touched, and success status.
+ */
+export interface ToolResultSummary {
+  /** One-sentence accomplishment summary */
+  summary: string;
+
+  /** Short bullets for dependent subtasks */
+  keyFindings: string[];
+
+  /** Paths written during this subtask (auto-tracked, not model-provided) */
+  filesTouched: string[];
+
+  /** False when the agent exhausted retries/escalations or never successfully finished */
+  ok: boolean;
 }
 
 /**
- * <Summary>
- * What it does:
- *   One completed subtask result keyed by plan id for combine and recording.
+ * One completed subtask result keyed by plan id for combine and recording.
  *
- * Used by:
- *   - Advisor.combine — formats prior work for the final answer.
- *   - IExperienceRecorder.finish — persistence payload.
- *
- * Produced by:
- *   - AdvisorOrchestrator — after each Agent.run wave completes.
- * </Summary>
+ * @remarks
+ * Produced by AgentOrchestrator after each Agent.run wave completes.
+ * Contains the subtask id and full subagent output text.
  */
 export interface SubtaskResult {
-  /** Matches PlannedSubtask.id. */
-  id: number
+  /** Matches PlannedSubtask.id */
+  id: number;
 
-  /** Full agent output text (may include failure summary after max retries). */
-  content: string
+  /** Full subagent output text (may include failure summary after max retries) */
+  content: string;
 }
 
 /**
- * <Summary>
- * What it does:
- *   Serializable bundle passed to ExperienceRecorder.finish after one task run.
+ * Serializable bundle passed to ExperienceRecorder.finish after one task run.
  *
- * Used by:
- *   - IExperienceRecorder.finish — audit trail and downstream pattern mining.
- *
- * Produced by:
- *   - AdvisorOrchestrator.runTask — success or failure path before return.
- * </Summary>
+ * @remarks
+ * Produced by AgentOrchestrator.runTask on both success and failure paths.
+ * Used by IExperienceRecorder.finish for audit trail and downstream pattern
+ * mining. Contains the plan, results, and optional error message.
  */
 export interface OrchestrationOutcome {
-  /** True when the DAG completed without cycle deadlock and finish emitted. */
-  ok: boolean
+  /** True when the DAG completed without cycle deadlock and finish emitted */
+  ok: boolean;
 
-  /** Advisor plan used for execution (may be partial if planning failed early). */
-  plan: AdvisorPlan
+  /** Agent plan used for execution (may be partial if planning failed early) */
+  plan: SubagentPlan;
 
-  /** Subtask results in ascending id order when ok; otherwise best-effort partial. */
-  results: SubtaskResult[]
+  /** Subtask results in ascending id order when ok; otherwise best-effort partial */
+  results: SubtaskResult[];
 
-  /** Human-readable error when ok is false (cycle, abort, planning error propagated). */
-  error?: string
+  /** Human-readable error when ok is false (cycle, abort, planning error propagated) */
+  error?: string;
 }

@@ -1,12 +1,32 @@
 /**
- * <Summary>
- * What it does:
- *   Reads finished experience records and extracts reusable preference rules via
- *   the advisor model; always runs asynchronously after task finish.
+ * Extracts reusable preference rules from task experiences.
  *
- * How it fits in the system:
- *   Triggered fire-and-forget by ExperienceRecorder.finish.
- * </Summary>
+ * @remarks
+ * Implements {@link IPatternExtractor} to analyze completed task experiences
+ * and extract generalizable lessons. Runs asynchronously (fire-and-forget)
+ * after {@link ExperienceRecorder.finish}.
+ *
+ * **Three Rule Sources:**
+ * 1. **Agent extraction** — LLM analyzes subagent behavior and outputs JSON rules
+ * 2. **Fix rules** — Escalations converted to "When X → do Y" patterns (high confidence)
+ * 3. **Style rules** — User edits converted to style/formatting preferences (language-scoped)
+ *
+ * **Workflow:**
+ * 1. ExperienceRecorder.finish triggers `extract(record)` (fire-and-forget)
+ * 2. extract() calls private `run()` asynchronously
+ * 3. run() skips failures with no escalations (no learning data)
+ * 4. Builds comprehensive prompt with task, diffs, escalations, edits
+ * 5. Queries agent model for JSON array of rules
+ * 6. Validates and persists each rule to preference store
+ * 7. Independently converts escalations and edits to fix/style rules
+ * 8. Returns without awaiting (background learning)
+ *
+ * **Error Handling:**
+ * - Logs but doesn't crash on agent failures
+ * - Invalid JSON gracefully degrades to escalation/edit rules only
+ * - Preference store errors logged but don't block task completion
+ *
+ * @see {@link PreferenceStore} for rule persistence
  */
 
 import type {
@@ -35,38 +55,34 @@ import {
   topicsFromPath,
   truncate,
 } from "./patternHelpers.js";
+import { logger } from "../../utils/logger.js";
 
 /**
- * <Summary>
- * What it does:
- *   Implements extraction of reusable preference rules from a completed
- *   `ExperienceRecord`. Orchestrates asking the advisor model for general
- *   rules, parses and validates its JSON output, and persists resulting
- *   rules into the preference store. Additionally converts escalations and
- *   user edits into high-confidence fix/style rules.
+ * Extracts reusable preference rules from task experiences.
  *
- * How it fits in the system:
- *   - Triggered by `ExperienceRecorder.finish` as a fire-and-forget task.
- *   - Depends on `IOllamaClient` for advisor chat, `IConfigManager` for
- *     model/temperature settings, and `IPreferenceStore` to save rules.
- * </Summary>
+ * @remarks
+ * Analyzes completed task experiences and extracts generalizable lessons using
+ * three sources: agent LLM analysis, escalation-based fix rules, and user-edit
+ * style rules. Runs asynchronously as a fire-and-forget background process.
+ *
+ * @example
+ * ```ts
+ * const extractor = new PatternExtractor({
+ *   ollama: ollamaClient,
+ *   config: configManager,
+ *   prefs: preferenceStore
+ * });
+ * extractor.extract(experienceRecord); // runs in background
+ * ```
  */
 export class PatternExtractor implements IPatternExtractor {
   /**
-   * Constructor
+   * Initializes the pattern extractor with required dependencies.
    *
-   * How it does it (step by step):
-   *   1. Accept a dependency bag containing the three required services.
-   *   2. Store the dependencies as private readonly fields for use in methods.
-   *
-   * Parameters:
-   *   @param deps - Dependency bag with the following services:
-   *     @param deps - .ollama — Client for communicating with the advisor AI model.
-   *     @param deps - .config — Manager for reading configuration (model name, temperature).
-   *     @param deps - .prefs — Store for persisting extracted preference rules.
-   *
-   * Returns:
-   *   void — Constructor does not return a value.
+   * @param deps - Dependency bag containing the following services:
+   *   @param deps.ollama - Client for communicating with the agent AI model.
+   *   @param deps.config - Manager for reading configuration (model name, temperature).
+   *   @param deps.prefs - Store for persisting extracted preference rules.
    */
   constructor(
     private readonly deps: {
@@ -77,18 +93,14 @@ export class PatternExtractor implements IPatternExtractor {
   ) {}
 
   /**
-   * Public entrypoint: enqueue a non-blocking extraction run for a record.
+   * Enqueues a non-blocking extraction run for a completed experience record.
    *
-   * How it does it (step by step):
-   *   1. Call the private async `run` method and intentionally ignore the
-   *      returned promise (fire-and-forget).
-   *   2. Attach a catch handler to log any unexpected error.
+   * @remarks
+   * Starts the async extraction work in the background without awaiting the result.
+   * Errors are logged but do not propagate to the caller. This is the public
+   * entry point called by {@link ExperienceRecorder.finish}.
    *
-   * Parameters:
-   *   @param record - The finished experience to analyze.
-   *
-   * Returns:
-   *   void — called for side effects only (background extraction).
+   * @param record - The finished experience to analyze.
    */
   extract = (record: ExperienceRecord): void => {
     // Step 1: Start the async work and attach error logging (fire-and-forget)
@@ -97,37 +109,30 @@ export class PatternExtractor implements IPatternExtractor {
     // that any failures are logged even though we're not awaiting the result.
     // The `void` prefix tells TypeScript and linters we're intentionally ignoring the promise.
     void this.run(record).catch((error) => {
-      console.error("[PatternExtractor]", error);
+      logger.error(
+        { taskId: record.taskId, err: error },
+        "PatternExtractor run failed",
+      );
     });
   };
 
   /**
-   * @async
-   * Core extraction implementation (async).
+   * Core extraction implementation.
    *
-   * How it does it (step by step):
-   *   1. Early-exit for failed outcomes without escalations (nothing to learn).
-   *   2. Build human-readable context blocks: paths, agent write diffs,
-   *      escalations (budgeted), and user edits as plain line diffs (sampled).
-   *   3. Construct a prompt (userContent) instructing the advisor to return
-   *      ONLY a JSON array of preference objects.
-   *   4. Query the advisor model using configured model + temperature.
-   *   5. Use `extractJsonArray` to pull a JSON array string from the raw
-   *      model response and attempt to `JSON.parse()` it.
-   *   6. If parsed output is an array, validate and convert each item into
-   *      a `NewPreferenceRule` and persist it into the preference store.
-   *   7. Independently, convert any recorded escalations into `fix` rules
-   *      and user edits into `style` rules, saving each to the preference
-   *      store.
+   * @remarks
+   * Performs the actual extraction work asynchronously:
+   * 1. Early-exit for failed outcomes without escalations (nothing to learn)
+   * 2. Builds human-readable context blocks: paths, subagent write diffs, escalations, user edits
+   * 3. Constructs a prompt instructing the agent to return JSON array of preference objects
+   * 4. Queries the agent model using configured model + temperature
+   * 5. Parses JSON array from the agent response using {@link extractJsonArray}
+   * 6. Validates each rule and persists to the preference store
+   * 7. Independently converts escalations to fix rules and user edits to style rules
    *
-   * Parameters:
-   *   @param record - The experience being processed.
+   * Agent chat failures are caught and logged but do not prevent escalation/edit
+   * rule extraction. Invalid JSON gracefully degrades to fix/style rules only.
    *
-   * Returns:
-   *   @returns Resolves when extraction and storage complete.
-   *
-   * Throws:
-   *   - Errors from advisor chat are caught and logged, not re-thrown.
+   * @param record - The experience being processed.
    */
   private run = async (record: ExperienceRecord): Promise<void> => {
     // Step 1: If the task failed but produced no escalations, nothing to do
@@ -139,11 +144,11 @@ export class PatternExtractor implements IPatternExtractor {
       return;
     }
 
-    // Step 2: Summarize files read/written, agent write diffs, escalations, user edits
+    // Step 2: Summarize files read/written, subagent write diffs, escalations, user edits
     // This step builds a comprehensive but budgeted summary of the experience
-    // that will be sent to the advisor model. Each section is carefully truncated
+    // that will be sent to the agent model. Each section is carefully truncated
     // to avoid overwhelming the model while preserving the most relevant information.
-    // The goal is to provide enough context for the advisor to extract meaningful rules
+    // The goal is to provide enough context for the agent to extract meaningful rules
     // without exceeding context window limits or including irrelevant details.
 
     // Extract just the file paths (not full file objects) for read operations
@@ -152,8 +157,8 @@ export class PatternExtractor implements IPatternExtractor {
     const readPaths = record.filesRead.map((fileEntry) => fileEntry.path);
 
     // Extract just the file paths for write operations
-    // This shows what files the agent modified during the task
-    // This helps the advisor understand which parts of the codebase were changed
+    // This shows what files the subagent modified during the task
+    // This helps the agent understand which parts of the codebase were changed
     const writePaths = record.filesWritten.map((fileEntry) => fileEntry.path);
 
     // Build a formatted block showing the actual diffs the agent wrote
@@ -186,7 +191,7 @@ export class PatternExtractor implements IPatternExtractor {
       )
       .join("\n");
 
-    // Sample user edits to avoid overwhelming the advisor model
+    // Sample user edits to avoid overwhelming the agent model
     // The sampleUserEdits function intelligently selects a representative subset
     // of edits and tells us how many were omitted for transparency
     // This is important because there could be hundreds of user edits in a single session
@@ -199,23 +204,23 @@ export class PatternExtractor implements IPatternExtractor {
     // The formatUserEditForPrompt function creates a consistent, parseable format
     const editBlock = sampledEdits.map(formatUserEditForPrompt).join("\n");
 
-    // Add a note if we omitted any edits so the advisor knows the data is partial
+    // Add a note if we omitted any edits so the agent knows the data is partial
     // This maintains transparency about the sampling process
-    // It prevents the advisor from assuming it has seen all user corrections
+    // It prevents the agent from assuming it has seen all user corrections
     const editOmittedNote =
       omittedEdits > 0 ? `\n(... ${omittedEdits} more user edits omitted)` : "";
 
-    // Step 3: Build user-visible prompt telling the advisor what to extract
-    // This prompt provides the advisor model with a comprehensive summary of the
+    // Step 3: Build user-visible prompt telling the agent what to extract
+    // This prompt provides the agent model with a comprehensive summary of the
     // task experience and instructs it to extract general, reusable rules.
     // The prompt is structured to be human-readable for debugging and model-comprehensible.
-    const advisorPrompt = [
+    const agentPrompt = [
       // Basic task information - what was attempted and how it turned out
       `Task: ${record.task}`,
       `Outcome: ${record.outcome ?? "unknown"}`,
 
       // File context - what files were involved in the task
-      // This helps the advisor understand the scope and domain of the work
+      // This helps the agent understand the scope and domain of the work
       `Files read: ${readPaths.length > 0 ? readPaths.join(", ") : "(none)"}`,
       `Files written (paths): ${writePaths.length > 0 ? writePaths.join(", ") : "(none)"}`,
 
@@ -223,18 +228,18 @@ export class PatternExtractor implements IPatternExtractor {
       // This is crucial for understanding the agent's behavior and patterns
       `Agent writes (diffs):\n${agentWriteBlock.length > 0 ? agentWriteBlock : "(none)"}`,
 
-      // Escalations - when the agent got stuck and needed help
+      // Escalations - when the subagent got stuck and needed help
       // These represent specific failure patterns that should be learned from
       `Escalations:\n${escalationBlock.length > 0 ? escalationBlock : "(none)"}`,
 
       // User corrections - what the user changed after the agent's work
       // These represent user preferences and style corrections
-      `User edits after agent output:\n${editBlock.length > 0 ? editBlock + editOmittedNote : "(none)"}`,
+      `User edits after subagent output:\n${editBlock.length > 0 ? editBlock + editOmittedNote : "(none)"}`,
 
       // Blank line for visual separation
       "",
 
-      // The core question - asking the advisor to generalize from this specific experience
+      // The core question - asking the agent to generalize from this specific experience
       "What general rules should be remembered from this experience to help with similar future tasks?",
 
       // Strict output format instructions - we need valid JSON, not conversational text
@@ -243,11 +248,11 @@ export class PatternExtractor implements IPatternExtractor {
     ].join("\n");
 
     // Step 4: Read model configuration and prepare chat messages
-    // We need to configure the advisor model with the right parameters
+    // We need to configure the agent model with the right parameters
     // The model name determines which AI model to use (e.g., llama2, mistral)
     // The temperature controls randomness (0.0 = deterministic, 1.0 = creative)
-    const model = await this.deps.config.getAdvisorModel();
-    const temperature = await this.deps.config.getAdvisorTemperature();
+    const model = await this.deps.config.getAgentModel();
+    const temperature = await this.deps.config.getAgentTemperature();
 
     // Construct the chat messages in the format expected by the Ollama client
     // The system message sets the persona and behavioral constraints
@@ -258,20 +263,20 @@ export class PatternExtractor implements IPatternExtractor {
         content:
           "You extract durable coding preferences and lessons from task experiences. Output only valid JSON arrays.",
       },
-      { role: "user", content: advisorPrompt },
+      { role: "user", content: agentPrompt },
     ];
 
     try {
-      // Step 5: Query the advisor and attempt to parse its JSON array output
+      // Step 5: Query the agent and attempt to parse its JSON array output
       // This is the core operation where we send the prompt to the AI model
       // and get back its analysis. We use the configured model and temperature.
       // The chat call may fail due to network issues or model errors, so it's wrapped in try-catch.
       // We await this call because we need the response before we can proceed with parsing.
-      const rawAdvisorResponse = await this.deps.ollama.chat(model, messages, {
+      const rawAgentResponse = await this.deps.ollama.chat(model, messages, {
         temperature,
       });
 
-      // Attempt to parse the JSON array from the advisor's response
+      // Attempt to parse the JSON array from the agent's response
       // The extractJsonArray helper extracts the JSON array from the raw response text
       // even if it's embedded in markdown code blocks or conversational text
       // This is necessary because LLMs often wrap JSON in markdown or add conversational filler
@@ -279,22 +284,23 @@ export class PatternExtractor implements IPatternExtractor {
       try {
         // First extract the JSON array string from the raw response
         // Then parse it as JSON to get a JavaScript object/array
-        parsedRules = JSON.parse(
-          extractJsonArray(rawAdvisorResponse),
-        ) as unknown;
+        parsedRules = JSON.parse(extractJsonArray(rawAgentResponse)) as unknown;
       } catch {
         // If parsing fails, log and continue to handle escalations/edits
         // This is a graceful failure - we still want to process escalations and user edits
-        // even if the advisor's JSON output was malformed or missing
+        // even if the agent's JSON output was malformed or missing
         // We set parsedRules to null to indicate the parsing failed
-        console.error("[PatternExtractor] invalid JSON from advisor");
+        logger.warn(
+          { taskId: record.taskId },
+          "PatternExtractor received invalid JSON from agent",
+        );
         parsedRules = null;
       }
 
-      // Step 6: If the advisor returned a JSON array, validate and store
+      // Step 6: If the agent returned a JSON array, validate and store
       // We validate each rule to ensure it meets our minimum requirements
       // This prevents malformed or empty rules from being stored
-      // Validation is crucial because the advisor output is untrusted and could be malformed
+      // Validation is crucial because the agent output is untrusted and could be malformed
       if (Array.isArray(parsedRules)) {
         for (const ruleItem of parsedRules) {
           // Validate shape — require a non-empty `text` string
@@ -344,15 +350,18 @@ export class PatternExtractor implements IPatternExtractor {
       }
     } catch (error) {
       // Step 5b: Fail the chat call gracefully and continue to other work
-      // If the advisor chat fails (network error, model unavailable, etc.),
+      // If the agent chat fails (network error, model unavailable, etc.),
       // we log the error but continue to process escalations and user edits.
       // This ensures we still capture some learning data even if the AI analysis fails.
       // We don't re-throw because this is a background process and failures shouldn't crash the system
-      console.error("[PatternExtractor] advisor chat failed:", error);
+      logger.error(
+        { taskId: record.taskId, err: error },
+        "PatternExtractor agent chat failed",
+      );
     }
 
     // Step 7a: Convert recorded escalations into high-confidence fix rules
-    // Escalations represent specific failure patterns where the agent needed help.
+    // Escalations represent specific failure patterns where the subagent needed help.
     // We convert these into "fix" rules with high confidence because they represent
     // explicit guidance that was needed to resolve the issue.
     // These are particularly valuable because they represent human intervention points
@@ -370,7 +379,7 @@ export class PatternExtractor implements IPatternExtractor {
         // The scope is "all" because failure patterns often transcend specific languages
         scope: "all",
         // High confidence because this is explicit human-provided guidance
-        // Unlike general advisor suggestions, escalation guidance comes from human intervention
+        // Unlike general agent suggestions, escalation guidance comes from human intervention
         confidence: "high",
         // Mark as a "fix" rule to indicate it's about resolving specific problems
         // This distinguishes it from style rules (source: "style") and general rules (source: "outcome")

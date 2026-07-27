@@ -1,50 +1,50 @@
 /**
- * Display toggle command handlers.
+ * UI toggle slash commands: `/spinner` and `/think`.
  *
- * This module handles commands for toggling UI display features:
- * - /spinner on|off
- * - /think on|off
+ * @remarks
+ * Both accept `on` / `off` in either the subcommand or argument slot
+ * (`/spinner on` and `/spinner` with arg `on` behave the same). Omitting the
+ * token prints the current setting without writing config.
  */
 
-import { loadConfig, updateConfig } from "../config.js";
+import { loadConfig, updateConfig } from "../config/index.js";
 import { printSuccess, printLine } from "../renderer.js";
 
 /**
- * <Summary>
- * What it does:
- *   Handles "/spinner" to enable or disable the UI spinner.
+ * Enables, disables, or reports the status of the animated UI spinner.
  *
- * How it does it (step by step):
- *   1. Parses the token from subcommand or argument.
- *   2. If token is "on", enables spinner in UI config.
- *   3. If token is "off", disables spinner in UI config.
- *   4. Otherwise displays current spinner status.
+ * @remarks
+ * Persists `ui.showSpinner` via {@link updateConfig}. Missing/`undefined`
+ * spinner preference is treated as enabled when reporting status
+ * (`!== false`).
  *
- * Parameters:
- *   @param sub - Subcommand: "on", "off", or empty.
- *   @param arg - Alternative position for "on" or "off".
+ * @param sub - First token after `/spinner` (often `"on"` / `"off"`).
+ * @param arg - Overflow token if the user placed `on`/`off` after a blank sub.
  *
- * Returns:
- *   @returns called for side effects only.
- * </Summary>
+ * @example
+ * ```ts
+ * handleSpinner("on", "");
+ * handleSpinner("", "off");
+ * handleSpinner("", ""); // prints current status
+ * ```
  */
 export const handleSpinner = (sub: string, arg: string): void => {
-  // Parse token from subcommand or argument
+  // Allow `/spinner on` or `/spinner` + arg interchangeably from the router.
   const token = (sub || arg).trim().toLowerCase();
   const config = loadConfig();
+
   if (token === "on") {
-    // Enable spinner in UI config
     updateConfig({ ui: { ...config.ui, showSpinner: true } });
     printSuccess("UI spinner enabled.");
     return;
   }
+
   if (token === "off") {
-    // Disable spinner in UI config
     updateConfig({ ui: { ...config.ui, showSpinner: false } });
     printSuccess("UI spinner disabled.");
     return;
   }
-  // Display current spinner status
+
   const enabled = config.ui.showSpinner !== false;
   printLine(
     `  UI spinner: ${enabled ? "on" : "off"} (use /spinner on | /spinner off)`,
@@ -52,40 +52,35 @@ export const handleSpinner = (sub: string, arg: string): void => {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Handles "/think" to enable or disable advisor/agent think output display.
+ * Enables, disables, or reports agent/subagent think-box visibility.
  *
- * How it does it (step by step):
- *   1. Parses the token from subcommand or argument.
- *   2. If token is "on", enables think output in config.
- *   3. If token is "off", disables think output in config.
- *   4. Otherwise displays current think output status.
+ * @remarks
+ * Persists top-level `showThinkOutput` in config. When off, think frames are
+ * still produced by the server but not rendered in the CLI.
  *
- * Parameters:
- *   @param sub - Subcommand: "on", "off", or empty.
- *   @param arg - Alternative position for "on" or "off".
+ * @param sub - First token after `/think`.
+ * @param arg - Alternate `on`/`off` position.
  *
- * Returns:
- *   @returns called for side effects only.
- * </Summary>
+ * @example
+ * ```ts
+ * handleThink("off", "");
+ * ```
  */
 export const handleThink = (sub: string, arg: string): void => {
-  // Parse token from subcommand or argument
   const token = (sub || arg).trim().toLowerCase();
+
   if (token === "on") {
-    // Enable think output
     updateConfig({ showThinkOutput: true });
-    printSuccess("Think output enabled (advisor/agent think boxes).");
+    printSuccess("Think output enabled (agent/subagent think boxes).");
     return;
   }
+
   if (token === "off") {
-    // Disable think output
     updateConfig({ showThinkOutput: false });
     printSuccess("Think output disabled.");
     return;
   }
-  // Display current think output status
+
   const enabled = loadConfig().showThinkOutput;
   printLine(
     `  Think output: ${enabled ? "on" : "off"} (use /think on | /think off)`,

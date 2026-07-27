@@ -15,19 +15,24 @@ import React, {
   useState,
 } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import type { CliOverrides } from "../../cliArgs.js";
-import { applyCliOverrides } from "../../cliArgs.js";
-import { loadConfig, type Config } from "../../config.js";
+import type { CliOverrides } from "../../cli/cliArgs.js";
+import { applyCliOverrides } from "../../cli/cliArgs.js";
+import { loadConfig, type Config } from "../../config/index.js";
 import { Connection } from "../../connection/index.js";
 import { CommandHandler } from "../../commands/index.js";
-import { SkillManager } from "../../skills.js";
-import { buildPromptLabel } from "../../pathDisplay.js";
+import { SkillManager } from "../../skills/skills.js";
+import { buildPromptLabel } from "../../utils/pathDisplay.js";
 import { LocalFileProxy } from "../../localFileProxy.js";
 import { createInkPromptPort } from "../promptPort.js";
 import { App } from "../App.js";
 import { SetupWizard } from "./SetupWizard.js";
 import { loadHistory } from "./historyPersist.js";
+import { wireSessionAbortSignal } from "./wireSessionAbortSignal.js";
 import { setInkActive } from "../uiBridge.js";
+import {
+  printTokenSaveInitTip,
+  syncTokenSaveTools,
+} from "../../commands/tokenSaveHandlers.js";
 
 /**
  * Props for {@link BootstrapApp}.
@@ -59,8 +64,10 @@ export type BootstrapAppProps = {
  *
  * @remarks
  * Transitions: `setup` → `connecting` → `ready`, or `connecting` → `error`
- * when the server is unreachable. There is no recovery from `error` except
- * restarting the CLI.
+ * when the server is unreachable. There is no in-app recovery from `error` —
+ * the CLI must be restarted, and if the failure was caused by changed server
+ * settings, restarted with `--address`/`--port`/`--password` (or `--reset`) to
+ * save the new ones first.
  */
 type BootstrapPhase = "setup" | "connecting" | "ready" | "error";
 
@@ -109,7 +116,8 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
 }) => {
   const { exit } = useApp();
 
-  // Registered by App so slash /exit and Ctrl+C share the same teardown path
+  // Registered by App so slash /exit and Ctrl+C share the same teardown path.
+  // Using a ref avoids re-rendering BootstrapApp when App mounts its exit handler.
   const exitHandlerRef = useRef<(() => void) | undefined>();
 
   const inputHistoryRef = useRef(loadHistory());
@@ -118,7 +126,9 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
     needsSetup ? "setup" : "connecting",
   );
 
-  // Config is null during first-run setup until the wizard calls onComplete
+  // Config is null during first-run setup until the wizard calls onComplete.
+  // Lazy-initialize with existing config when needsSetup is false to avoid
+  // unnecessary config reads on every render.
   const [appConfig, setAppConfig] = useState<Config | null>(() =>
     needsSetup ? null : applyCliOverrides(loadConfig(), cliOverrides),
   );
@@ -129,7 +139,9 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
     null,
   );
 
-  // uiBridge routes log output away from Ink while the terminal UI is active
+  // uiBridge routes log output away from Ink while the terminal UI is active.
+  // useLayoutEffect ensures this happens synchronously before paint to prevent
+  // log flicker during the initial render.
   useLayoutEffect(() => {
     setInkActive(true);
     return () => setInkActive(false);
@@ -137,6 +149,8 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
 
   const workspaceRootDirectory = useMemo(() => {
     if (!appConfig) return process.cwd();
+    // Fall back to process.cwd() if the config has an empty workspace string.
+    // This can happen when users clear the workspace field in the setup wizard.
     return appConfig.workspace.trim().length > 0
       ? appConfig.workspace
       : process.cwd();
@@ -151,7 +165,11 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
       void buildPromptLabel(localFileProxy.getCwd());
     });
 
+    // Wire the file proxy into the connection so the server can invoke it
+    // for workspace I/O, and wire the session abort signal so shell commands
+    // terminate when the connection drops.
     rsocketConnection.setFileProxy(localFileProxy);
+    wireSessionAbortSignal(rsocketConnection, localFileProxy);
 
     return { connection: rsocketConnection, fileProxy: localFileProxy };
   }, [appConfig, workspaceRootDirectory]);
@@ -161,6 +179,9 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
       return;
     }
 
+    // Flag to prevent state updates if the component unmounts during async work.
+    // This is critical because the connection effect can run for several seconds
+    // while the user might dismiss the error screen and trigger unmount.
     let connectionCancelled = false;
 
     const { connection: rsocketConnection, fileProxy: localFileProxy } =
@@ -189,27 +210,34 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
         return;
       }
 
+      // Skills are synced manually via /skills sync — no automatic sync on connect.
       const skillManager = new SkillManager(rsocketConnection);
 
-      // Skill sync is best-effort — a failure should not block the main UI
       try {
-        const syncedSkillCount = await skillManager.autoSync();
-        if (syncedSkillCount > 0) {
+        const syncedToolCount = await syncTokenSaveTools(
+          rsocketConnection,
+          workspaceRootDirectory,
+        );
+        if (syncedToolCount > 0) {
           sessionInitializationMessages.push(
-            `Synced ${syncedSkillCount} skill(s) to server.`,
+            `Synced ${syncedToolCount} TokenSave tool(s) to server.`,
           );
+        } else {
+          await printTokenSaveInitTip(workspaceRootDirectory);
         }
-      } catch (skillSyncError) {
+      } catch (tokenSaveSyncError) {
         sessionInitializationMessages.push(
-          `Skill sync failed: ${
-            skillSyncError instanceof Error
-              ? skillSyncError.message
-              : String(skillSyncError)
+          `TokenSave sync failed: ${
+            tokenSaveSyncError instanceof Error
+              ? tokenSaveSyncError.message
+              : String(tokenSaveSyncError)
           }`,
         );
       }
 
-      // Inform the user if a server session already exists; ignore RPC errors
+      // Inform the user if a server session already exists; ignore RPC errors.
+      // This is agenty only — startup continues without the hint if the RPC fails.
+      // The hint helps users avoid confusing state where two clients share one session.
       try {
         const sessionExists = await rsocketConnection.sendCommand<boolean>(
           "session.exists",
@@ -248,10 +276,14 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
     })();
 
     return () => {
+      // Set the flag to prevent state updates if the effect cleanup runs
+      // after async operations complete but before the component fully unmounts.
       connectionCancelled = true;
     };
   }, [bootstrapPhase, appConfig, connectionServices]);
 
+  // Persist input history on unmount so arrow-key navigation survives restarts.
+  // This runs on both normal exit and error-screen dismissal.
   useEffect(
     () => () => {
       onSaveHistory(inputHistoryRef.current);
@@ -259,6 +291,9 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
     [onSaveHistory],
   );
 
+  // Allow the user to dismiss the error screen with any key press.
+  // This is the only recovery path from a connection failure — the CLI
+  // exits cleanly rather than hanging.
   useInput(() => {
     if (bootstrapPhase === "error") {
       onSaveHistory(inputHistoryRef.current);
@@ -281,6 +316,15 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
     return (
       <Box flexDirection="column" paddingY={1}>
         <Text color="red">error: {connectionError}</Text>
+        {/* The /set commands that would fix this are unreachable from here —
+            they only exist once connected. Point at the offline flags instead,
+            at the exact moment the user needs them. */}
+        <Text dimColor>
+          If the server&apos;s address, port, or password changed, save the new
+          ones with:
+        </Text>
+        <Text dimColor> loopy --address &lt;ip&gt; --port &lt;n&gt; --password</Text>
+        <Text dimColor> loopy --reset (clear everything and start over)</Text>
         <Text dimColor>Press any key to exit</Text>
       </Box>
     );

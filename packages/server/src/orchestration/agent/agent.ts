@@ -1,598 +1,1113 @@
 /**
- * <Summary>
- * What it does:
- *   Executes subtasks via Ollama tool calls (read/write/edit/run/escalate/finish).
+ * Orchestrates task planning, escalation guidance, and result synthesis using the agent model.
  *
- * How it fits in the system:
- *   The Agent is the worker that executes individual subtasks from the advisor's plan.
- *   It interacts with the Ollama model through streaming chat, parses tool calls from
- *   the response, executes them through specialized handlers, and tracks verification
- * requirements. It manages retry logic for common model mistakes and can escalate
- *   to the advisor when stuck. The agent enforces command classification rules
- *   (setup/verify/run-project) from the advisor's command plan.
- * </Summary>
+ * @remarks
+ * The Agent class handles three core responsibilities:
+ * 1. **Planning** — Decomposes user tasks into executable Directed Acyclic Graph (DAG) plans using the agent model.
+ * 2. **Escalation guidance** — Provides blocking advice when worker subagents get stuck.
+ * 3. **Result synthesis** — Streams a final user-facing answer that merges multi-subtask results.
+ *
+ * The agent uses the Ollama inference API and never manages RSocket or TCP connections directly.
+ * It's the "lead" coordinator model configured for reasoning and planning, distinct from execution subagents.
+ *
+ * @example
+ * ```ts
+ * const agent = new Agent({ ollama: client, config: configManager });
+ * const plan = await agent.plan(userTask, contextHeader, skillContent);
+ * // Returns validated SubagentPlan with subtasks, risks, and execution strategy
+ * ```
  */
 
-import type { Advisor } from "../advisor/advisor.js";
-import { hasCommandPlanSection } from "../commandClassifier.js";
+import { TaskSkippedError, PlanRevisionRequestedError } from "./agentErrors.js";
+import { ValidationError, OrchestrationError } from "../../errors/index.js";
+import {
+  buildAgentThinkInstruction,
+  buildPlanFromLines,
+  extractAgentThink,
+  parseCommandPlan,
+  parseCommandPlanGaps,
+  parseParallelismGaps,
+  parsePlanLines,
+  parseRisks,
+  parseVerifyGaps,
+} from "./agentThink.js";
+import type { MaxSubagentsParam } from "../maxSubagents.js";
+import {
+  applyMaxAgentsConstraint,
+  deriveExecution,
+  validateNoCycles,
+} from "../planHelpers.js";
+import {
+  extractThinkTextForPlan,
+  normaliseSubagentPlan,
+  tryParseAgentJson,
+} from "./agentHelpers.js";
+import type { IConfigManager, IOllamaClient } from "../interfaces.js";
 import type {
-  IConfigManager,
-  IExperienceRecorder,
-  IOllamaClient,
-} from "../interfaces.js";
-import type { CommandPlan, Message, TaskModelOverrides } from "../types.js";
+  SubagentPlan,
+  CommandPlan,
+  Message,
+  PlannedSubtask,
+  PlanReviewResponse,
+  SubtaskResult,
+  TaskModelOverrides,
+} from "../types.js";
 import { emptyCommandPlan } from "../types.js";
 import {
-  extractThinking,
-  extractToolFromText,
-  parseAllToolCalls,
-  stripThinking,
-  ToolStreamParser,
-  type AgentToolCall,
-} from "../toolProtocol.js";
-import type { TaskFrame } from "../../transport/frames.js";
-import type { TerminalExecutor } from "../../workspace/execution/terminalExecutor.js";
-import type { WorkspaceManager } from "../../workspace/manager/workspaceManager.js";
-import { ReadFileHandler } from "../tools/readFileHandler.js";
-import { WriteFileHandler } from "../tools/writeFileHandler.js";
-import { EditFileHandler } from "../tools/editFileHandler.js";
-import { RunCommandHandler } from "../tools/runCommandHandler.js";
-import { EscalateHandler } from "../tools/escalateHandler.js";
-import { FinishHandler } from "../tools/finishHandler.js";
-import type { IToolHandler } from "../tools/toolHandler.js";
-import { buildAgentMessages } from "./agentMessageBuilder.js";
-import { handleAgentRetry } from "./agentRetryHandler.js";
-import { AbortError } from "../../errors/index.js";
+  SubagentPlanHooks,
+  MAX_AGENT_EXPLORE_CALLS,
+  MAX_AGENT_LOOPS,
+  MAX_AGENT_SEARCH_CALLS,
+  MAX_AGENT_TOTAL_ITERATIONS,
+} from "./agentConstants.js";
+import {
+  AGENT_EXPLORATION_RULES,
+  AGENT_RETRIEVAL_RULES,
+  EXPLORE_CODEBASE_TOOL,
+  hasAgentSearchTools,
+  isAgentSearchToolName,
+  isExploreCodebaseTool,
+  SUBMIT_PLAN_TOOL,
+  SUBMIT_PLAN_TOOL_NAME,
+} from "./agentTools.js";
+import { formatMcpData } from "../tools/tokenSaveToolHandler.js";
+import type { ToolSchema } from "../tools/types.js";
+import { logger } from "../../utils/logger.js";
 
-/**
- * <Summary>
- * What it does:
- *   Maximum number of tool call iterations allowed per subtask.
- *
- * How it fits in the system:
- *   Prevents infinite loops when the agent gets stuck or makes repeated mistakes.
- *   After this many tool call attempts, the agent fails with a timeout error.
- * </Summary>
- */
-const MAX_TOOL_ITERATIONS = 16;
+export { TaskSkippedError, PlanRevisionRequestedError } from "./agentErrors.js";
 
-/**
- * <Summary>
- * What it does:
- *   Parameters required to run an agent on a subtask.
- *
- * How it fits in the system:
- *   Contains all the context and dependencies needed for agent execution,
- * including the subtask description, workspace access, terminal executor,
- * model configuration, and command plan for shell command classification.
- *
- * Fields:
- *   taskId — Unique identifier for the task execution.
- *   subtask — The subtask description to execute.
- *   agentId — The agent group ID for tracking/display.
- *   agentLabel — Human-readable label for the agent group.
- *   skillContent — Selected skill documentation (may be empty).
- *   sessionContext — Session context header (may be empty).
- *   workspace — Workspace manager for file operations.
- *   terminal — Terminal executor for command execution.
- *   recorder — Experience recorder for logging.
- *   emit — Function to emit task frames to client.
- *   signal — AbortSignal for cancellation support.
- *   modelOverrides — Optional model/temperature overrides.
- *   commandPlan — Command plan for shell classification.
- *   debug — Whether to emit debug logs to stderr.
- * </Summary>
- */
-export type AgentRunParams = {
-  /** Unique identifier for the task execution. */
-  taskId: string;
+/** Extracts and formats error message from raw plan JSON response. */
+const planJsonErrorMessage = (rawResponse: string): string => {
+  const snippet = rawResponse.replace(/\s+/g, " ").trim().slice(0, 200);
+  return snippet.length > 0
+    ? `Agent returned invalid plan JSON. Model output started with: "${snippet}"`
+    : "Agent returned invalid plan JSON";
+};
 
-  /** The subtask description to execute. */
-  subtask: string;
+/** Generates error message for empty model response (may indicate reasoning model). */
+const emptyAgentResponseMessage = (agentModel: string): string =>
+  `Agent model '${agentModel}' returned an empty response. It may be a reasoning model whose output was not captured, or the model tag may be incorrect.`;
 
-  /** The agent group ID for tracking/display. */
-  agentId: number;
+/** Returns appropriate error message based on response content (empty vs. invalid JSON). */
+const agentPlanFailureMessage = (
+  agentModel: string,
+  rawResponse: string,
+): string => {
+  if (rawResponse.trim().length === 0) {
+    return emptyAgentResponseMessage(agentModel);
+  }
+  return planJsonErrorMessage(rawResponse);
+};
 
-  /** Human-readable label for the agent group. */
-  agentLabel: string;
+/** Truncates text for revision prompts with ellipsis suffix. */
+const truncateForRevisionPrompt = (text: string, max = 120): string =>
+  text.length <= max ? text : `${text.slice(0, max).trimEnd()}…`;
 
-  /** Selected skill documentation (may be empty). */
-  skillContent: string;
-
-  /** Session context header (may be empty). */
-  sessionContext: string;
-
-  /** Workspace manager for file operations. */
-  workspace: WorkspaceManager;
-
-  /** Terminal executor for command execution. */
-  terminal: TerminalExecutor;
-
-  /** Experience recorder for logging. */
-  recorder: IExperienceRecorder;
-
-  /** Function to emit task frames to client. */
-  emit: (frame: TaskFrame) => void;
-
-  /** AbortSignal for cancellation support. */
-  signal: AbortSignal;
-
-  /** Optional model/temperature overrides. */
-  modelOverrides?: TaskModelOverrides;
-
-  /** Command plan for shell classification. */
-  commandPlan?: CommandPlan;
-
-  /** Whether to emit debug logs to stderr. */
-  debug?: boolean;
+/** Detects if response looks like conversational prose rather than structured plan output. */
+const looksLikeConversationalReply = (rawResponse: string): boolean => {
+  const trimmed = rawResponse.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+  if (/<agent-think>/i.test(trimmed)) {
+    return false;
+  }
+  return /^(?:the user|you(?:'re| are) (?:right|correct|pointing)|i (?:see|understand|missed|need to)|let me)/i.test(
+    trimmed,
+  );
 };
 
 /**
- * <Summary>
- * What it does:
- *   Emits debug logs to stderr when debug mode is enabled.
+ * Constructs a targeted revision prompt telling the agent to fix specific gaps.
  *
- * How it does it (step by step):
- *   1. Check if debug mode is enabled.
- *   2. If disabled, return immediately.
- *   3. If enabled, emit formatted debug message to stderr.
- *
- * Parameters:
- *   @param debug - Whether debug mode is enabled.
- *   @param label - Label for the debug message.
- *   @param data - Data to log.
- * </Summary>
+ * @remarks
+ * Incorporates gap summary and command hints into a concise revision request,
+ * respecting tool calling mode (native vs. text-based).
  */
-const agentDebugLog = (debug: boolean, label: string, data: unknown): void => {
-  // Step 1: Check if debug mode is enabled
-  if (!debug) {
+const revisionFollowUpMessage = (
+  gapSummary: string,
+  commandHint: string,
+  configuredSupportsTools: boolean,
+): string => {
+  const planFollowUp = configuredSupportsTools
+    ? "call submit_plan with your subtask breakdown."
+    : "call submit_plan with your subtask breakdown after your <agent-think> block.";
+  const missing = truncateForRevisionPrompt(gapSummary);
+  return [
+    "Revise your plan. Do not explain, acknowledge, or discuss this message.",
+    missing.length > 0
+      ? `Still missing: ${missing}${commandHint}`
+      : commandHint.trim(),
+    `Output ONLY a corrected <agent-think> block, then ${planFollowUp}`,
+  ]
+    .filter((line) => line.length > 0)
+    .join("\n");
+};
+
+/**
+ * Constructs a recovery message when agent is over-explaining instead of focusing on structured output.
+ *
+ * @remarks
+ * Directs the agent to stop conversational prose and output only the plan structure.
+ */
+const formatOnlyRecoveryMessage = (configuredSupportsTools: boolean): string =>
+  configuredSupportsTools
+    ? "Stop explaining. Output ONLY a <agent-think> block, then call submit_plan. No prose."
+    : "Stop explaining. Output ONLY a <agent-think> block with your plan, then submit_plan JSON. No prose.";
+
+/** A tool call parsed from a native tool-calling response: name plus arguments. */
+type ParsedToolCall = { name: string; args: Record<string, unknown> };
+
+/**
+ * Resolved model, temperature, and tool-support settings for one planning call.
+ *
+ * @remarks
+ * Combines persisted config with optional per-task overrides. Per-task overrides
+ * take precedence for flexibility (e.g., trying a different model for one task).
+ */
+type PlanningConfig = {
+  /** Ollama model identifier to use for planning. */
+  agentModel: string;
+  /** Sampling temperature for planning (typically low for consistency). */
+  agentTemperature: number;
+  /** Whether the configured model supports native tool calling. */
+  configuredSupportsTools: boolean;
+};
+
+/** Resolved model and temperature for one advise/combine call (no tool-support flag needed). */
+type ModelAndTemperature = {
+  /** Ollama model identifier to use. */
+  agentModel: string;
+  /** Sampling temperature to use. */
+  agentTemperature: number;
+};
+
+/**
+ * Resolves the effective model and temperature from config, preferring per-task overrides.
+ *
+ * @remarks
+ * Shared by `advise()`, `combine()`, and `resolvePlanningConfig()` so the
+ * override-precedence logic (per-task override wins over persisted config) lives in one place.
+ *
+ * @param config - Config manager providing default settings.
+ * @param overrides - Optional per-task model/temperature overrides.
+ * @returns Resolved model and temperature.
+ */
+const resolveModelAndTemperature = async (
+  config: IConfigManager,
+  overrides: TaskModelOverrides | undefined,
+): Promise<ModelAndTemperature> => {
+  const agentModel =
+    overrides?.agentModel?.trim() || (await config.getAgentModel());
+  const agentTemperature =
+    overrides?.agentTemp ?? (await config.getAgentTemperature());
+  return { agentModel, agentTemperature };
+};
+
+/**
+ * Resolves effective planning configuration from config manager and optional per-task overrides.
+ *
+ * @remarks
+ * Per-task overrides take precedence over persisted config. This allows callers to
+ * temporarily switch models or temperatures for specific tasks without persisting changes.
+ *
+ * @param config - Config manager providing default settings.
+ * @param overrides - Optional per-task model/temperature/tool-support overrides.
+ * @returns Resolved planning configuration with effective model and temperature.
+ */
+const resolvePlanningConfig = async (
+  config: IConfigManager,
+  overrides: TaskModelOverrides | undefined,
+): Promise<PlanningConfig> => {
+  const { agentModel, agentTemperature } = await resolveModelAndTemperature(
+    config,
+    overrides,
+  );
+  const configuredSupportsTools =
+    overrides?.agentModelSupportsTools ??
+    (await config.getAgentModelSupportsTools());
+  return { agentModel, agentTemperature, configuredSupportsTools };
+};
+
+/**
+ * Builds the complete system prompt for planning by combining skill, context, rules, and instructions.
+ *
+ * @remarks
+ * Assembles the system prompt from multiple sources in order:
+ * 1. Skill content (if provided)
+ * 2. Memory context header (if provided)
+ * 3. Exploration rules (always)
+ * 4. Retrieval rules (if tool calling is supported and search tools are available)
+ * 5. Agent think instruction template (always)
+ *
+ * @param skillContent - Selected skill markdown (may be empty).
+ * @param contextHeader - Memory/preference context (may be empty).
+ * @param hooks - Optional hooks that may provide search tools.
+ * @param configuredSupportsTools - Whether native tool calling is available.
+ * @param maxSubagents - Max agent constraint to include in instructions.
+ * @returns Complete system prompt string.
+ */
+const buildPlanningSystemText = (
+  skillContent: string,
+  contextHeader: string,
+  hooks: SubagentPlanHooks | undefined,
+  configuredSupportsTools: boolean,
+  maxSubagents: MaxSubagentsParam,
+): string => {
+  const systemParts: string[] = [];
+  if (skillContent.trim().length > 0) {
+    systemParts.push(skillContent.trim());
+  }
+  if (contextHeader.trim().length > 0) {
+    systemParts.push(contextHeader.trim());
+  }
+  systemParts.push(AGENT_EXPLORATION_RULES);
+  if (
+    configuredSupportsTools &&
+    hasAgentSearchTools(hooks?.searchTools ?? [])
+  ) {
+    systemParts.push(AGENT_RETRIEVAL_RULES);
+  }
+  systemParts.push(buildAgentThinkInstruction(maxSubagents));
+  return systemParts.join("\n\n");
+};
+
+/**
+ * Builds the tool list offered to the model for this planning iteration.
+ *
+ * @remarks
+ * Respects per-call budgets: submit_plan is always offered (if native tools enabled),
+ * explore_codebase only if budget remaining, search tools only if budget remaining.
+ *
+ * @param configuredSupportsTools - Whether native tool calling is available.
+ * @param hooks - Optional hooks providing explore and search tool implementations.
+ * @param exploreCallsUsed - Count of explore calls already made this iteration.
+ * @param searchCallsUsed - Count of search calls already made this iteration.
+ * @returns Array of tool schemas available for this model call.
+ */
+const buildPlanningTools = (
+  configuredSupportsTools: boolean,
+  hooks: SubagentPlanHooks | undefined,
+  exploreCallsUsed: number,
+  searchCallsUsed: number,
+): ToolSchema[] =>
+  configuredSupportsTools
+    ? [
+        SUBMIT_PLAN_TOOL,
+        ...(hooks?.exploreCodebase && exploreCallsUsed < MAX_AGENT_EXPLORE_CALLS
+          ? [EXPLORE_CODEBASE_TOOL]
+          : []),
+        ...(searchCallsUsed < MAX_AGENT_SEARCH_CALLS
+          ? (hooks?.searchTools ?? [])
+          : []),
+      ]
+    : [];
+
+/**
+ * Result of handling an explore or search tool call during planning.
+ *
+ * @remarks
+ * Used to track whether an auxiliary tool call (explore or search) was handled,
+ * and to report updated budgets so the planning loop knows when limits are reached.
+ */
+type AuxiliaryToolOutcome = {
+  /** `true` when a tool call was dispatched; caller should continue the loop. */
+  handled: boolean;
+  /** Updated count of explore_codebase calls made. */
+  exploreCallsUsed: number;
+  /** Updated count of search tool calls made. */
+  searchCallsUsed: number;
+};
+
+/**
+ * Dispatches an `explore_codebase` or search tool call made during planning iteration.
+ *
+ * @remarks
+ * Appends assistant and tool response turns to the message array in place.
+ * Checks explore before search (priority order). Does not dispatch the same call type twice.
+ * Respects per-call budgets and only dispatches if the budget is not exhausted.
+ *
+ * @param messages - Message array to append assistant/tool turns to (mutated in place).
+ * @param rawResponse - The model's raw response text.
+ * @param configuredSupportsTools - Whether native tool calling is available.
+ * @param exploreCall - Parsed explore_codebase tool call (if present).
+ * @param searchCall - Parsed search tool call (if present).
+ * @param hooks - Optional hooks providing tool implementations.
+ * @param exploreCallsUsed - Current count of explore calls made.
+ * @param searchCallsUsed - Current count of search calls made.
+ * @returns Outcome indicating whether a call was handled and updated budgets.
+ */
+const handleAuxiliaryToolCall = async (
+  messages: Message[],
+  rawResponse: string,
+  configuredSupportsTools: boolean,
+  exploreCall: ParsedToolCall | undefined,
+  searchCall: ParsedToolCall | undefined,
+  hooks: SubagentPlanHooks | undefined,
+  exploreCallsUsed: number,
+  searchCallsUsed: number,
+): Promise<AuxiliaryToolOutcome> => {
+  if (
+    configuredSupportsTools &&
+    exploreCall &&
+    hooks?.exploreCodebase &&
+    exploreCallsUsed < MAX_AGENT_EXPLORE_CALLS
+  ) {
+    const exploreResult = await hooks.exploreCodebase();
+    messages.push({
+      role: "assistant",
+      content: rawResponse,
+      tool_calls: [
+        {
+          function: {
+            name: exploreCall.name,
+            arguments: exploreCall.args,
+          },
+        },
+      ],
+    });
+    messages.push({
+      role: "tool",
+      tool_name: exploreCall.name,
+      content: exploreResult.snapshot.trim(),
+    });
+    return {
+      handled: true,
+      exploreCallsUsed: exploreCallsUsed + 1,
+      searchCallsUsed,
+    };
+  }
+
+  if (
+    configuredSupportsTools &&
+    searchCall &&
+    hooks?.callSearchTool &&
+    searchCallsUsed < MAX_AGENT_SEARCH_CALLS
+  ) {
+    const searchResult = await hooks.callSearchTool(
+      searchCall.name,
+      searchCall.args,
+    );
+    messages.push({
+      role: "assistant",
+      content: rawResponse,
+      tool_calls: [
+        {
+          function: {
+            name: searchCall.name,
+            arguments: searchCall.args,
+          },
+        },
+      ],
+    });
+    messages.push({
+      role: "tool",
+      tool_name: searchCall.name,
+      content: searchResult.isError
+        ? `[tokensave error]: ${searchResult.errorMessage ?? "unknown error"}`
+        : formatMcpData(searchResult.data),
+    });
+    return {
+      handled: true,
+      exploreCallsUsed,
+      searchCallsUsed: searchCallsUsed + 1,
+    };
+  }
+
+  return { handled: false, exploreCallsUsed, searchCallsUsed };
+};
+
+/**
+ * Result of evaluating a planning response for validation gaps.
+ *
+ * @remarks
+ * Captures whether the response passes validation and provides a summary of
+ * any gaps found (verification, commands, etc.). Used to decide whether to
+ * re-prompt the model for a revision.
+ */
+type PlanGapEvaluation = {
+  /** Whether the response has any validation gaps that require revision. */
+  hasValidationGaps: boolean;
+  /** Human-readable summary of detected gaps. */
+  gapSummary: string;
+  /** Detailed analysis of command plan gaps (see, e.g., parseCommandPlanGaps). */
+  commandGaps: { hasGaps: boolean; missingSummary: string };
+};
+
+/**
+ * Evaluates a planning response for validation gaps and missing components.
+ *
+ * @remarks
+ * Checks the `<agent-think>` block for:
+ * - Missing verification statements in VERIFY PLAN section
+ * - Missing COMMAND PLAN section or verify commands
+ * - (Informational only) parallelism gaps between declared mode and dependsOn structure
+ *
+ * Parallelism gaps are logged but do NOT trigger re-prompts — the model's
+ * declared execution strategy is trusted as is.
+ *
+ * @param thinkText - Extracted agent-think block content (if available).
+ * @param rawResponse - Raw model response (used as fallback).
+ * @param planCall - Parsed submit_plan tool call (if present).
+ * @returns Evaluation result with flags and summaries for detected gaps.
+ */
+const evaluatePlanGaps = (
+  thinkText: string | null,
+  rawResponse: string,
+  planCall: ParsedToolCall | undefined,
+): PlanGapEvaluation => {
+  const verificationGaps = thinkText
+    ? parseVerifyGaps(thinkText)
+    : {
+        hasGaps: true,
+        missingSummary: "missing agent-think block",
+      };
+
+  const commandGaps = thinkText
+    ? parseCommandPlanGaps(thinkText)
+    : {
+        hasGaps: true,
+        missingSummary: "missing COMMAND PLAN",
+      };
+
+  // Validate parallelism: declared execution mode vs dependsOn structure
+  let parallelismGaps = { hasGaps: false, missingSummary: "" };
+  if (thinkText) {
+    let probedJson: unknown = planCall?.args ?? null;
+    if (probedJson === null) {
+      probedJson = tryParseAgentJson(rawResponse);
+    }
+    if (probedJson !== null) {
+      parallelismGaps = parseParallelismGaps(thinkText, probedJson);
+    }
+  }
+
+  // Note: parallelismGaps computed for logging but NOT used to trigger re-prompts
+  // — we trust the subagent model's judgment on execution mode
+  const hasValidationGaps = verificationGaps.hasGaps || commandGaps.hasGaps;
+  const gapSummary = [
+    verificationGaps.missingSummary,
+    commandGaps.missingSummary,
+  ]
+    .filter((summary) => summary.length > 0)
+    .join("; ");
+
+  return { hasValidationGaps, gapSummary, commandGaps };
+};
+
+/**
+ * Builds a fallback plan from numbered plan-step lines when JSON parsing fails.
+ *
+ * @remarks
+ * Used when the model's response cannot be parsed as JSON but its `<agent-think>`
+ * (or `<think>`) block contains a numbered PLAN section. Returns `null` when no
+ * usable plan lines are found, letting the caller fall back further (retry or fail).
+ *
+ * @param thinkTextForPlan - Think text to extract plan lines from (agent-think, think, or cleaned response).
+ * @param maxSubagents - Max agent constraint to apply to the derived plan.
+ * @returns A plan built from the numbered lines, or `null` if none were found.
+ */
+const buildPlanFromThinkBlock = (
+  thinkTextForPlan: string | null,
+  maxSubagents: MaxSubagentsParam,
+): SubagentPlan | null => {
+  if (!thinkTextForPlan) {
+    return null;
+  }
+  const planLines = parsePlanLines(thinkTextForPlan);
+  if (planLines.length === 0) {
+    return null;
+  }
+  const planSubtasks = buildPlanFromLines(planLines, maxSubagents);
+  return applyMaxAgentsConstraint(
+    {
+      subtasks: planSubtasks,
+      risks: [],
+      commandPlan: emptyCommandPlan(),
+      execution: deriveExecution(planSubtasks),
+      agentCount: new Set(planSubtasks.map((subtask) => subtask.agentId)).size,
+    },
+    maxSubagents,
+  );
+};
+
+/**
+ * Attaches parsed risks/command plan to an accepted plan and applies the review hook.
+ *
+ * @remarks
+ * Fills in `risks` and `commandPlan` from the think block, adds a generic warning
+ * when the plan was never fully verified, then (if `hooks.reviewPlan` is provided)
+ * awaits user review. Throws {@link TaskSkippedError} on "skip" and
+ * {@link PlanRevisionRequestedError} on "edit" — both propagate out of `Agent.plan()`
+ * uncaught, by design, so the caller can react to the user's decision.
+ *
+ * @param agentPlan - The plan to finalize (mutated in place with risks/commandPlan).
+ * @param lastRiskList - Risks parsed from the most recent think block.
+ * @param lastCommandPlan - Command plan parsed from the most recent think block.
+ * @param planUnverified - Whether the plan reached this point without passing all gap checks.
+ * @param hooks - Optional lifecycle hooks; only `reviewPlan` is used here.
+ * @param maxSubagents - Max agent constraint to apply after review.
+ * @returns The finalized plan, or a plan with `max_agents` re-applied after edit-free review.
+ * @throws {TaskSkippedError} When the review hook returns a "skip" decision.
+ * @throws {PlanRevisionRequestedError} When the review hook returns an "edit" decision.
+ */
+const attachMetadataAndReview = async (
+  agentPlan: SubagentPlan,
+  lastRiskList: string[],
+  lastCommandPlan: CommandPlan,
+  planUnverified: boolean,
+  hooks: SubagentPlanHooks | undefined,
+  maxSubagents: MaxSubagentsParam,
+): Promise<SubagentPlan> => {
+  agentPlan.risks = lastRiskList.length > 0 ? lastRiskList : agentPlan.risks;
+  agentPlan.commandPlan = lastCommandPlan;
+
+  if (planUnverified && agentPlan.risks.length === 0) {
+    agentPlan.risks = [
+      "Plan may be incomplete — verification did not pass all checks.",
+    ];
+  }
+
+  if (!hooks?.reviewPlan) {
+    return agentPlan;
+  }
+
+  const reviewResponse = await hooks.reviewPlan(agentPlan);
+  if (reviewResponse.decision === "skip") {
+    throw new TaskSkippedError();
+  }
+  if (reviewResponse.decision === "edit") {
+    // Not applied here — the caller catches this and re-invokes plan()
+    // with the user's feedback folded into the task text.
+    throw new PlanRevisionRequestedError(reviewResponse.feedback ?? "");
+  }
+
+  return applyMaxAgentsConstraint(agentPlan, maxSubagents);
+};
+
+/**
+ * Appends the model's turn to the message history, preserving its tool call if present.
+ *
+ * @remarks
+ * Mutates `messages` in place, mirroring the mutate-in-place style already used by
+ * {@link handleAuxiliaryToolCall}. When `planCall` is present, the assistant turn
+ * carries a `tool_calls` entry so the conversation stays consistent with native
+ * tool-calling transcripts; otherwise it's a plain assistant content turn.
+ *
+ * @param messages - Message array to append to (mutated in place).
+ * @param rawResponse - The model's raw response text for this turn.
+ * @param planCall - The parsed submit_plan tool call for this turn, if present.
+ */
+const pushAssistantTurn = (
+  messages: Message[],
+  rawResponse: string,
+  planCall: ParsedToolCall | undefined,
+): void => {
+  if (planCall) {
+    messages.push({
+      role: "assistant",
+      content: rawResponse,
+      tool_calls: [
+        {
+          function: {
+            name: planCall.name,
+            arguments: planCall.args,
+          },
+        },
+      ],
+    });
     return;
   }
-
-  // Step 2-3: If enabled, emit formatted debug message to stderr
-  console.error(`[Agent] ${label}`, data);
+  messages.push({ role: "assistant", content: rawResponse });
 };
 
 /**
- * <Summary>
- * What it does:
- *   Formats a tool result as an observation message for the agent.
+ * Outcome of {@link resolvePlanAttempt}: either an accepted plan, a request to
+ * retry the current planning iteration, or a terminal failure.
  *
- * How it does it (step by step):
- *   1. Build argument string based on tool type (path or command).
- *   2. Format observation header with tool name and arguments.
- *   3. Include the result text.
- *   4. Add prompt for next action.
- *
- * Parameters:
- *   @param tool - The tool call that produced the result.
- *   @param result - The result string from tool execution.
- *
- * Returns:
- *   {string} — Formatted observation message.
- * </Summary>
+ * @remarks
+ * Mirrors the `handleAuxiliaryToolCall` → `AuxiliaryToolOutcome` shape already
+ * used in this file — a per-iteration decision function returning a small
+ * discriminated result for the loop to switch on.
  */
-const formatObservation = (tool: AgentToolCall, result: string): string => {
-  // Step 1: Build argument string based on tool type
-  const toolArguments =
-    tool.tool === "read_file"
-      ? `(${tool.path})`
-      : tool.tool === "write_file" || tool.tool === "edit_file"
-        ? `(${tool.path})`
-        : tool.tool === "run_command"
-          ? `(${tool.command})`
-          : "";
-
-  // Step 2-4: Format observation header with tool name, result, and next action prompt
-  return `[Observation from ${tool.tool}${toolArguments}]:\n${result}\n\nThink about what this means and what to do next.`;
-};
+type PlanAttemptOutcome =
+  | { outcome: "accepted"; plan: SubagentPlan }
+  | { outcome: "retry"; updatedVerificationAttempt: number }
+  | { outcome: "failed"; error: ValidationError };
 
 /**
- * <Summary>
- * What it does:
- *   Internal tracking state for a single agent subtask execution.
+ * Resolves one planning turn's raw response into an accepted plan, a retry, or a failure.
  *
- * How it fits in the system:
- *   Tracks files written, verified, and read during the task to enforce
- *   verification requirements. Also tracks whether the agent has included
- *   the required command plan section in its first think block.
+ * @remarks
+ * Attempts, in order: the parsed `submit_plan` tool call args, then JSON extracted
+ * from the raw response text, then a plan built from numbered PLAN lines in the
+ * think block. If none produce a usable plan and retry attempts remain, appends a
+ * corrective user turn and requests a retry. If attempts are exhausted, logs
+ * diagnostic detail and returns a terminal {@link ValidationError}.
  *
- * Fields:
- *   filesWrittenThisTask — Set of file paths written during this task.
- *   filesVerifiedThisTask — Set of file paths verified during this task.
- *   filesReadThisTask — Set of file paths read during this task.
- *   verifyCommandPassed — Whether a verify command passed with exit code 0.
- *   firstThinkSeen — Whether the first think block has been seen.
- *   commandPlanRetryUsed — Whether command plan retry has been used.
- *   lastThinkText — The most recent think block text.
- * </Summary>
+ * Mutates `messages` in place (via `pushAssistantTurn`) only on the retry path,
+ * matching how the model's turn is normally appended before a follow-up prompt.
+ *
+ * @param messages - Message array to append the assistant/retry turn to on retry (mutated in place).
+ * @param rawResponse - The model's raw response text for this turn.
+ * @param configuredSupportsTools - Whether native tool calling is available (affects recovery wording).
+ * @param planCall - Parsed submit_plan tool call for this turn, if present.
+ * @param thinkText - Extracted `<agent-think>` block content, if present (used for debug logging).
+ * @param thinkTextForPlan - Think text to use for the plan-line fallback (agent-think, think, or cleaned response).
+ * @param verificationAttempt - Current retry attempt count for this call to `plan()`.
+ * @param agentModel - Model identifier, used in error messages and debug logs.
+ * @param maxSubagents - Max agent constraint to apply to any derived plan.
+ * @returns An accepted plan, a retry request with the incremented attempt count, or a failure.
  */
-type TaskTrackers = {
-  /** Set of file paths written during this task. */
-  filesWrittenThisTask: Set<string>;
-
-  /** Set of file paths verified during this task. */
-  filesVerifiedThisTask: Set<string>;
-
-  /** Set of file paths read during this task. */
-  filesReadThisTask: Set<string>;
-
-  /** Whether a verify command passed with exit code 0. */
-  verifyCommandPassed: boolean;
-
-  /** Whether the first think block has been seen. */
-  firstThinkSeen: boolean;
-
-  /** Whether command plan retry has been used. */
-  commandPlanRetryUsed: boolean;
-
-  /** The most recent think block text. */
-  lastThinkText: string | null;
-};
-
-/**
- * <Summary>
- * What it does:
- *   Agent class that executes subtasks via Ollama tool calls.
- *
- * How it fits in the system:
- *   The Agent is the worker that executes individual subtasks from the advisor's plan.
- *   It streams responses from the model, parses tool calls, executes them through
- *   specialized handlers, manages retry logic for common mistakes, and tracks
- *   verification requirements. It can escalate to the advisor when stuck.
- * </Summary>
- */
-export class Agent {
-  /** Map of tool names to their handler instances. */
-  private readonly toolHandlers: Map<string, IToolHandler>;
-
-  /**
-   * Constructor
-   *
-   * How it does it (step by step):
-   *   1. Store dependencies (ollama, config, advisor) as private readonly field.
-   *   2. Initialize tool handler map with all available tool handlers.
-   *   3. Inject advisor dependency into escalate handler.
-   *
-   * @param dependencies - Dependencies for model IO and escalation.
-   */
-  constructor(
-    private readonly dependencies: {
-      ollama: IOllamaClient;
-      config: IConfigManager;
-      advisor: Advisor;
-    },
-  ) {
-    // Step 2-3: Initialize tool handler map with all available tool handlers
-    this.toolHandlers = new Map([
-      ["read_file", new ReadFileHandler()],
-      ["write_file", new WriteFileHandler()],
-      ["edit_file", new EditFileHandler()],
-      ["run_command", new RunCommandHandler()],
-      ["escalate", new EscalateHandler(dependencies.advisor)],
-      ["finish", new FinishHandler()],
-    ]);
+const resolvePlanAttempt = (
+  messages: Message[],
+  rawResponse: string,
+  configuredSupportsTools: boolean,
+  planCall: ParsedToolCall | undefined,
+  thinkText: string | null,
+  thinkTextForPlan: string | null,
+  verificationAttempt: number,
+  agentModel: string,
+  maxSubagents: MaxSubagentsParam,
+): PlanAttemptOutcome => {
+  let parsedPlan: unknown | null = planCall ? planCall.args : null;
+  if (parsedPlan === null) {
+    parsedPlan = tryParseAgentJson(rawResponse);
   }
 
-  /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Executes a subtask by streaming model responses, parsing tool calls,
-   *   executing them, and tracking verification requirements.
-   *
-   * How it does it (step by step):
-   *   1. Extract parameters from AgentRunParams with defaults.
-   *   2. Read model configuration (model, temperature, max retries).
-   *   3. Build initial messages with command plan and context.
-   *   4. Initialize trackers for files, verification, and retry counts.
-   *   5. Enter main execution loop (up to MAX_TOOL_ITERATIONS).
-   *   6. For each iteration: stream response, parse tools, execute tools.
-   *   7. Handle retry logic for common mistakes (markdown, no tools, no thinking).
-   *   8. Handle escalation when agent is stuck.
-   *   9. Return final result or failure message on timeout.
-   *
-   * Parameters:
-   *   @param params - All parameters for agent execution.
-   *
-   * Returns:
-   *   @returns Final result summary or failure message.
-   *
-   * Throws:
-   *   @throws {AbortError} — When execution is aborted via signal.
-   * </Summary>
-   */
-  run = async (params: AgentRunParams): Promise<string> => {
-    // Step 1: Extract parameters from AgentRunParams with defaults
-    const {
-      taskId,
-      subtask,
-      agentId,
-      agentLabel,
-      skillContent,
-      sessionContext,
-      workspace,
-      terminal,
-      recorder,
-      emit,
-      signal,
-      modelOverrides,
-      commandPlan = emptyCommandPlan(),
-      debug = false,
-    } = params;
-
-    const agentSource = { agentId, agentLabel };
-
-    // Helper function to emit agent status frames to client
-    const emitAgentStatus = (
-      stage: "reading" | "writing" | "running" | "escalating" | "done",
-      icon: "◌" | "✓" | "⚠",
-      statusMessage: string,
-    ): void => {
-      emit({
-        kind: "status",
-        source: agentSource,
-        stage,
-        icon,
-        message: statusMessage,
-        ...(stage !== "done"
-          ? { activity: { stage, message: statusMessage } }
-          : {}),
-      });
-    };
-
-    // Step 2: Read model configuration (model, temperature, max retries)
-    const agentModel =
-      modelOverrides?.agentModel?.trim() ||
-      (await this.dependencies.config.getAgentModel());
-    const agentTemperature =
-      modelOverrides?.agentTemp ??
-      (await this.dependencies.config.getAgentTemperature());
-    const configuredMaxRetries = await this.dependencies.config.getMaxRetries();
-    const maxEscalations = Math.max(1, Math.floor(configuredMaxRetries));
-
-    // Step 3: Build initial messages with command plan and context
-    const messages = buildAgentMessages(
-      subtask,
-      skillContent,
-      sessionContext,
-      commandPlan,
-    );
-
-    // Step 4: Initialize trackers for files, verification, and retry counts
-    const trackers: TaskTrackers = {
-      filesWrittenThisTask: new Set(),
-      filesVerifiedThisTask: new Set(),
-      filesReadThisTask: new Set(),
-      verifyCommandPassed: false,
-      firstThinkSeen: false,
-      commandPlanRetryUsed: false,
-      lastThinkText: null,
-    };
-
-    let escalationCount = 0;
-    let markdownRetryCount = 0;
-    let thinkRetryCount = 0;
-
-    // Step 5: Enter main execution loop (up to MAX_TOOL_ITERATIONS)
-    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration += 1) {
-      // Check for abort signal
-      if (signal.aborted) {
-        throw new AbortError("Agent execution aborted");
-      }
-
-      const streamParser = new ToolStreamParser();
-      let assistantResponseText = "";
-
-      // Step 6: Stream response from model and parse tool calls in real-time
-      for await (const token of this.dependencies.ollama.chatStream(
-        agentModel,
-        messages,
-        {
-          temperature: agentTemperature,
-        },
-      )) {
-        // Check for abort signal during streaming
-        if (signal.aborted) {
-          throw new AbortError("Agent stream aborted");
-        }
-        assistantResponseText += token;
-        streamParser.feed(token, () => {});
-      }
-
-      // Extract think block from response
-      const thinkText = extractThinking(assistantResponseText);
-      if (thinkText) {
-        emit({ kind: "think", text: thinkText, advisor: false });
-        trackers.lastThinkText = thinkText;
-
-        // Validate first think block includes command plan section
-        if (!trackers.firstThinkSeen) {
-          trackers.firstThinkSeen = true;
-          if (
-            !hasCommandPlanSection(thinkText) &&
-            !trackers.commandPlanRetryUsed
-          ) {
-            trackers.commandPlanRetryUsed = true;
-            messages.push({
-              role: "assistant",
-              content: assistantResponseText,
-            });
-            messages.push({
-              role: "user",
-              content:
-                "Your first think block must include setup commands, verify commands, and off-limits (run-project) sections before any tool call.",
-            });
-            continue;
-          }
-        }
-      }
-
-      // Strip thinking blocks and parse tool calls
-      const cleanResponse = stripThinking(assistantResponseText);
-      let toolCalls = parseAllToolCalls(cleanResponse);
-      if (toolCalls.length === 0) {
-        // Try to recover tool call from text if parsing failed
-        const recoveredTool = extractToolFromText(cleanResponse);
-        if (recoveredTool) {
-          toolCalls = [recoveredTool];
-        }
-      }
-
-      // Log debug information if debug mode enabled
-      agentDebugLog(debug, "turn", {
-        iteration,
-        think: Boolean(thinkText),
-        tools: toolCalls.length,
-      });
-
-      // Step 7: Handle retry logic for common mistakes
-      const retryResult = handleAgentRetry(
-        assistantResponseText,
-        thinkText,
-        toolCalls.length,
-        markdownRetryCount,
-        thinkRetryCount,
-        maxEscalations,
-      );
-
-      if (retryResult.shouldRetry) {
-        if (retryResult.shouldEscalate) {
-          // Step 8: Handle escalation when agent is stuck
-          const escalationTool: AgentToolCall = {
-            tool: "escalate",
-            reason: retryResult.escalationReason ?? "Unknown reason",
-          };
-          const escalationResult = await this.executeTool(escalationTool, {
-            taskId,
-            subtask,
-            agentSource,
-            emitAgentStatus,
-            messages,
-            workspace,
-            terminal,
-            recorder,
-            escalationCount,
-            maxEscalations,
-            modelOverrides,
-            trackers,
-            thinkText,
-            commandPlan,
-          });
-          escalationCount = escalationResult.escalationCount;
-          if (escalationResult.done) {
-            return escalationResult.summary;
-          }
-          messages.push({ role: "user", content: escalationResult.feedback });
-          thinkRetryCount = 0;
-          continue;
-        }
-
-        // Apply retry messages and update counters
-        messages.push(...retryResult.updatedMessages);
-        markdownRetryCount = retryResult.updatedMarkdownRetryCount;
-        thinkRetryCount = retryResult.updatedThinkRetryCount;
-        continue;
-      }
-
-      // Execute the first tool call (agent should only call one at a time)
-      const toolCall = toolCalls[0];
-      if (!toolCall) {
-        continue;
-      }
-
-      // Step 6: Execute tool and handle result
-      const toolResult = await this.executeTool(toolCall, {
-        taskId,
-        subtask,
-        agentSource,
-        emitAgentStatus,
-        messages,
-        workspace,
-        terminal,
-        recorder,
-        escalationCount,
-        maxEscalations,
-        modelOverrides,
-        trackers,
-        thinkText,
-        commandPlan,
-      });
-      escalationCount = toolResult.escalationCount;
-      if (toolResult.done) {
-        return toolResult.summary;
-      }
-      messages.push({ role: "assistant", content: assistantResponseText });
-      messages.push({ role: "user", content: toolResult.feedback });
-      thinkRetryCount = 0;
+  if (parsedPlan === null) {
+    const planFromThink = buildPlanFromThinkBlock(thinkTextForPlan, maxSubagents);
+    if (planFromThink) {
+      return { outcome: "accepted", plan: planFromThink };
     }
 
-    // Step 9: Return failure message on timeout
-    return "[agent failed: exceeded maximum tool iterations]";
-  };
-
-  /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Executes a single tool call using the appropriate handler.
-   *
-   * How it does it (step by step):
-   *   1. Get the handler for the tool type from the handlers map.
-   *   2. If handler not found, return error observation.
-   *   3. Delegate to handler's execute method with context.
-   *   4. Return the handler's result.
-   *
-   * Parameters:
-   *   @param tool - The tool call to execute.
-   *   @param context - Execution context with all dependencies.
-   *
-   * Returns:
-   *   @returns Execution result.
-   * </Summary>
-   */
-  private executeTool = async (
-    tool: AgentToolCall,
-    context: {
-      taskId: string;
-      subtask: string;
-      agentSource: { agentId: number; agentLabel: string };
-      emitAgentStatus: (
-        stage: "reading" | "writing" | "running" | "escalating" | "done",
-        icon: "◌" | "✓" | "⚠",
-        message: string,
-      ) => void;
-      messages: Message[];
-      workspace: WorkspaceManager;
-      terminal: TerminalExecutor;
-      recorder: IExperienceRecorder;
-      escalationCount: number;
-      maxEscalations: number;
-      modelOverrides?: TaskModelOverrides;
-      trackers: TaskTrackers;
-      thinkText: string | null;
-      commandPlan: CommandPlan;
-    },
-  ): Promise<{
-    done: boolean;
-    summary: string;
-    feedback: string;
-    escalationCount: number;
-  }> => {
-    // Step 1: Get the handler for the tool type from the handlers map
-    const toolHandler = this.toolHandlers.get(tool.tool);
-
-    // Step 2: If handler not found, return error observation
-    if (!toolHandler) {
+    if (verificationAttempt < MAX_AGENT_LOOPS - 1) {
+      pushAssistantTurn(messages, rawResponse, planCall);
+      messages.push({
+        role: "user",
+        content: looksLikeConversationalReply(rawResponse)
+          ? formatOnlyRecoveryMessage(configuredSupportsTools)
+          : "You must call submit_plan with your subtask breakdown after your <agent-think> block.",
+      });
       return {
-        done: false,
-        summary: "",
-        feedback: formatObservation(tool, "Unknown tool"),
-        escalationCount: context.escalationCount,
+        outcome: "retry",
+        updatedVerificationAttempt: verificationAttempt + 1,
       };
     }
 
-    // Step 3-4: Delegate to handler's execute method with context
-    return toolHandler.execute(tool, context);
+    logger.debug(
+      {
+        agentModel,
+        configuredSupportsTools,
+        rawResponse: rawResponse.slice(0, 4000),
+        thinkText: thinkText?.slice(0, 2000) ?? null,
+      },
+      "Agent returned invalid plan JSON (no parseable plan)",
+    );
+    return {
+      outcome: "failed",
+      error: new ValidationError(
+        agentPlanFailureMessage(agentModel, rawResponse),
+      ),
+    };
+  }
+
+  try {
+    const validatedPlan = normaliseSubagentPlan(parsedPlan, maxSubagents);
+    return { outcome: "accepted", plan: validatedPlan };
+  } catch (normaliseError) {
+    const planFromThink = buildPlanFromThinkBlock(thinkTextForPlan, maxSubagents);
+    if (planFromThink) {
+      return { outcome: "accepted", plan: planFromThink };
+    }
+
+    if (verificationAttempt < MAX_AGENT_LOOPS - 1) {
+      pushAssistantTurn(messages, rawResponse, planCall);
+      messages.push({
+        role: "user",
+        content:
+          "Your submit_plan arguments were invalid. Output a corrected <agent-think> block and call submit_plan with valid subtasks.",
+      });
+      return {
+        outcome: "retry",
+        updatedVerificationAttempt: verificationAttempt + 1,
+      };
+    }
+
+    logger.debug(
+      {
+        agentModel,
+        configuredSupportsTools,
+        rawResponse: rawResponse.slice(0, 4000),
+        thinkText: thinkText?.slice(0, 2000) ?? null,
+        parsedPlan,
+        normaliseError:
+          normaliseError instanceof Error
+            ? normaliseError.message
+            : String(normaliseError),
+      },
+      "Agent returned invalid plan JSON (normalise failed, no think fallback)",
+    );
+    return {
+      outcome: "failed",
+      error: new ValidationError(
+        agentPlanFailureMessage(agentModel, rawResponse),
+      ),
+    };
+  }
+};
+
+/**
+ * Orchestrates task planning, escalation guidance, and result synthesis.
+ *
+ * @remarks
+ * The Agent class is the primary coordinator that:
+ * - Decomposes user tasks into executable DAG plans (via `plan()`)
+ * - Provides blocking guidance when worker subagents escalate (via `advise()`)
+ * - Synthesizes multi-subtask results into a final user-facing answer (via `combine()`)
+ *
+ * It uses a specialized Ollama model configured for reasoning and planning, not execution.
+ */
+export class Agent {
+  /**
+   * Creates a new Agent instance with required dependencies.
+   *
+   * @param dependencies - Ollama client for inference and config manager for settings.
+   */
+  constructor(
+    private readonly dependencies: {
+      /** Ollama HTTP client for chat completions. */
+      ollama: IOllamaClient;
+      /** Config manager providing model names and temperatures. */
+      config: IConfigManager;
+    },
+  ) {}
+
+  /**
+   * Produces a validated Directed Acyclic Graph (DAG) of subtasks from an Ollama planning call.
+   *
+   * @remarks
+   * Executes a verification loop (up to MAX_AGENT_LOOPS iterations) that:
+   * 1. Calls the agent model with system prompt, context, skill, and user task.
+   * 2. Parses the `<agent-think>` block and validates for gaps (verification, commands, structure).
+   * 3. Parses JSON output (or falls back to think-block-based plan).
+   * 4. Re-prompts if gaps detected and retries remain; otherwise accepts the plan.
+   * 5. Normalizes the plan (coerce shapes, validate DAG, apply max_agents constraint).
+   * 6. Optionally invokes the `reviewPlan` hook for user approval/edits.
+   *
+   * The method respects per-call tool budgets (explore, search) and handles both
+   * native tool calling and text-based modes.
+   *
+   * @param task - User task description for planning.
+   * @param contextHeader - Memory/preference context to inject (may be empty).
+   * @param skillContent - Selected skill guidance (may be empty).
+   * @param overrides - Optional per-task model, temperature, and tool-support overrides.
+   * @param hooks - Optional lifecycle hooks: `onThink` for logging, `reviewPlan` for approval,
+   *   `exploreCodebase` for workspace structure, `callSearchTool` for TokenSave searches.
+   * @param maxSubagents - Maximum agent count constraint (default 3).
+   * @returns Normalized and validated SubagentPlan ready for execution.
+   * @throws {ValidationError} When JSON parsing fails after all retries or plan structure is invalid.
+   * @throws {OrchestrationError} When maximum verification loops are exhausted without success.
+   * @throws {TaskSkippedError} When the user skips the task at review.
+   * @throws {PlanRevisionRequestedError} When the user edits the plan at review (caller should re-invoke with updated task).
+   *
+   * @example
+   * ```ts
+   * const plan = await agent.plan(
+   *   "Refactor the login component",
+   *   contextHeader,
+   *   skillContent,
+   *   undefined,
+   *   { reviewPlan: async (p) => ({ decision: "implement" }) }
+   * );
+   * // Returns validated plan with subtasks, risks, command checks, and execution strategy
+   * ```
+   */
+  plan = async (
+    task: string,
+    contextHeader: string,
+    skillContent: string,
+    overrides?: TaskModelOverrides,
+    hooks?: SubagentPlanHooks,
+    maxSubagents: MaxSubagentsParam = 3,
+  ): Promise<SubagentPlan> => {
+    // Step 1: Read agent model and temperature from IConfigManager
+    const { agentModel, agentTemperature, configuredSupportsTools } =
+      await resolvePlanningConfig(this.dependencies.config, overrides);
+
+    // Step 2: Build system text: skill content, memory context header, then PLANNING_INSTRUCTION
+    const systemText = buildPlanningSystemText(
+      skillContent,
+      contextHeader,
+      hooks,
+      configuredSupportsTools,
+      maxSubagents,
+    );
+
+    // Step 3: Send user message with the original task text
+    const messages: Message[] = [
+      { role: "system", content: systemText },
+      { role: "user", content: task },
+    ];
+
+    // Track state across verification loop iterations
+    let lastRiskList: string[] = [];
+    let lastCommandPlan: CommandPlan = emptyCommandPlan();
+    let planUnverified = false;
+
+    let searchCallsUsed = 0;
+    let exploreCallsUsed = 0;
+    let verificationAttempt = 0;
+
+    for (
+      let iteration = 0;
+      iteration < MAX_AGENT_TOTAL_ITERATIONS;
+      iteration += 1
+    ) {
+      const planningTools = buildPlanningTools(
+        configuredSupportsTools,
+        hooks,
+        exploreCallsUsed,
+        searchCallsUsed,
+      );
+
+      let rawResponse = "";
+      let exploreCall: ParsedToolCall | undefined;
+      let searchCall: ParsedToolCall | undefined;
+      let planCall: ParsedToolCall | undefined;
+
+      if (configuredSupportsTools) {
+        const agentResult = await this.dependencies.ollama.chatWithTools(
+          agentModel,
+          messages,
+          planningTools,
+          { temperature: agentTemperature, includeThinking: true },
+        );
+        rawResponse = agentResult.content || agentResult.thinking;
+        planCall = agentResult.toolCalls.find(
+          (toolCall) => toolCall.name === SUBMIT_PLAN_TOOL_NAME,
+        );
+        exploreCall = agentResult.toolCalls.find((toolCall) =>
+          isExploreCodebaseTool(toolCall.name),
+        );
+        searchCall = agentResult.toolCalls.find((toolCall) =>
+          isAgentSearchToolName(toolCall.name),
+        );
+      } else {
+        for await (const token of this.dependencies.ollama.chatStream(
+          agentModel,
+          messages,
+          { temperature: agentTemperature, includeThinking: true },
+        )) {
+          rawResponse += token;
+        }
+      }
+
+      const auxOutcome = await handleAuxiliaryToolCall(
+        messages,
+        rawResponse,
+        configuredSupportsTools,
+        exploreCall,
+        searchCall,
+        hooks,
+        exploreCallsUsed,
+        searchCallsUsed,
+      );
+      exploreCallsUsed = auxOutcome.exploreCallsUsed;
+      searchCallsUsed = auxOutcome.searchCallsUsed;
+      if (auxOutcome.handled) {
+        continue;
+      }
+
+      // Step 5: Parse think block from the response
+      const thinkText = extractAgentThink(rawResponse);
+      const thinkTextForPlan = extractThinkTextForPlan(rawResponse);
+      if (thinkText) {
+        lastRiskList = parseRisks(thinkText);
+        lastCommandPlan = parseCommandPlan(thinkText);
+        // Call onThink hook if provided
+        hooks?.onThink?.(thinkText);
+      }
+
+      const { hasValidationGaps, gapSummary, commandGaps } = evaluatePlanGaps(
+        thinkText,
+        rawResponse,
+        planCall,
+      );
+
+      // Step 6: If gaps exist and we have retries left, prompt model to revise
+      if (hasValidationGaps && verificationAttempt < MAX_AGENT_LOOPS - 1) {
+        messages.push({ role: "assistant", content: rawResponse });
+        const commandHint = commandGaps.hasGaps
+          ? " Your COMMAND PLAN is incomplete. List concrete verify commands for this repo."
+          : "";
+        messages.push({
+          role: "user",
+          content: revisionFollowUpMessage(
+            gapSummary,
+            commandHint,
+            configuredSupportsTools,
+          ),
+        });
+        verificationAttempt += 1;
+        continue;
+      }
+
+      // Mark plan as unverified if gaps exist on final iteration
+      if (hasValidationGaps) {
+        planUnverified = true;
+      }
+
+      const resolution = resolvePlanAttempt(
+        messages,
+        rawResponse,
+        configuredSupportsTools,
+        planCall,
+        thinkText,
+        thinkTextForPlan,
+        verificationAttempt,
+        agentModel,
+        maxSubagents,
+      );
+
+      if (resolution.outcome === "retry") {
+        verificationAttempt = resolution.updatedVerificationAttempt;
+        continue;
+      }
+      if (resolution.outcome === "failed") {
+        throw resolution.error;
+      }
+
+      // Step 7: Apply max_agents constraint and return validated plan
+      return attachMetadataAndReview(
+        resolution.plan,
+        lastRiskList,
+        lastCommandPlan,
+        planUnverified,
+        hooks,
+        maxSubagents,
+      );
+    }
+
+    // Step 8: If all loops exhausted without success, throw error
+    throw new OrchestrationError(
+      "Agent planning failed after maximum verification loops",
+    );
   };
+
+  /**
+   * Provides blocking guidance to a worker subagent that has escalated.
+   *
+   * @remarks
+   * Called when a worker subagent hits an issue it cannot resolve and calls ESCALATE.
+   * This method generates targeted guidance from the lead agent by:
+   * 1. Formatting the escalation reason and conversation history into a readable transcript.
+   * 2. Calling the agent model with context about the stuck subtask and prior attempts.
+   * 3. Returning concise, actionable guidance for the subagent to use.
+   *
+   * This is a blocking operation — the subagent waits for guidance before retrying.
+   *
+   * @param subtask - The text of the subtask the subagent was executing when it escalated.
+   * @param reason - The escalation reason (text following the ESCALATE signal).
+   * @param history - Message history showing the subagent's prior attempts.
+   * @param overrides - Optional per-task model/temperature overrides.
+   * @returns Concise guidance text for the subagent to incorporate and retry.
+   *
+   * @example
+   * ```ts
+   * const guidance = await agent.advise(
+   *   "Write unit tests for the login module",
+   *   "Test framework not installed; unclear which to use",
+   *   conversationHistory
+   * );
+   * // Returns e.g.: "Install Jest: npm install --save-dev jest. See package.json for scripts."
+   * ```
+   */
+  advise = async (
+    subtask: string,
+    reason: string,
+    history: Message[],
+    overrides?: TaskModelOverrides,
+  ): Promise<string> => {
+    const { agentModel, agentTemperature } =
+      await resolveModelAndTemperature(this.dependencies.config, overrides);
+
+    // Flatten the agent's message list so the agent sees the whole attempt in one user blob
+    const conversationTranscript = history
+      .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
+      .join("\n\n");
+
+    const userPromptContent = `The agent is stuck on this subtask:\n${subtask}\n\nReason for escalation:\n${reason}\n\nConversation so far:\n${conversationTranscript}\n\nReply with concise actionable guidance for the agent's next attempt. Do not repeat the ESCALATE protocol.`;
+
+    const agentMessages: Message[] = [
+      {
+        role: "system",
+        content:
+          "You are a senior technical agent helping a coding agent unblock. Be direct and specific.",
+      },
+      { role: "user", content: userPromptContent },
+    ];
+
+    // Blocking: the agent waits on this before appending guidance and retrying chatStream
+    return this.dependencies.ollama.chat(agentModel, agentMessages, {
+      temperature: agentTemperature,
+    });
+  };
+
+  /**
+   * Streams a final user-facing answer that integrates subtask results with the original task.
+   *
+   * @remarks
+   * Used when multiple subtasks were executed and need to be synthesized into one coherent answer.
+   * Streams tokens as they arrive, enabling real-time output to the client. For single-subtask
+   * plans, this method is often skipped (the subtask result is returned directly instead).
+   *
+   * @param originalTask - The original user task description for context.
+   * @param results - Array of completed subtask results in display order.
+   * @param overrides - Optional per-task model/temperature overrides.
+   * @returns Async generator yielding response tokens for streaming to the client.
+   *
+   * @example
+   * ```ts
+   * for await (const token of agent.combine(userTask, subtaskResults)) {
+   *   process.stdout.write(token);
+   * }
+   * // Streams the integrated final answer
+   * ```
+   */
+  async *combine(
+    originalTask: string,
+    results: SubtaskResult[],
+    overrides?: TaskModelOverrides,
+  ): AsyncGenerator<string> {
+    // combine uses the same model as planning
+    const { agentModel, agentTemperature } =
+      await resolveModelAndTemperature(this.dependencies.config, overrides);
+
+    // One section per completed subtask so the model can merge / dedupe / summarise
+    const resultsBlock = results
+      .map((result) => `### Subtask ${result.id}\n${result.content}`)
+      .join("\n\n");
+
+    const userPromptContent = `Original task:\n${originalTask}\n\nSubtask results:\n${resultsBlock}\n\nWrite one coherent final answer for the user that integrates the results. Do not mention internal subtask ids unless helpful.`;
+
+    const agentMessages: Message[] = [
+      {
+        role: "system",
+        content:
+          "You are the lead assistant delivering the final response to the user based on prior sub-work.",
+      },
+      { role: "user", content: userPromptContent },
+    ];
+    // Stream tokens out — AgentOrchestrator forwards these to the client as the only visible output when N>1 subtasks
+    for await (const token of this.dependencies.ollama.chatStream(
+      agentModel,
+      agentMessages,
+      {
+        temperature: agentTemperature,
+      },
+    )) {
+      yield token;
+    }
+  }
 }

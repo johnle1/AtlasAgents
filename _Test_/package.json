@@ -1,0 +1,22 @@
+{
+  "name": "loopycode-tests",
+  "version": "1.0.0",
+  "description": "Unit, integration, and system tests for the LoopyCode monorepo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:unit": "vitest run unit",
+    "test:integration": "vitest run integration",
+    "test:system": "vitest run system",
+    "test:e2e": "npm run build --prefix ../packages/client && vitest run system",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0",
+    "@vitest/coverage-v8": "^2.0.0",
+    "execa": "^9.0.0",
+    "strip-ansi": "^7.1.1"
+  }
+}

@@ -1,3 +1,12 @@
+/**
+ * Connection status machine and automatic reconnect scheduling.
+ *
+ * @remarks
+ * {@link Connection} owns the live RSocket and delegates status transitions,
+ * listener fan-out, and exponential-backoff reconnect to this class so the
+ * socket plumbing stays separate from the reconnect policy.
+ */
+
 import type { ConnectionStatus, StatusListener } from "./types.js";
 import {
   RECONNECT_BASE_DELAY_MS,
@@ -6,359 +15,244 @@ import {
 } from "./constants.js";
 
 /**
- * <Summary>
- * What it does:
- *   Defines the dependencies required by the ConnectionLifecycle class.
+ * Injected hooks {@link ConnectionLifecycle} needs from the owning connection.
  *
- * Used by:
- *   - ConnectionLifecycle — constructor requires these dependencies.
+ * @remarks
+ * Dependency injection keeps this class free of RSocket imports: reconnect
+ * calls back into `Connection.connect`, and socket teardown clears the owner’s
+ * `rsocket` field via `clearSocket`.
  *
- * Produced by:
- *   - Connection — creates this object and passes it to ConnectionLifecycle constructor.
- * </Summary>
+ * @example
+ * ```ts
+ * const deps: ConnectionLifecycleDeps = {
+ *   connect: () => connection.connect(),
+ *   clearSocket: () => {
+ *     connectionSocket = null;
+ *   },
+ * };
+ * ```
  */
 export type ConnectionLifecycleDeps = {
-  /** Function to initiate a connection attempt. */
+  /** Attempt (or re-attempt) a full RSocket handshake. */
   connect: () => Promise<void>;
-  /** Function to clear the socket reference when connection closes. */
+
+  /**
+   * Drop the owner’s socket reference after close so later calls see
+   * disconnected state before reconnect finishes.
+   */
   clearSocket: () => void;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Manages the connection lifecycle including status tracking, listener notifications,
- *   and automatic reconnection with exponential backoff.
+ * Tracks connection status, notifies listeners, and schedules reconnects.
  *
- * How it fits in the system:
- *   Handles the connection state machine and reconnection logic for the RSocket connection.
- *   Provides status change notifications to listeners and implements exponential backoff
- *   with jitter for reconnection attempts.
- * </Summary>
+ * @remarks
+ * **Status:** `emitStatus` ignores no-ops (same status twice) so UIs are not
+ * spammed. `onConnectionStatus` always fires once immediately with the current
+ * value so new subscribers synchronize without waiting for the next event.
+ *
+ * **Reconnect:** On unexpected close, `handleSocketClosed` schedules
+ * `connect()` with exponential backoff + jitter unless
+ * `setSuppressReconnect(true)` (used during intentional `reload` / teardown).
+ * Only one reconnect timer is active at a time; failures increment the attempt
+ * counter and reschedule; success resets the counter to zero.
+ *
+ * @example
+ * ```ts
+ * const lifecycle = new ConnectionLifecycle({
+ *   connect: () => owner.connect(),
+ *   clearSocket: () => {
+ *     ownerSocket = null;
+ *   },
+ * });
+ *
+ * const unsubscribe = lifecycle.onConnectionStatus((status) => {
+ *   console.log(status);
+ * });
+ * // After an unexpected close (auto-reconnect allowed):
+ * lifecycle.handleSocketClosed();
+ * unsubscribe();
+ * ```
  */
 export class ConnectionLifecycle {
-  /** Current connection status (disconnected, connecting, connected, reconnecting). */
-  private currentStatus: ConnectionStatus = "disconnected";
+  /** Last emitted status; starts disconnected before any handshake. */
+  private currentStatus: ConnectionStatus = "Disconnected";
 
-  /** Set of registered listeners that receive connection status updates. */
+  /** Subscribers notified on every distinct status change. */
   private readonly statusListeners = new Set<StatusListener>();
 
-  /** Counter tracking the number of reconnection attempts (for exponential backoff). */
+  /**
+   * Zero-based reconnection attempt index used in `baseDelay * 2^attempt`.
+   * Reset to `0` after a successful reconnect.
+   */
   private reconnectAttemptCounter = 0;
 
-  /** Timer handle for scheduled reconnection attempts (null if no reconnect scheduled). */
+  /** Pending reconnect timeout; non-null means a retry is already scheduled. */
   private reconnectTimerHandle: ReturnType<typeof setTimeout> | null = null;
 
-  /** Flag to suppress automatic reconnection (used during intentional disconnects). */
+  /**
+   * When true, `handleSocketClosed` / `scheduleReconnect` skip auto-retry.
+   * Set around intentional disconnects (config reload) so closing the old
+   * socket does not race a stale reconnect into the new settings.
+   */
   private suppressReconnectFlag = false;
 
   /**
-   * <Summary>
-   * What it does:
-   *   Initializes the lifecycle manager with dependency injection.
+   * Creates a lifecycle controller bound to an owning connection’s hooks.
    *
-   * How it does it (step by step):
-   *   1. Stores the provided dependencies for later use.
-   *
-   * Parameters:
-   *   @param lifecycleDependencies - Functions for connection and cleanup.
-   *
-   * Returns:
-   *   void — constructor side effects only.
-  
-   * </Summary>
+   * @param lifecycleDependencies - `connect` + `clearSocket` implementations.
    */
   constructor(
     private readonly lifecycleDependencies: ConnectionLifecycleDeps,
   ) {}
 
   /**
-   * <Summary>
-   * What it does:
-   *   Registers a listener for connection status changes and returns an unsubscribe function.
+   * Subscribes to status changes and returns an unsubscribe function.
    *
-   * How it does it (step by step):
-   *   1. Adds the callback to the statusListeners set.
-   *   2. Immediately invokes the callback with the current status.
-   *   3. Returns a function that removes the callback from the set.
+   * @remarks
+   * The listener is invoked immediately with {@link getStatus} so React/Ink
+   * bridges can render the current banner without a flash of stale state.
    *
-   * Parameters:
-   *   @param statusListenerCallback - Callback invoked with the new status.
+   * @param statusListenerCallback - Invoked on register and on each new status.
+   * @returns Function that removes this listener (idempotent if called twice
+   *   after the listener was already removed).
    *
-   * Returns:
-   *   @returns Call this to unsubscribe from status updates.
-   *
-
-   * </Summary>
+   * @example
+   * ```ts
+   * const off = lifecycle.onConnectionStatus((status) => {
+   *   setUiStatus(status);
+   * });
+   * // …
+   * off();
+   * ```
    */
   onConnectionStatus = (
     statusListenerCallback: StatusListener,
   ): (() => void) => {
-    // ===== STEP 1: Add Listener to Set =====
-    // Step 1a: Add the callback to the set of status listeners
-    // Step 1b: This ensures the listener will receive future status updates
     this.statusListeners.add(statusListenerCallback);
-
-    // ===== STEP 2: Invoke Callback with Current Status =====
-    // Step 2a: Immediately call the callback with the current status
-    // Step 2b: This provides the initial status to the new listener
+    // Push current status so new UI mounts do not wait for the next transition.
     statusListenerCallback(this.currentStatus);
-
-    // ===== STEP 3: Return Unsubscribe Function =====
-    // Step 3a: Return a function that removes the listener from the set
-    // Step 3b: This allows the caller to clean up when they no longer need updates
     return () => {
       this.statusListeners.delete(statusListenerCallback);
     };
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Returns the current connection status.
+   * Returns the last emitted {@link ConnectionStatus}.
    *
-   * How it does it (step by step):
-   *   1. Returns the currentStatus field value.
-   *
-   * Returns:
-   *   @returns The current connection status.
-   *
-   * </Summary>
+   * @returns Current status string (`"Disconnected"` before first connect).
    */
   getStatus = (): ConnectionStatus => this.currentStatus;
 
   /**
-   * <Summary>
-   * What it does:
-   *   Updates the connection status and notifies all registered listeners.
+   * Transitions status and notifies listeners when the value actually changes.
    *
-   * How it does it (step by step):
-   *   1. Returns immediately if the new status is the same as current (no change).
-   *   2. Updates the currentStatus to the new status.
-   *   3. Iterates through all listeners and invokes each with the new status.
+   * @remarks
+   * No-op when `newStatus === currentStatus` to avoid redundant re-renders.
    *
-   * Parameters:
-   *   @param newStatus - The new connection status to emit.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   *
-   * </Summary>
+   * @param newStatus - Status to publish.
    */
   emitStatus = (newStatus: ConnectionStatus): void => {
-    // ===== STEP 1: Check for Status Change =====
-    // Step 1a: If new status is the same as current, no need to notify listeners
-    // Step 1b: This prevents unnecessary notifications when status hasn't changed
     if (this.currentStatus === newStatus) return;
-
-    // ===== STEP 2: Update Current Status =====
-    // Step 2a: Update the current status to the new value
     this.currentStatus = newStatus;
-
-    // ===== STEP 3: Notify All Listeners =====
-    // Step 3a: Iterate through all registered status listeners
-    // Step 3b: Invoke each listener with the new status
-    // Step 3c: This ensures all listeners receive the status update
     for (const statusListener of this.statusListeners) {
       statusListener(newStatus);
     }
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Sets the flag to suppress automatic reconnection.
+   * Enables or disables automatic reconnect after socket close.
    *
-   * How it does it (step by step):
-   *   1. Updates the suppressReconnectFlag to the provided value.
-   *
-   * Parameters:
-   *   @param suppressFlag - True to suppress reconnect, false to allow reconnect.
-   *
-   * Returns:
-   *   void — called for side effects only.
-  
-   * </Summary>
+   * @param suppressFlag - `true` to skip scheduling reconnect; `false` to allow it.
    */
   setSuppressReconnect = (suppressFlag: boolean): void => {
-    // ===== STEP 1: Update Suppress Flag =====
-    // Step 1a: Set the suppress reconnect flag to the provided value
-    // Step 1b: When true, automatic reconnection will be skipped
     this.suppressReconnectFlag = suppressFlag;
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Returns whether automatic reconnection is currently suppressed.
+   * Whether automatic reconnect is currently suppressed.
    *
-   * How it does it (step by step):
-   *   1. Returns the suppressReconnectFlag value.
-   *
-   * Returns:
-   *   @returns True if reconnect is suppressed, false otherwise.
-   *
-
-   * </Summary>
+   * @returns `true` if closes must not schedule reconnect.
    */
   isReconnectSuppressed = (): boolean => this.suppressReconnectFlag;
 
   /**
-   * <Summary>
-   * What it does:
-   *   Cancels any pending reconnection timer.
+   * Cancels a pending reconnect timer, if any.
    *
-   * How it does it (step by step):
-   *   1. Checks if a reconnect timer is active.
-   *   2. If active, clears the timeout and nulls the handle.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   *
-
-   * </Summary>
+   * @remarks
+   * Safe to call when no timer is armed. Does not change {@link getStatus}.
    */
   cancelReconnect = (): void => {
-    // ===== STEP 1: Check for Active Timer =====
-    // Step 1a: Check if there is a pending reconnection timer
     if (this.reconnectTimerHandle) {
-      // ===== STEP 1a-i: Cancel the Timer =====
-      // Step 1a-i-1: Clear the timeout to prevent the reconnection attempt
       clearTimeout(this.reconnectTimerHandle);
-
-      // Step 1a-i-2: Null the handle to indicate no timer is active
       this.reconnectTimerHandle = null;
     }
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Resets the reconnection attempt counter to zero.
+   * Resets the exponential backoff attempt counter to zero.
    *
-   * How it does it (step by step):
-   *   1. Sets the reconnect attempt counter to zero.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   *
-   * </Summary>
+   * @remarks
+   * Call after a successful handshake so the next failure starts from the
+   * short base delay again instead of staying near the max backoff.
    */
   resetReconnectAttempt = (): void => {
-    // ===== STEP 1: Reset Reconnect Counter =====
-    // Step 1a: Set the reconnect attempt counter back to zero
-    // Step 1b: This is called after a successful connection to restart the backoff sequence
     this.reconnectAttemptCounter = 0;
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Handles socket close event by cleaning up and optionally scheduling reconnection.
+   * Handles an unexpected (or final) socket close: clear socket, emit status,
+   * optionally schedule reconnect.
    *
-   * How it does it (step by step):
-   *   1. Calls clearSocket to null the socket reference.
-   *   2. Emits "disconnected" status.
-   *   3. If reconnect is suppressed, returns without scheduling reconnect.
-   *   4. Otherwise, schedules a reconnection attempt.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   * </Summary>
+   * @remarks
+   * Always clears the owner socket and sets status to `"Disconnected"`. If
+   * reconnect is suppressed (intentional teardown), returns without scheduling.
+   * Otherwise delegates to {@link scheduleReconnect}.
    */
   handleSocketClosed = (): void => {
-    // ===== STEP 1: Clear Socket Reference =====
-    // Step 1a: Call the clearSocket function to null the socket reference
-    // Step 1b: This prevents further operations on the closed socket
     this.lifecycleDependencies.clearSocket();
-
-    // ===== STEP 2: Update Connection Status =====
-    // Step 2a: Emit "disconnected" status to notify listeners
-    // Step 2b: This updates UI components and other status consumers
-    this.emitStatus("disconnected");
-
-    // ===== STEP 3: Check if Reconnect is Suppressed =====
-    // Step 3a: If reconnect flag is set, skip automatic reconnection
-    // Step 3b: This is used during intentional disconnects (e.g., config reload)
+    this.emitStatus("Disconnected");
+    // Intentional disconnect (reload / shutdown) must not start a ghost reconnect.
     if (this.suppressReconnectFlag) return;
-
-    // ===== STEP 4: Schedule Reconnection Attempt =====
-    // Step 4a: Schedule a reconnection attempt with exponential backoff
-    // Step 4b: This implements automatic reconnection with increasing delays
     this.scheduleReconnect();
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Schedules a reconnection attempt with exponential backoff and jitter.
+   * Arms a single reconnect attempt using exponential backoff + jitter.
    *
-   * How it does it (step by step):
-   *   1. Returns if reconnect is already scheduled or suppressed.
-   *   2. Emits "reconnecting" status.
-   *   3. Calculates exponential backoff delay based on attempt count.
-   *   4. Adds random jitter to prevent thundering herd problem.
-   *   5. Sets timer to attempt connection after calculated delay.
-   *   6. On success: resets attempt counter.
-   *   7. On failure: increments counter and schedules next attempt.
+   * @remarks
+   * No-ops if a timer is already pending or reconnect is suppressed. Delay is
+   * `min(MAX, BASE * 2^attempt) + random(0..JITTER)`. On success the attempt
+   * counter resets; on failure it increments and this method schedules again.
    *
-   * Returns:
-   *   void — called for side effects only.
-   * </Summary>
+   * The `connect()` promise is intentionally not awaited by callers of this
+   * method — failures are handled inside the timer callback.
    */
   scheduleReconnect = (): void => {
-    // ===== STEP 1: Check Reconnection Preconditions =====
-    // Step 1a: Return if reconnect timer is already set (avoid duplicate timers)
-    // Step 1b: Return if reconnect is suppressed (respect the suppress flag)
+    // Coalesce: never stack multiple timers for the same outage window.
     if (this.reconnectTimerHandle || this.suppressReconnectFlag) return;
 
-    // ===== STEP 2: Update Connection Status =====
-    // Step 2a: Emit "reconnecting" status to notify listeners
-    // Step 2b: This updates UI to show reconnection is in progress
-    this.emitStatus("reconnecting");
+    this.emitStatus("Reconnecting");
 
-    // ===== STEP 3: Calculate Exponential Backoff Delay =====
-    // Step 3a: Calculate base delay using exponential backoff formula
-    // Step 3b: Formula: BASE_DELAY * 2^attempt (doubles each attempt)
-    // Step 3c: Cap at MAX_DELAY to prevent excessively long delays
     const exponentialDelay = Math.min(
       RECONNECT_MAX_DELAY_MS,
       RECONNECT_BASE_DELAY_MS * 2 ** this.reconnectAttemptCounter,
     );
 
-    // ===== STEP 4: Add Random Jitter =====
-    // Step 4a: Add random jitter to the exponential delay
-    // Step 4b: Jitter prevents multiple clients from reconnecting simultaneously
-    // Step 4c: This mitigates the "thundering herd" problem on server restart
+    // Jitter desynchronizes clients that all dropped when the server restarted.
     const reconnectDelayWithJitter =
       exponentialDelay + Math.floor(Math.random() * RECONNECT_JITTER_MAX_MS);
 
-    // ===== STEP 5: Schedule Reconnection Attempt =====
-    // Step 5a: Set a timeout to attempt connection after calculated delay
     this.reconnectTimerHandle = setTimeout(() => {
-      // ===== STEP 5a-i: Clear Timer Handle =====
-      // Step 5a-i-1: Null the timer handle to indicate timer has fired
+      // Allow a future scheduleReconnect if this attempt fails.
       this.reconnectTimerHandle = null;
-
-      // ===== STEP 5a-ii: Attempt Connection =====
-      // Step 5a-ii-1: Attempt to connect using the provided connect function
-      // Step 5a-ii-2: Use void to avoid unhandled promise rejection warning
       void this.lifecycleDependencies
         .connect()
         .then(() => {
-          // ===== STEP 5a-ii-1-a: Connection Succeeded =====
-          // Step 5a-ii-1-a-1: Reset the reconnect attempt counter on success
-          // Step 5a-ii-1-a-2: This restarts the backoff sequence for future disconnects
           this.reconnectAttemptCounter = 0;
         })
         .catch(() => {
-          // ===== STEP 5a-ii-1-b: Connection Failed =====
-          // Step 5a-ii-1-b-1: Increment the reconnect attempt counter
-          // Step 5a-ii-1-b-2: This increases the delay for the next attempt
           this.reconnectAttemptCounter++;
-
-          // Step 5a-ii-1-b-3: Schedule the next reconnection attempt
-          // Step 5a-ii-1-b-4: This implements the retry loop with increasing delays
           this.scheduleReconnect();
         });
     }, reconnectDelayWithJitter);

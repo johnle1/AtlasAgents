@@ -1,67 +1,58 @@
 #!/usr/bin/env node
 
 /**
- * <Summary>
- * What it does:
- *   Entry point for the LoopyCode CLI application that parses CLI arguments,
- *   initializes theme and syntax highlighting, and launches the Ink TUI via the
- *   bootstrap module.
+ * Entry point for the LoopyCode CLI application.
  *
- * How it fits in the system:
- *   This is the minimal entry point that handles only:
- *   - CLI argument parsing and help display
- *   - Theme and syntax highlighter initialization
- *   - Config directory creation
- *   - Delegation to the bootstrap module for all other initialization
+ * @remarks
+ * This is the minimal entry point that handles only:
+ * - CLI argument parsing and help display
+ * - Offline config repair (--reset/--password/--address), which exits before
+ *   the TUI starts and never contacts the server
+ * - Theme and syntax highlighter initialization
+ * - Config directory creation
+ * - Delegation to the bootstrap module for all other initialization
  *
- *   The bootstrap module handles:
- *   - First-run setup (if needed)
- *   - Configuration loading
- *   - Server connection
- *   - File proxy setup
- *   - Skill synchronization
- *   - Ink TUI launch
+ * The bootstrap module handles:
+ * - First-run setup (if needed)
+ * - Configuration loading
+ * - Server connection
+ * - File proxy setup
+ * - Skill synchronization
+ * - Ink TUI launch
  *
- * Dependencies:
- *   - config.js — config directory and file existence checks
- *   - diff/shikiHighlighter — syntax highlighting initialization
- *   - theme/themeManager — terminal color theme loading
- *   - cliArgs — CLI argument parsing
- *   - ui/bootstrap/index.js — main application bootstrap logic
- *
- * Dependants:
- *   None (entry point).
- * </Summary>
+ * This file is the entry point and is not used by other modules.
  */
 
-import { ensureDirs, hasConfigFile } from "./config.js";
+import {
+  ensureDirs,
+  isConnectionConfigured,
+  loadConfig,
+  unlockOrSetupConfigCipher,
+} from "./config/index.js";
 import { initShiki } from "./diff/shikiHighlighter.js";
 import { loadTheme } from "./theme/themeManager.js";
-import { parseCliArgs, printCliHelp } from "./cliArgs.js";
+import { parseCliArgs, printCliHelp } from "./cli/cliArgs.js";
+import { runConfigRepair } from "./cli/configRepair.js";
 import { runInkApp } from "./ui/bootstrap/index.js";
 
 /**
- * @async
- * <Summary>
- * What it does:
- *   Main entry point that parses CLI arguments, initializes UI components,
- *   and delegates to the bootstrap module to launch the application.
+ * Main entry point that parses CLI arguments, initializes UI components,
+ * and delegates to the bootstrap module to launch the application.
  *
- * How it does it (step by step):
- *   1. Parses CLI arguments from process.argv.
- *   2. Shows help and exits if --help flag is present.
- *   3. Loads terminal color theme.
- *   4. Initializes Shiki syntax highlighter (non-blocking on failure).
- *   5. Ensures config directory exists.
- *   6. Checks if config file exists to determine if setup is needed.
- *   7. Delegates to bootstrap module with CLI overrides and setup flag.
+ * @remarks
+ * This function:
+ * 1. Parses CLI arguments from process.argv
+ * 2. Shows help and exits if --help flag is present
+ * 3. Runs offline config repair and exits if --reset/--password/--address is present
+ * 4. Loads terminal color theme
+ * 5. Initializes Shiki syntax highlighter (non-blocking on failure)
+ * 6. Ensures config directory exists
+ * 7. Checks whether connection settings are configured to decide if setup is needed
+ * 8. Delegates to bootstrap module with CLI overrides and setup flag
  *
- * Returns:
- *   @returns {Promise<void>} — Resolves when the application exits.
+ * @returns Resolves when the application exits.
  *
- * Throws:
- *   @throws {Error} — Uncaught errors are caught by the top-level catch block.
- * </Summary>
+ * @throws Uncaught errors are caught by the top-level catch block.
  */
 const main = async (): Promise<void> => {
   // ===== STEP 1: Parse CLI Arguments =====
@@ -83,6 +74,34 @@ const main = async (): Promise<void> => {
     process.exit(0);
   }
 
+  // ===== STEP 2a: Handle Config-Repair Mode =====
+  // --reset/--password/--address change the saved connection settings and exit
+  // without ever contacting the server. This must run before the Ink app: the
+  // in-app /set commands only exist after a successful connection, so when the
+  // server's password/port/IP changes out from under the client, this is the
+  // only way back in. runConfigRepair prompts for the passphrase itself.
+  if (cliArgs.repair) {
+    try {
+      await runConfigRepair(cliArgs.repair);
+    } catch (repairError) {
+      // Quitting at the passphrase prompt is a deliberate choice, not a crash —
+      // report it as a plain message rather than a stack trace.
+      console.error(
+        repairError instanceof Error
+          ? repairError.message
+          : String(repairError),
+      );
+      process.exit(1);
+    }
+    process.exit(0);
+  }
+
+  // ===== STEP 2b: Unlock (or set up) the encrypted config =====
+  // Must happen before ANY config.ts function that reads/writes config.json —
+  // loadTheme() below is the very first such call — since loadConfig/saveConfig
+  // are synchronous and cannot themselves prompt for a passphrase.
+  await unlockOrSetupConfigCipher();
+
   // ===== STEP 3: Initialize UI Components =====
   // Step 3a: Load terminal color theme from config or defaults
   loadTheme();
@@ -101,8 +120,10 @@ const main = async (): Promise<void> => {
   ensureDirs();
 
   // ===== STEP 5: Check if Setup is Needed =====
-  // Step 5a: Determine if config file exists (first-run detection)
-  const needsSetup = !hasConfigFile();
+  // Step 5a: Determine whether usable connection settings exist. Checking for
+  // the file itself would always report "configured": loadTheme() above calls
+  // loadConfig(), which writes DEFAULT_CONFIG to disk on a fresh install.
+  const needsSetup = !isConnectionConfigured(loadConfig());
 
   // ===== STEP 6: Delegate to Bootstrap Module =====
   // Step 6a: Pass CLI overrides and setup flag to bootstrap module

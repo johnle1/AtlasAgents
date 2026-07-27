@@ -21,13 +21,13 @@ export {
 
 export {
   setSpinner,
-  setAgentStatus,
-  removeAgentStatus,
-  clearAgentStatuses,
-  setAgentBoards,
+  setSubagentStatus,
+  removeSubagentStatus,
+  clearSubagentStatuses,
+  setSubagentBoards,
   updateAgentActivity,
-  clearAgentBoards,
-} from "./bridge/agentStatus.js";
+  clearSubagentBoards,
+} from "./bridge/subagentStatus.js";
 
 export {
   setBusy,

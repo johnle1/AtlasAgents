@@ -1,18 +1,27 @@
 /**
- * <Summary>
- * What it does:
- *   Passive observer that records task activity in memory and persists finished
- *   experiences to user-data/experiences/ without blocking the user on learning.
+ * Records task activity for experience persistence and pattern extraction.
  *
- * How it fits in the system:
- *   Implements IExperienceRecorder; called by AdvisorOrchestrator and future
- *   workspace/terminal/agent hooks. Provides fire-and-forget learning that doesn't
- *   block the user's workflow while pattern extraction runs in the background.
- * </Summary>
+ * @remarks
+ * Implements {@link IExperienceRecorder} for the orchestration layer.
+ * Records everything the agent does during a task:
+ * - Files read and written (with diffs)
+ * - Shell commands executed (with output)
+ * - Agent escalations and resolutions
+ * - User corrections to subagent output
+ *
+ * **Workflow:**
+ * 1. `start(taskId, taskText)` — Create in-memory record
+ * 2. `log*(taskId, ...)` — Append events during execution (non-blocking)
+ * 3. `finish(taskId, outcome)` — Persist to disk and trigger learning
+ *
+ * **Key Design:**
+ * - Fire-and-forget learning: persist and extract asynchronously
+ * - Experiences written to `user-data/experiences/<timestamp>-<taskId>.json`
+ * - Snapshots cleaned up in background after successful tasks
+ * - Session summaries appended to `user-data/session/current.md` for continuity
+ *
+ * @see {@link PatternExtractor} for how experiences are analyzed
  */
-
-// ===== CRYPTO IMPORTS =====
-import { randomUUID } from "node:crypto";
 
 // ===== FILESYSTEM IMPORTS =====
 import * as fs from "node:fs/promises";
@@ -37,19 +46,10 @@ import type {
 import { EXPERIENCES_DIR, SNAPSHOTS_DIR } from "./experienceConstants.js";
 
 // ===== HELPER FUNCTIONS IMPORTS =====
-import { deriveOutcome, ensureDir } from "./experienceHelpers.js";
+import { deriveOutcome } from "./experienceHelpers.js";
+import { logger } from "../../utils/logger.js";
+import { atomicWriteJson } from "../../utils/atomicWriteJson.js";
 
-/**
- * <Summary>
- * What it does:
- *   Records one orchestrated task lifecycle in memory, persists JSON on finish,
- *   and triggers pattern extraction without blocking the user.
- *
- * How it fits in the system:
- *   Brackets AdvisorOrchestrator.runTask; future workspace/terminal/agent code
- *   call log* methods between start and finish.
- * </Summary>
- */
 export class ExperienceRecorder implements IExperienceRecorder {
   /**
    * Base directory for user-data paths (defaults to process.cwd()).
@@ -77,21 +77,12 @@ export class ExperienceRecorder implements IExperienceRecorder {
   private readonly activeRecords = new Map<string, ExperienceRecord>();
 
   /**
-   * <Summary>
-   * What it does:
-   *   Resolves storage paths and stores collaborators for finish-side effects.
+   * Initializes recorder with storage paths and extraction dependencies.
    *
-   * How it does it (step by step):
-   *   1. Accept optional rootDir (else use process.cwd()).
-   *   2. Join rootDir with EXPERIENCES_DIR and SNAPSHOTS_DIR.
-   *   3. Store patternExtractor and optional sessionManager from deps.
-   *
-   * Parameters:
-   *   @param deps - Injected services.
-   *
-   * Returns:
-   *   void — instance fields are set for later method calls.
-   * </Summary>
+   * @param dependencies - Services for pattern extraction and session management
+   * @param dependencies.rootDir - Optional data root (defaults to process.cwd())
+   * @param dependencies.patternExtractor - Extractor to trigger on task completion
+   * @param dependencies.sessionManager - Optional session manager for continuity
    */
   constructor(
     private readonly dependencies: {
@@ -102,36 +93,24 @@ export class ExperienceRecorder implements IExperienceRecorder {
       };
     },
   ) {
-    // Step 1: Resolve data root (where user-data/ lives)
     this.rootDirectory = dependencies.rootDir ?? process.cwd();
-    // Step 2: Build absolute paths for experience files and snapshot cleanup
     this.experiencesDirectory = path.join(this.rootDirectory, EXPERIENCES_DIR);
     this.snapshotsDirectory = path.join(this.rootDirectory, SNAPSHOTS_DIR);
   }
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Opens a new in-memory experience record when a task begins (no disk write).
+   * Opens a new in-memory experience record for a task (no disk write).
    *
-   * How it does it (step by step):
-   *   1. Build an ExperienceRecord with taskId, task text, and startTime.
-   *   2. Initialise all log arrays as empty.
-   *   3. Set outcome, duration, and sessionSummary to null until finish.
-   *   4. Store the record in this.records keyed by taskId.
+   * @param taskId - Unique task ID (UUID from orchestrator)
+   * @param taskText - Original user task description
+   * @returns Resolves when in-memory record is ready
    *
-   * Parameters:
-   *   @param taskId - Unique id for this orchestration run (UUID).
-   *   @param taskText - Original user task string.
-   *
-   * Returns:
-   *   @returns Completes when the record is in the Map.
-   
-   * </Summary>
+   * @remarks
+   * Creates empty ExperienceRecord with all log arrays initialized.
+   * Final fields (outcome, duration, sessionSummary) remain null until `finish()`.
+   * Record is registered in activeRecords map for subsequent log* and finish calls.
    */
   start = async (taskId: string, taskText: string): Promise<void> => {
-    // Step 1–3: Create the empty record shell per Part 18 spec
     const record: ExperienceRecord = {
       taskId,
       task: taskText,
@@ -145,36 +124,24 @@ export class ExperienceRecorder implements IExperienceRecorder {
       duration: null,
       sessionSummary: null,
     };
-    // Step 4: Register so log* and finish can find this task
     this.activeRecords.set(taskId, record);
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *  whenever a model reads a file, this logs the read event.
+   * Logs a file read event during task execution.
    *
-   * How it does it (step by step):
-   *   1. Look up the record by taskId in this.records.
-   *   2. If missing, return immediately (defensive no-op).
-   *   3. Push { path, timestamp } onto filesRead.
+   * @param taskId - Task ID from `start()`
+   * @param filePath - Path that was read
    *
-   * Parameters:
-   *   @param taskId - Task id from start().
-   *   @param filePath - Path that was read.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   * </Summary>
+   * @remarks
+   * Appends read entry with ISO timestamp. No-op if task not found (already finished
+   * or never started). Timestamps enable audit trail and event ordering.
    */
   logRead = (taskId: string, filePath: string): void => {
-    // Step 1: Find in-flight record
     const record = this.activeRecords.get(taskId);
-    // Step 2: Unknown or already finished task — ignore silently
     if (!record) {
       return;
     }
-    // Step 3: Append read entry with ISO timestamp for audit ordering
     record.filesRead.push({
       path: filePath,
       timestamp: new Date().toISOString(),
@@ -182,32 +149,22 @@ export class ExperienceRecorder implements IExperienceRecorder {
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Appends one file write event with diff text to the active task record.
+   * Logs a file write event with diff during task execution.
    *
-   * How it does it (step by step):
-   *   1. Look up the record by taskId.
-   *   2. If missing, return without error.
-   *   3. Push { path, diff, timestamp } onto filesWritten.
+   * @param taskId - Task ID from `start()`
+   * @param filePath - Path that was written
+   * @param diffContent - Unified diff or change summary
    *
-   * Parameters:
-   *   @param taskId - Task id from start().
-   *   @param filePath - Path that was written.
-   *   @param diffContent - Unified diff or change summary.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   * </Summary>
+   * @remarks
+   * Appends write entry with ISO timestamp. No-op if task not found.
+   * Diffs are used by PatternExtractor to learn style preferences and by
+   * upstream code for replay/verification.
    */
   logWrite = (taskId: string, filePath: string, diffContent: string): void => {
-    // Step 1: Find in-flight record
     const record = this.activeRecords.get(taskId);
-    // Step 2: No active record — no-op
     if (!record) {
       return;
     }
-    // Step 3: Store path and diff for PatternExtractor and replay
     record.filesWritten.push({
       path: filePath,
       diff: diffContent,
@@ -216,36 +173,26 @@ export class ExperienceRecorder implements IExperienceRecorder {
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Appends one terminal command execution to the active task record.
+   * Logs a shell command execution with output during task.
    *
-   * How it does it (step by step):
-   *   1. Look up the record by taskId.
-   *   2. If missing, return immediately.
-   *   3. Push command, stdout, stderr, exitCode, and timestamp onto commandsRun.
+   * @param taskId - Task ID from `start()`
+   * @param command - Shell command string that ran
+   * @param output - Captured stdout, stderr, and exit code
    *
-   * Parameters:
-   *   @param taskId - Task id from start().
-   *   @param command - Shell command string that ran.
-   *   @param output - Captured stdout, stderr, and exit code.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   * </Summary>
+   * @remarks
+   * Appends command entry with ISO timestamp. No-op if task not found.
+   * Full output (stdout, stderr, exitCode) is persisted for experience replay
+   * and command-result pattern extraction.
    */
   logCommand = (
     taskId: string,
     command: string,
     output: CommandOutput,
   ): void => {
-    // Step 1: Find in-flight record
     const record = this.activeRecords.get(taskId);
-    // Step 2: No active record — no-op
     if (!record) {
       return;
     }
-    // Step 3: Persist full command output for experience replay
     record.commandsRun.push({
       command,
       stdout: output.stdout,
@@ -256,32 +203,22 @@ export class ExperienceRecorder implements IExperienceRecorder {
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Appends one agent escalation and advisor resolution pair to the record.
+   * Logs an agent escalation with user/agent resolution.
    *
-   * How it does it (step by step):
-   *   1. Look up the record by taskId.
-   *   2. If missing, return without error.
-   *   3. Push { reason, guidance, timestamp } onto escalations.
+   * @param taskId - Task ID from `start()`
+   * @param reason - Why the agent escalated (error/blocker)
+   * @param guidance - User or agent text that unblocked the agent
    *
-   * Parameters:
-   *   @param taskId - Task id from start().
-   *   @param reason - Why the agent escalated (ESCALATE reason).
-   *   @param guidance - Advisor text that unblocked the agent.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   * </Summary>
+   * @remarks
+   * Appends escalation pair with ISO timestamp. No-op if task not found.
+   * Escalations are analyzed by PatternExtractor to derive fix rules
+   * (workarounds for similar issues in the future).
    */
   logEscalation = (taskId: string, reason: string, guidance: string): void => {
-    // Step 1: Find in-flight record
     const record = this.activeRecords.get(taskId);
-    // Step 2: No active record — no-op
     if (!record) {
       return;
     }
-    // Step 3: Store escalation pair for downstream fix-rule extraction
     record.escalations.push({
       reason,
       guidance,
@@ -290,24 +227,17 @@ export class ExperienceRecorder implements IExperienceRecorder {
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Appends one user edit (before/after agent output) for style preference learning.
+   * Logs a user correction to subagent output for style preference learning.
    *
-   * How it does it (step by step):
-   *   1. Look up the record by taskId.
-   *   2. If missing, return immediately.
-   *   3. Push { path, before, after, timestamp } onto userEdits.
+   * @param taskId - Task ID from `start()`
+   * @param filePath - File the user edited
+   * @param before - Content before user change
+   * @param after - Content after user change
    *
-   * Parameters:
-   *   @param taskId - Task id from start().
-   *   @param filePath - File the user edited.
-   *   @param before - Content before user change.
-   *   @param after - Content after user change.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   * </Summary>
+   * @remarks
+   * Appends before/after pair with ISO timestamp. No-op if task not found.
+   * User edits are analyzed by PatternExtractor to extract style preferences
+   * (formatting, conventions, tone) that the agent should learn to match.
    */
   logUserEdit = (
     taskId: string,
@@ -315,13 +245,10 @@ export class ExperienceRecorder implements IExperienceRecorder {
     before: string,
     after: string,
   ): void => {
-    // Step 1: Find in-flight record
     const record = this.activeRecords.get(taskId);
-    // Step 2: No active record — no-op
     if (!record) {
       return;
     }
-    // Step 3: Capture before/after for style preference rules
     record.userEdits.push({
       path: filePath,
       before,
@@ -331,47 +258,37 @@ export class ExperienceRecorder implements IExperienceRecorder {
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Finalises the task record: sets outcome and duration, writes JSON to disk,
-   *   optionally cleans snapshots and appends session summary, then triggers
-   *   PatternExtractor without awaiting learning.
+   * Finalizes task record, persists to disk, and triggers async learning.
    *
-   * How it does it (step by step):
-   *   1. Look up the record; return if taskId unknown.
-   *   2. Derive TaskOutcome from orchestration.ok and logged activity.
-   *   3. Set duration, sessionSummary, ok, and error on the record.
-   *   4. Write user-data/experiences/<timestamp>-<taskId>.json via temp file + rename.
-   *   5. On success only, schedule snapshot cleanup (background, non-blocking).
-   *   6. On success or partial, call sessionManager.append when summary and manager exist.
-   *   7. Remove the record from this.records to free memory.
-   *   8. Fire-and-forget patternExtractor.extract(record).
-   *   9. Return (user never waits for steps 5–8 completion).
+   * @param taskId - Same ID passed to `start()`
+   * @param outcome - Orchestration result (ok flag, error, plan)
+   * @param sessionSummary - Optional custom summary; auto-generated if omitted
+   * @returns Resolves after persist and async triggers; does not await pattern extraction
    *
-   * Parameters:
-   *   @param taskId - Same id passed to start().
-   *   @param outcome - Plan, results, ok flag, optional error.
-   *   @param {SessionSummary} [sessionSummary] — Optional blob for session file append.
+   * @remarks
+   * **Fire-and-forget async operations:**
+   * 1. Derives TaskOutcome from orchestrator result + logged activity
+   * 2. Persists record to `user-data/experiences/<timestamp>-<taskId>.json` (atomic write)
+   * 3. On success, schedules snapshot cleanup (background, non-blocking)
+   * 4. On success/partial, appends session summary for continuity
+   * 5. Triggers PatternExtractor.extract() without awaiting (learning is async)
+   * 6. Removes record from activeRecords to free memory
    *
-   * Returns:
-   *   @returns Resolves after persist attempt; does not await extraction.
-   * </Summary>
+   * Persist failures are logged but do not break orchestrator. Extraction and cleanup
+   * errors are logged separately and don't block return.
    */
   finish = async (
     taskId: string,
     outcome: OrchestrationOutcome,
     sessionSummary?: SessionSummary,
   ): Promise<void> => {
-    // Step 1: Load in-memory record (missing if start never ran or double-finish)
     const record = this.activeRecords.get(taskId);
     if (!record) {
       return;
     }
 
-    // Step 2: Map orchestrator result + logs to success | partial | failure
+    // Derive outcome from orchestrator result + logged activity
     const taskOutcome = deriveOutcome(outcome, record);
-    // Step 3: Fill final fields on the record before serialisation
     record.outcome = taskOutcome;
     record.duration = Date.now() - record.startTime;
     const summary: SessionSummary = sessionSummary ?? {
@@ -384,39 +301,29 @@ export class ExperienceRecorder implements IExperienceRecorder {
     record.ok = outcome.ok;
     record.error = outcome.error;
 
-    // Step 4a: Build destination filename (timestamp prefix aids sort-by-time)
+    // Persist to disk with atomic write pattern
     const timestampValue = Date.now();
     const fileName = `${timestampValue}-${taskId}.json`;
     const destinationPath = path.join(this.experiencesDirectory, fileName);
 
     try {
-      // Step 4b: Ensure experiences directory exists
-      await ensureDir(this.experiencesDirectory);
-      // Step 4c: Write to a unique temp file first (atomic publish pattern)
-      const tempPath = path.join(
-        this.experiencesDirectory,
-        `.experience-${randomUUID()}.tmp`,
-      );
-      const jsonPayload = `${JSON.stringify(record, null, 2)}\n`;
-      await fs.writeFile(tempPath, jsonPayload, "utf-8");
-      // Step 4d: Rename temp to final name — readers never see a half-written file
-      await fs.rename(tempPath, destinationPath);
+      await atomicWriteJson(destinationPath, record, "experience");
     } catch (error) {
-      // Persist failure must not break orchestrator; log and continue cleanup/learning
-      console.error(
-        "[ExperienceRecorder] failed to persist experience:",
-        error,
-      );
+      // Persist failure must not break orchestrator
+      logger.error({ taskId, err: error }, "Failed to persist experience");
+      // Early return: don't proceed with cleanup/session/learning if persist failed
+      this.activeRecords.delete(taskId);
+      return;
     }
 
-    // Step 5: Successful tasks no longer need rollback snapshots (background)
+    // Clean up snapshots for successful tasks (background, non-blocking)
     if (taskOutcome === "success") {
       void this.cleanupSnapshots(taskId).catch((error) => {
-        console.error("[ExperienceRecorder] snapshot cleanup failed:", error);
+        logger.error({ taskId, err: error }, "Snapshot cleanup failed");
       });
     }
 
-    // Step 6: Append session summary when task ended usefully and manager is wired
+    // Append to session file for continuity on useful outcomes
     if (
       (taskOutcome === "success" || taskOutcome === "partial") &&
       this.dependencies.sessionManager
@@ -424,54 +331,42 @@ export class ExperienceRecorder implements IExperienceRecorder {
       try {
         await Promise.resolve(this.dependencies.sessionManager.append(summary));
       } catch (error) {
-        console.error(
-          "[ExperienceRecorder] sessionManager.append failed:",
-          error,
-        );
+        logger.error({ taskId, err: error }, "sessionManager.append failed");
       }
     }
 
-    // Step 7: Drop from Map so taskId can be reused and memory is freed
+    // Free memory
     this.activeRecords.delete(taskId);
 
-    // Step 8: Trigger learning asynchronously (extract schedules its own async work)
+    // Trigger learning asynchronously (fire-and-forget)
     try {
       this.dependencies.patternExtractor.extract(record);
     } catch (error) {
-      console.error(
-        "[ExperienceRecorder] patternExtractor.extract failed:",
-        error,
-      );
+      logger.error({ taskId, err: error }, "patternExtractor.extract failed");
     }
-    // Step 9: Return immediately — PatternExtractor and snapshot cleanup are not awaited
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Deletes snapshot files under user-data/snapshots/ whose names contain taskId.
+   * Deletes snapshot files for a completed task from user-data/snapshots/.
    *
-   * How it does it (step by step):
-   *   1. Read directory listing of snapshotsDir.
-   *   2. If directory missing (ENOENT), return without error.
-   *   3. Filter filenames that include taskId.
-   *   4. Unlink each matching file in parallel (log per-file failures).
+   * @param taskId - Task ID embedded in snapshot filenames
+   * @returns Resolves after best-effort deletes (one failure doesn't stop others)
    *
-   * Parameters:
-   *   @param taskId - Task id embedded in snapshot filenames.
+   * @remarks
+   * **Graceful handling:**
+   * - Missing snapshots directory (ENOENT): returns without error (expected on fresh install)
+   * - Per-file delete failures: logged but don't block other deletes
+   * - Filenames filtered by taskId (name.includes(taskId))
    *
-   * Returns:
-   *   @returns Completes after best-effort deletes.
-   * </Summary>
+   * Deletes run in parallel via Promise.all. Errors are logged per-file but
+   * never propagated.
    */
   private cleanupSnapshots = async (taskId: string): Promise<void> => {
     let snapshotFilenames: string[];
     try {
-      // Step 1: List all files in the snapshots directory
       snapshotFilenames = await fs.readdir(this.snapshotsDirectory);
     } catch (error) {
-      // Step 2: No snapshots folder yet — nothing to clean (expected on fresh install)
+      // Snapshots dir missing on fresh install — nothing to clean
       const errorCode = (error as NodeJS.ErrnoException).code;
       if (errorCode === "ENOENT") {
         return;
@@ -479,19 +374,20 @@ export class ExperienceRecorder implements IExperienceRecorder {
       throw error;
     }
 
-    // Step 3: Only delete files tied to this task (filename contains taskId)
+    // Filter filenames containing taskId
     const matchingFilenames = snapshotFilenames.filter((filename) =>
       filename.includes(taskId),
     );
-    // Step 4: Delete in parallel; one failure does not stop others
+
+    // Delete in parallel; one failure doesn't stop others
     await Promise.all(
       matchingFilenames.map((filename) =>
         fs
           .unlink(path.join(this.snapshotsDirectory, filename))
           .catch((unlinkError) => {
-            console.error(
-              `[ExperienceRecorder] failed to delete snapshot ${filename}:`,
-              unlinkError,
+            logger.error(
+              { taskId, filename, err: unlinkError },
+              "Failed to delete snapshot",
             );
           }),
       ),

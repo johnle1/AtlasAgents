@@ -1,15 +1,19 @@
 /**
- * <Summary>
- * What it does:
- *   Maps file extensions to their corresponding programming language identifiers
- *   for syntax highlighting and language detection.
+ * Maps filesystem paths to Shiki language ids for diff syntax highlighting.
  *
- * Used by:
- *   - detectLang — looks up language names by file extension.
+ * @remarks
+ * Used by {@link renderDiffFromChunks} / {@link renderDiff} via
+ * {@link detectLang}. Unknown extensions fall back to `"text"` so highlighting
+ * still runs without throwing.
+ */
+
+/**
+ * Extension → Shiki language id table (lowercase keys including the leading `.`).
  *
- * Produced by:
- *   - None (static constant defined at module level).
- * </Summary>
+ * @remarks
+ * Not every extension Shiki supports is listed — only common ones for agent
+ * workspaces. Special cases (Dockerfile, `.d.ts`) are handled in
+ * {@link detectLang} before this map is consulted.
  */
 const EXTENSION_TO_LANGUAGE_MAP: Record<string, string> = {
   ".ts": "typescript",
@@ -70,39 +74,34 @@ const EXTENSION_TO_LANGUAGE_MAP: Record<string, string> = {
 };
 
 /**
- * <Summary>
- * What it does:
- *   Detects the programming language of a file based on its path and extension.
+ * Infers a Shiki language id from a file path.
  *
- * How it does it (step by step):
- *   1. Extract the filename from the full file path by splitting on path separators.
- *   2. Convert the filename to lowercase for case-insensitive comparison.
- *   3. Check if the file is a Dockerfile (either named "dockerfile" or starts with "dockerfile.").
- *   4. Check if the file is a TypeScript declaration file (ends with ".d.ts").
- *   5. Extract the file extension from the filename and look it up in the extension map.
- *   6. If no match is found, default to "text" as a fallback language.
+ * @remarks
+ * Checks, in order:
+ * 1. Basename `Dockerfile` / `dockerfile.*` → `"dockerfile"` (no extension)
+ * 2. `*.d.ts` → `"typescript"` (would otherwise look like `.ts` only partially)
+ * 3. Last `.ext` in {@link EXTENSION_TO_LANGUAGE_MAP}
+ * 4. Fallback `"text"`
  *
- * Parameters:
- *   @param filePath - Full file path including directory and filename (e.g., "/src/components/Button.tsx").
+ * Matching is case-insensitive on the basename. Windows and POSIX separators
+ * are both accepted when extracting the filename.
  *
- * Returns:
- *   @returns Language identifier string (e.g., "typescript", "javascript", "text").
- * </Summary>
+ * @param filePath - Absolute or relative path, e.g. `src/Button.tsx`.
+ * @returns Shiki language string such as `"typescript"`, `"bash"`, or `"text"`.
+ *
+ * @example
+ * ```ts
+ * detectLang("packages/client/src/app.tsx"); // "tsx"
+ * detectLang("Dockerfile.prod");             // "dockerfile"
+ * detectLang("types/index.d.ts");            // "typescript"
+ * detectLang("notes.txt");                   // "text"
+ * ```
  */
 export const detectLang = (filePath: string): string => {
-  // ===== STEP 1: Extract filename from path =====
-  // Step 1a: Split the file path by forward slashes or backslashes (handles both Unix and Windows paths)
-  // Step 1b: Pop the last element which is the filename, or use the full path if split fails
   const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
-
-  // ===== STEP 2: Convert filename to lowercase =====
-  // Step 2a: Convert the filename to lowercase for case-insensitive comparison
-  // Example: "Button.TSX" becomes "button.tsx"
   const lowerCaseFileName = fileName.toLowerCase();
 
-  // ===== STEP 3: Check for Dockerfile =====
-  // Step 3a: Check if the file is exactly named "dockerfile" or starts with "dockerfile."
-  // Example: "Dockerfile", "dockerfile.dev", "Dockerfile.production" all return "dockerfile"
+  // Dockerfiles often have no extension; variants like Dockerfile.dev still count.
   if (
     lowerCaseFileName === "dockerfile" ||
     lowerCaseFileName.startsWith("dockerfile.")
@@ -110,32 +109,19 @@ export const detectLang = (filePath: string): string => {
     return "dockerfile";
   }
 
-  // ===== STEP 4: Check for TypeScript declaration files =====
-  // Step 4a: Check if the file ends with ".d.ts" (TypeScript declaration file extension)
-  // Example: "index.d.ts", "component.d.ts" both return "typescript"
+  // `.d.ts` ends with `.ts` but is declaration syntax — treat as TypeScript explicitly.
   if (lowerCaseFileName.endsWith(".d.ts")) {
     return "typescript";
   }
 
-  // ===== STEP 5: Extract and lookup file extension =====
-  // Step 5a: Find the last occurrence of a dot in the filename (extension separator)
   const lastDotIndex = lowerCaseFileName.lastIndexOf(".");
-
-  // Step 5b: If a dot was found, extract the extension including the dot
   if (lastDotIndex >= 0) {
     const fileExtension = lowerCaseFileName.slice(lastDotIndex);
-
-    // Step 5c: Look up the extension in the extension-to-language map
     const detectedLanguage = EXTENSION_TO_LANGUAGE_MAP[fileExtension];
-
-    // Step 5d: If the extension exists in the map, return the corresponding language
     if (detectedLanguage) {
       return detectedLanguage;
     }
   }
 
-  // ===== STEP 6: Default fallback =====
-  // Step 6a: If no language was detected, return "text" as a safe fallback
-  // This ensures all files have some language identifier for rendering
   return "text";
 };

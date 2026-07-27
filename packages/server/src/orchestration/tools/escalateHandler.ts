@@ -1,78 +1,99 @@
 /**
- * <Summary>
- * What it does:
- *   Handler for escalate tool execution.
+ * The `escalate` tool: lets a stuck subagent ask the lead agent for guidance.
  *
- * How it does it (step by step):
- *   1. Emit escalating status.
- *   2. Increment escalation count.
- *   3. Check if max escalations exceeded.
- *   4. If exceeded, return failure result.
- *   5. Otherwise, request advisor guidance.
- *   6. Log escalation to experience recorder.
- *   7. Return observation with guidance.
- *
- * Parameters:
- *   @param tool - Tool call with escalation reason.
- *   @param ctx - Execution context.
- *
- * Returns:
- *   @returns Result with guidance observation or failure.
- * </Summary>
+ * @remarks
+ * Escalation is also triggered automatically by the retry handler when a
+ * subagent exhausts its format-retry budget (see `subagentRetryHandler.ts`),
+ * not just by the model explicitly calling this tool. Either way, this is
+ * where the actual escalation happens: it asks the lead {@link Agent} for
+ * advice, records the exchange, and enforces the escalation budget —
+ * exceeding `maxEscalations` ends the subtask as failed rather than looping
+ * forever.
  */
 
-import type { AgentToolCall } from "../toolProtocol.js";
+import type { Agent } from "../agent/agent.js";
 import type {
-  IToolHandler,
+  ToolHandler,
   ToolHandlerContext,
   ToolExecutionResult,
-} from "./toolHandler.js";
-import { ValidationError } from "../../errors/index.js";
-import type { Advisor } from "../advisor/advisor.js";
+} from "./types.js";
+import { formatObservation } from "./toolHandler.js";
 
-const formatObservation = (tool: AgentToolCall, content: string): string => {
-  return `[${tool.tool}] ${JSON.stringify(tool)}\n${content}`;
-};
-
-export class EscalateHandler implements IToolHandler {
-  constructor(private readonly advisor: Advisor) {}
+/**
+ * Builds the `escalate` tool handler, bound to a specific lead agent.
+ *
+ * @remarks
+ * A factory rather than a plain constant (unlike the file-based tools)
+ * because it needs to close over `agent` to call `agent.advise(...)` — the
+ * lead agent that provides guidance is only known once a subagent run
+ * starts, not at module load time.
+ *
+ * @param agent - The lead agent to consult for guidance when a subagent is stuck.
+ * @returns A `ToolHandler` for the `escalate` tool.
+ *
+ * @example
+ * ```ts
+ * const escalateTool = createEscalateTool(leadAgent);
+ * Agent calls escalate({ reason: "tests keep failing on the same assertion" })
+ * → leadAgent.advise(...) returns guidance, fed back as tool feedback.
+ * ```
+ */
+export const createEscalateTool = (agent: Agent): ToolHandler => ({
+  schema: {
+    type: "function",
+    function: {
+      name: "escalate",
+      description:
+        "Ask the agent for help when blocked. Provide a clear reason.",
+      parameters: {
+        type: "object",
+        properties: {
+          reason: {
+            type: "string",
+            description: "Why you are stuck and need guidance",
+          },
+        },
+        required: ["reason"],
+      },
+    },
+  },
 
   async execute(
-    tool: AgentToolCall,
-    ctx: ToolHandlerContext,
+    escalateArgs: Record<string, unknown>,
+    handlerContext: ToolHandlerContext,
   ): Promise<ToolExecutionResult> {
-    if (tool.tool !== "escalate") {
-      throw new ValidationError(
-        `EscalateHandler received wrong tool type: ${tool.tool}`,
-      );
-    }
+    const reason = String(escalateArgs.reason ?? "");
 
-    ctx.emitAgentStatus("escalating", "⚠", "Escalating to advisor...");
-    const nextCount = ctx.escalationCount + 1;
-    ctx.escalationCount = nextCount;
+    const nextCount = handlerContext.escalationCount + 1;
 
-    if (nextCount > ctx.maxEscalations) {
+    // Budget exhausted: this escalation would exceed maxEscalations, so the
+    // subtask is reported as failed rather than escalating again. Prevents
+    // an unrecoverable subtask from looping through infinite escalations.
+    if (nextCount > handlerContext.maxEscalations) {
       return {
         done: true,
-        summary: `[agent failed after ${ctx.maxEscalations} escalations: ${tool.reason}]`,
+        summary: `[agent failed after ${handlerContext.maxEscalations} escalations: ${reason}]`,
         feedback: "",
         escalationCount: nextCount,
+        ok: false,
       };
     }
 
-    const guidance = await this.advisor.advise(
-      ctx.subtask,
-      tool.reason,
-      ctx.messages,
-      ctx.modelOverrides,
+    // Ask the lead agent for guidance, passing the full conversation history
+    // so it has context on what's already been tried.
+    const guidance = await agent.advise(
+      handlerContext.subtask,
+      reason,
+      handlerContext.messages,
+      handlerContext.modelOverrides,
     );
-    ctx.recorder.logEscalation(ctx.taskId, tool.reason, guidance);
+    handlerContext.recorder.logEscalation(handlerContext.taskId, reason, guidance);
 
     return {
       done: false,
       summary: "",
-      feedback: formatObservation(tool, guidance),
+      feedback: formatObservation("escalate", escalateArgs, guidance),
       escalationCount: nextCount,
     };
-  }
-}
+  },
+});

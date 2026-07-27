@@ -8,7 +8,7 @@
  * in plain text.
  */
 import * as fs from "node:fs";
-import { HISTORY_FILE, ensureDirs } from "../../config.js";
+import { HISTORY_FILE, ensureDirs } from "../../config/index.js";
 import { sanitizeHistoryLine } from "../historySanitize.js";
 import { logger } from "../../utils/logger.js";
 

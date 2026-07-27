@@ -1,638 +1,668 @@
 /**
- * <Summary>
- * What it does:
- *   Defines tool-call markers and streaming parser for Agent.run.
+ * Legacy text-protocol helpers and shared types for agent tool calling.
  *
- * How it fits in the system:
- *   Provides the protocol for parsing tool calls from LLM responses.
- *   LLMs output tool calls between TOOL_START and TOOL_END markers.
- *   The streaming parser extracts these tool calls incrementally.
- *
- *   - Agent.run — parses tool calls from LLM responses.
- * </Summary>
+ * @remarks
+ * Provides utilities for parsing tool calls from subagent responses, extracting thinking
+ * blocks, and recovering malformed tool calls. Supports both legacy text protocol
+ * and native Ollama tool_calls. Includes functions for stripping markdown fences,
+ * validating required fields, and recovering finish tool calls from think blocks.
  */
 
-/** Marker that begins a tool call block in LLM responses. */
-export const TOOL_START = "<<TOOL>>";
-
-/** Marker that ends a tool call block in LLM responses. */
-export const TOOL_END = "<<END>>";
-
-/** Maximum number of retries when model outputs markdown instead of tool calls. */
-export const MAX_MARKDOWN_RETRIES = 2;
+import type { ToolHandler } from "./tools/types.js";
+export { TOOL_START, TOOL_END } from "./tools/promptText.js";
+export { buildLegacyToolBlock } from "./tools/promptText.js";
 
 /**
- * <Summary>
- * What it does:
- *   Error message sent to LLM when it outputs markdown instead of tool calls.
+ * Purpose classification for run_command tool calls.
  *
- * How it fits in the system:
- *   Used to correct the model when it incorrectly uses code fences
- *   instead of the tool call protocol. Instructs the model to retry
- *   with the correct format.
- *
- *   - Agent.run — sends correction message to model.
- * </Summary>
- */
-export const MARKDOWN_CORRECTION_MESSAGE =
-  "You printed code or markdown instead of using tool calls. " +
-  "Do NOT use markdown code fences (``` or ~~~). " +
-  "Do NOT paste full file contents in your reply. " +
-  `Use exactly one block: ${TOOL_START}{"tool":"edit_file","path":"...","old":"...","new":"..."}${TOOL_END} ` +
-  "(or read_file / write_file / run_command / finish). Retry now with the correct format only.";
-
-/**
- * <Summary>
- * What it does:
- *   Purpose classification for run_command tool calls.
- *
- * How it fits in the system:
- *   Helps the system understand why a command is being run.
- *   "setup" commands prepare the environment.
- *   "verify" commands check that work is correct.
- *   "run-project" commands start dev servers (must be background).
- *
- *   - AgentToolCall — run_command includes purpose field.
- * </Summary>
+ * @remarks
+ * Used to classify shell commands by their intended purpose: setup (one-time
+ * environment preparation), verify (test/validation commands), or run-project
+ * (indefinite processes like dev servers).
  */
 export type CommandPurpose = "setup" | "verify" | "run-project";
 
 /**
- * <Summary>
- * What it does:
- *   Union type of all tool names available to agents.
+ * Normalized tool call shape used by Agent.run() for both protocols.
  *
- * How it fits in the system:
- *   Defines the complete set of tools that agents can invoke.
- *   Each tool corresponds to a specific capability (file ops, commands, etc.).
- *
- *   - AgentToolCall — tool field must be one of these names.
- * </Summary>
+ * @remarks
+ * Represents a parsed tool call with the tool name and arguments. Used by both
+ * legacy text protocol and native Ollama tool_calls.
  */
-export type AgentToolName =
-  | "read_file"
-  | "write_file"
-  | "edit_file"
-  | "run_command"
-  | "escalate"
-  | "finish";
+export type ParsedToolCall = {
+  /** The name of the tool to call */
+  name: string;
+  /** The arguments to pass to the tool */
+  args: Record<string, unknown>;
+};
 
-/**
- * <Summary>
- * What it does:
- *   Discriminated union of all possible tool call structures.
- *
- * How it fits in the system:
- *   Each variant corresponds to a different tool with its specific parameters.
- *   The "tool" field discriminates which variant is being used.
- *   Parsed from LLM responses between TOOL_START and TOOL_END markers.
- *
- *   - Agent.run — executes the parsed tool call.
- * </Summary>
- */
-export type AgentToolCall =
-  | { tool: "read_file"; path: string }
-  | { tool: "write_file"; path: string; content: string }
-  | {
-      tool: "edit_file";
-      path: string;
-      old: string;
-      new: string;
-      replace_all?: boolean;
-    }
-  | {
-      tool: "run_command";
-      command: string;
-      purpose?: CommandPurpose;
-      background?: boolean;
-    }
-  | { tool: "escalate"; reason: string }
-  | { tool: "finish"; summary: string };
-
-/** Internal tag name for thinking blocks (redacted from LLM output). */
 const THINK_BLOCK = "redacted_thinking";
 
-/** Opening tag for thinking blocks in LLM responses. */
+/** Opening tag for thinking blocks in subagent responses */
 export const THINKING_TAG_OPEN = `<${THINK_BLOCK}>`;
 
-/** Closing tag for thinking blocks in LLM responses. */
+/** Closing tag for thinking blocks in subagent responses */
 export const THINKING_TAG_CLOSE = `</${THINK_BLOCK}>`;
 
-/** Regular expression to match thinking blocks with their content. */
 const THINKING_RE = new RegExp(
   `<${THINK_BLOCK}>([\\s\\S]*?)<\\/${THINK_BLOCK}>`,
   "gi",
 );
 
 /**
- * <Summary>
- * What it does:
- *   Extracts the content of the first thinking block from a response.
+ * Extracts the content of the first thinking block from a response.
  *
- * How it does it (step by step):
- *   1. Execute regex to find first thinking block.
- *   2. Reset regex lastIndex for future use.
- *   3. Return trimmed content or null if not found.
+ * @remarks
+ * Uses regex to find the first thinking block and returns its trimmed content.
+ * Resets the regex lastIndex after extraction to enable re-use.
  *
- * Parameters:
- *   @param response - The LLM response text to extract from.
+ * @param response - The subagent response text
  *
- * Returns:
- *   Trimmed thinking content or null if no thinking block found.
- *
- *   - Agent.run — extracts reasoning from LLM responses.
- * </Summary>
+ * @returns The thinking block content, or null if not found
  */
 export const extractThinking = (response: string): string | null => {
-  // Step 1: Execute regex to find first thinking block
   const match = THINKING_RE.exec(response);
-  // Step 2: Reset regex lastIndex for future use
   THINKING_RE.lastIndex = 0;
-  // Step 3: Return trimmed content or null if not found
   return match?.[1]?.trim() ?? null;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Removes all thinking blocks from a response.
+ * Removes all thinking blocks from a response.
  *
- * How it does it (step by step):
- *   1. Replace all thinking block matches with empty string.
- *   2. Trim whitespace from result.
+ * @remarks
+ * Uses regex to remove all thinking block tags and their content from the response.
+ * Returns the cleaned response with trailing whitespace trimmed.
  *
- * Parameters:
- *   @param response - The LLM response text to clean.
+ * @param response - The subagent response text
  *
- * Returns:
- *   Response text with all thinking blocks removed and trimmed.
- *
- *   - Agent.run — cleans responses before tool extraction.
- * </Summary>
+ * @returns Response with thinking blocks removed
  */
-export const stripThinking = (response: string): string => {
-  // Step 1-2: Replace all thinking blocks and trim result
-  return response.replace(THINKING_RE, "").trim();
-};
+export const stripThinking = (response: string): string =>
+  response.replace(THINKING_RE, "").trim();
 
 /**
- * <Summary>
- * What it does:
- *   System instruction prompt that teaches the LLM how to use tools correctly.
+ * Removes markdown code-fence lines from think blocks and command-plan sections.
  *
- * How it fits in the system:
- *   This is the core protocol document that the LLM receives.
- *   It explains the thinking block format, tool call syntax,
- *   file operation rules, command reasoning requirements,
- *   and verification expectations.
+ * @remarks
+ * Filters out lines that start with markdown code fence markers (```), which
+ * the model sometimes adds around multi-line content. Returns the cleaned text.
  *
- *   - Agent.run — includes this in the system prompt.
- * </Summary>
+ * @param text - The text to strip fences from
+ *
+ * @returns Text with markdown fence lines removed
  */
-export const TOOL_SYSTEM_INSTRUCTION = `
-[REASONING RULES]
+export const stripMarkdownFencesFromText = (text: string): string =>
+  text
+    .split("\n")
+    .filter((line) => !/^\s*```/.test(line))
+    .join("\n")
+    .trim();
 
-You are a coding agent on a real file system. Think before every action. Observe every result.
+/**
+ * Behavioral rules shared by native and legacy agent paths.
+ *
+ * @remarks
+ * System prompt instructions for the agent that define how to structure think
+ * blocks, when to use specific fields (purpose, exits), and how to call tools.
+ * Enforces safety rules like requiring background: true for run-project commands
+ * and requiring verification before finish.
+ */
+export const AGENT_RULES = `
+You are an expert software engineer working inside a coding agent on a real file system.
 
-Before EVERY tool call write a ${THINKING_TAG_OPEN} block:
-${THINKING_TAG_OPEN}
-know:    [what you have confirmed — use the session snapshot for stack and commands]
-need:    [what is still unclear]
-action:  [exact tool and why]
-risk:    [what could go wrong]
-verify:  [how you know it worked]
-purpose: [run_command only: setup | verify | run-project]
-exits:   [run_command only: yes | no]
-${THINKING_TAG_CLOSE}
+Before every tool call, think inside a ${THINKING_TAG_OPEN} block using:
+  know:    what you already know (use the session snapshot for stack and commands)
+  need:    what is still missing
+  action:  tool name only, optionally plus a short target (e.g. "finish" or "read_file package.json") — never "none", never tool arguments
+  risk:    what could go wrong
+  verify:  how you know it worked
+  purpose: [ONLY when action is run_command: setup | verify | run-project — otherwise omit this line]
+  exits:   [ONLY when action is run_command: yes | no — otherwise omit this line]
 
 The first think block of each task must also include:
-setup commands:   [copy or adapt from [Advisor command plan] above]
-verify commands:    [copy or adapt from [Advisor command plan] — exits pass/fail]
-off-limits (run-project): [copy or adapt from [Advisor command plan] — background only]
+  setup commands:   [copy or adapt from [Agent command plan] above — one command per line, no markdown fences]
+  verify commands:  [copy or adapt from [Agent command plan] — use "none" if empty]
+  off-limits (run-project): [copy or adapt from [Agent command plan] — background only]
 
-- Never call a tool without a preceding ${THINKING_TAG_OPEN} block
-- Never print code blocks or markdown fences in replies
-- Output exactly ONE ${TOOL_START}...${TOOL_END} block per turn, then stop
-- Paths are relative to the workspace root
+Example (plain lines only — never wrap commands in markdown code fences):
+  setup commands: npm install --save-dev jest @testing-library/react
+  verify commands: none
+  off-limits (run-project): npm run dev
 
-[FILE OPERATION RULES]
+Rules:
+- Call exactly one tool per turn, then stop. Thinking alone does not complete the turn — you must also emit the real tool call.
+- Never call a tool without a preceding ${THINKING_TAG_OPEN} block.
+- Never use markdown code fences inside think blocks.
+- action must name a real tool (read_file, write_file, edit_file, run_command, escalate, finish). Never write action: none.
+- Do NOT put tool arguments in the action line. Arguments belong only in the tool call (function call or <<TOOL>> JSON).
+- Omit purpose and exits unless action is run_command. Never write purpose: none or exits: yes for finish/read_file/write_file/edit_file/escalate — those fields do not apply.
+- When setup is already done and the subtask needs no further file or command work, call the finish tool with a short summary (do not only write action: finish in the think block).
+- read_file a path before you may edit_file it on the same path in this task.
+- write_file only for new files or full rewrites.
+- run-project commands require background: true or they will be blocked.
+- Before finish, re-read files you wrote or run a verify command that exits 0.
+- If blocked, call escalate with a clear reason instead of guessing.
 
-- read_file before edit_file on the same path in this task
-- edit_file for surgical changes: {"tool":"edit_file","path":"...","old":"exact anchor","new":"replacement","replace_all":false}
-- old must appear exactly once unless replace_all is true
-- write_file only for new files or full rewrites
-
-[COMMAND REASONING RULES]
-
-For run_command include in the think block:
-command: [exact string]
-purpose: setup | verify | run-project
-exits:   yes | no
-risk:    [what if non-zero exit]
-
-run_command JSON may include purpose and background:
-{"tool":"run_command","command":"...","purpose":"verify"}
-{"tool":"run_command","command":"...","purpose":"run-project","background":true}
-
-run-project commands (dev servers) require background: true or they will be blocked.
-Use verify commands from [Advisor command plan] in your system prompt.
-purpose on run_command JSON overrides list matching when set.
-
-[VERIFICATION RULES]
-
-Before finish you must verify work if you wrote or edited files:
-
-Option 1 — Re-read every file you wrote or edited and confirm the requirement in your think block.
-Option 2 — Run a verify command that exits on its own with code 0 (from [Advisor command plan]).
-
-Starting a server is NEVER verification. Servers do not prove correctness.
-finish will be blocked without file re-read or successful verify command.
-
-[TOOL FORMAT]
-
-${TOOL_START}{"tool":"<name>", ...fields...}${TOOL_END}
-
-Tools:
-- read_file: {"tool":"read_file","path":"relative/path"}
-- write_file: {"tool":"write_file","path":"relative/path","content":"full file content"}
-- edit_file: {"tool":"edit_file","path":"relative/path","old":"anchor","new":"replacement"}
-- run_command: {"tool":"run_command","command":"shell","purpose":"setup|verify|run-project","background":false}
-- escalate: {"tool":"escalate","reason":"why you are blocked"}
-- finish: {"tool":"finish","summary":"what you accomplished"}
-
-[WORKFLOW]
-
-explore (session snapshot) → think (command plan) → read → edit or write → verify → finish
-
-Example turn:
-${THINKING_TAG_OPEN}
-know:   [from session snapshot]
-need:   [gap]
-action: read_file
-risk:   [missing file]
-verify: [content returned]
-${THINKING_TAG_CLOSE}
-${TOOL_START}{"tool":"read_file","path":"src/main.ts"}${TOOL_END}
+Tool definitions are provided separately (function schemas or legacy tool format).
 `.trim();
 
-/** Regular expression to match tool blocks between markers. */
 const TOOL_BLOCK_REGEX = /<<TOOL>>([\s\S]*?)<<END>>/g;
 
 /**
- * <Summary>
- * What it does:
- *   Parses a JSON string into a validated AgentToolCall object.
+ * Validates that all required fields are present and non-empty in tool arguments.
  *
- * How it does it (step by step):
- *   1. Parse JSON string into unknown object.
- *   2. Extract tool name from parsed object.
- *   3. Validate and construct specific tool call based on tool name.
- *   4. For each tool type, validate required fields and types.
- *   5. Return null if validation fails or JSON is invalid.
+ * @remarks
+ * Checks each required field in the schema against the provided arguments.
+ * Returns false if any required field is missing, null, or empty (except content
+ * which can be empty). Special case for edit_file: old field cannot be empty.
  *
- * Parameters:
- *   @param raw - The JSON string to parse.
+ * @param schema - The tool handler schema
+ * @param args - The arguments to validate
  *
- * Returns:
- *   Validated AgentToolCall or null if parsing/validation fails.
- *
- *   - parseAllToolCalls — parses each tool block.
- * </Summary>
+ * @returns True if all required fields are valid
  */
-export const parseAgentToolCall = (
-  rawJsonString: string,
-): AgentToolCall | null => {
-  try {
-    // Step 1: Parse JSON string into unknown object
-    const parsedObject = JSON.parse(rawJsonString) as Record<string, unknown>;
-    // Step 2: Extract tool name from parsed object
-    const toolName = parsedObject.tool;
-
-    // Step 3-4: Validate and construct specific tool call based on tool name
-    if (toolName === "read_file" && typeof parsedObject.path === "string") {
-      return { tool: "read_file", path: parsedObject.path };
+const validateRequiredFields = (
+  schema: ToolHandler["schema"],
+  args: Record<string, unknown>,
+): boolean => {
+  for (const field of schema.function.parameters.required) {
+    const value = args[field];
+    if (value === undefined || value === null) {
+      return false;
     }
-
     if (
-      toolName === "write_file" &&
-      typeof parsedObject.path === "string" &&
-      typeof parsedObject.content === "string"
+      typeof value === "string" &&
+      value.length === 0 &&
+      field !== "content"
     ) {
-      return {
-        tool: "write_file",
-        path: parsedObject.path,
-        content: parsedObject.content,
-      };
+      return false;
     }
-
-    if (
-      toolName === "edit_file" &&
-      typeof parsedObject.path === "string" &&
-      typeof parsedObject.old === "string" &&
-      typeof parsedObject.new === "string"
-    ) {
-      // Empty old string is invalid (would match everything)
-      if (parsedObject.old.length === 0) {
-        return null;
-      }
-      return {
-        tool: "edit_file",
-        path: parsedObject.path,
-        old: parsedObject.old,
-        new: parsedObject.new,
-        replace_all: parsedObject.replace_all === true,
-      };
-    }
-
-    if (
-      toolName === "run_command" &&
-      typeof parsedObject.command === "string"
-    ) {
-      const purposeValue = parsedObject.purpose;
-      // Validate purpose is one of the allowed values
-      const validPurpose: CommandPurpose | undefined =
-        purposeValue === "setup" ||
-        purposeValue === "verify" ||
-        purposeValue === "run-project"
-          ? purposeValue
-          : undefined;
-      return {
-        tool: "run_command",
-        command: parsedObject.command,
-        purpose: validPurpose,
-        background: parsedObject.background === true,
-      };
-    }
-
-    if (toolName === "escalate" && typeof parsedObject.reason === "string") {
-      return { tool: "escalate", reason: parsedObject.reason };
-    }
-
-    if (toolName === "finish" && typeof parsedObject.summary === "string") {
-      return { tool: "finish", summary: parsedObject.summary };
-    }
-  } catch {
-    // Step 5: Return null if JSON is invalid
-    return null;
   }
-  // Step 5: Return null if validation fails
-  return null;
+  if (
+    schema.function.name === "edit_file" &&
+    typeof args.old === "string" &&
+    args.old.length === 0
+  ) {
+    return false;
+  }
+  return true;
+};
+
+/** Fields that commonly carry multi-line code the model may fence or mis-escape */
+const CONTENT_BEARING_FIELDS = new Set(["content", "old", "new"]);
+
+/**
+ * Removes a wrapping markdown code fence (```lang ... ```) if the model wrapped
+ * literal file content in one. Also strips a lone opening fence line when the
+ * closing fence is missing. Returns the value unchanged when no fence is found.
+ *
+ * @remarks
+ * The model sometimes wraps file content in markdown code fences, which breaks
+ * JSON parsing. This function detects and removes those fences, handling both
+ * complete fences and incomplete (opening only) fences.
+ *
+ * @param value - The value to strip fences from
+ *
+ * @returns Value with markdown fence removed, or unchanged if no fence found
+ */
+export const stripMarkdownFence = (value: string): string => {
+  const trimmed = value.trim();
+  const fullMatch = /^\s*```[^\n]*\n([\s\S]*?)\n?```[ \t]*$/.exec(trimmed);
+  if (fullMatch) {
+    return fullMatch[1];
+  }
+  const openOnly = /^\s*```[^\n]*\n([\s\S]+)$/.exec(trimmed);
+  if (openOnly && !/```/.test(openOnly[1])) {
+    return openOnly[1];
+  }
+  return value;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Parses all tool call blocks from a text response.
+ * Applies standard JSON string escape sequences to a raw extracted substring.
  *
- * How it does it (step by step):
- *   1. Initialize empty array for parsed tool calls.
- *   2. Create regex from TOOL_BLOCK_REGEX pattern.
- *   3. Iterate through all matches in the text.
- *   4. Parse each match and add to array if valid.
- *   5. Log error if parsing fails.
- *   6. Return array of all successfully parsed tool calls.
+ * @remarks
+ * Replaces JSON escape sequences (\n, \t, \uXXXX, etc.) with their actual
+ * character values. Used when recovering malformed tool calls where string
+ * values were extracted positionally.
  *
- * Parameters:
- *   @param text - The LLM response text containing tool blocks.
+ * @param raw - The raw string with escape sequences
  *
- * Returns:
- *   Array of all successfully parsed tool calls.
- *
- *   - extractToolFromText — gets first tool call.
- * </Summary>
+ * @returns Unescaped string
  */
-export const parseAllToolCalls = (text: string): AgentToolCall[] => {
-  // Step 1: Initialize empty array for parsed tool calls
-  const parsedCalls: AgentToolCall[] = [];
-  // Step 2: Reset regex lastIndex for fresh matching
+const unescapeJsonStringLiteral = (raw: string): string =>
+  raw.replace(
+    /\\(u[0-9a-fA-F]{4}|["\\/bfnrt])/g,
+    (_match, escapeBody: string) => {
+      switch (escapeBody[0]) {
+        case '"':
+          return '"';
+        case "\\":
+          return "\\";
+        case "/":
+          return "/";
+        case "b":
+          return "\b";
+        case "f":
+          return "\f";
+        case "n":
+          return "\n";
+        case "r":
+          return "\r";
+        case "t":
+          return "\t";
+        case "u":
+          return String.fromCharCode(parseInt(escapeBody.slice(1), 16));
+        default:
+          return escapeBody;
+      }
+    },
+  );
+
+/**
+ * Best-effort recovery for tool blocks that fail strict JSON.parse.
+ *
+ * @remarks
+ * Recovers tool calls that fail strict JSON.parse, typically because the model
+ * put literal newlines or a markdown fence inside a string value. Reconstructs
+ * fields positionally using the known tool schema so that embedded quotes,
+ * newlines, and fences no longer break parsing. Returns null when the block
+ * cannot be safely recovered so the caller treats it as malformed.
+ *
+ * @param raw - The raw tool block string
+ * @param registry - The tool handler registry
+ *
+ * @returns Parsed tool call, or null if recovery failed
+ */
+const recoverMalformedToolCall = (
+  raw: string,
+  registry: ToolHandler[],
+): ParsedToolCall | null => {
+  const toolNameMatch = /"tool"\s*:\s*"([A-Za-z0-9_]+)"/.exec(raw);
+  if (!toolNameMatch) {
+    return null;
+  }
+  const toolName = toolNameMatch[1];
+  const handler = registry.find(
+    (entry) => entry.schema.function.name === toolName,
+  );
+  if (!handler) {
+    return null;
+  }
+
+  const fieldKeys = Object.keys(handler.schema.function.parameters.properties);
+
+  const stringMarkers = fieldKeys
+    .map((key) => {
+      const marker = new RegExp(`"${key}"\\s*:\s*"`).exec(raw);
+      return marker
+        ? {
+            key,
+            start: marker.index,
+            valueStart: marker.index + marker[0].length,
+          }
+        : null;
+    })
+    .filter(
+      (marker): marker is { key: string; start: number; valueStart: number } =>
+        marker !== null,
+    )
+    .sort((a, b) => a.valueStart - b.valueStart);
+
+  const args: Record<string, unknown> = {};
+  for (let index = 0; index < stringMarkers.length; index += 1) {
+    const current = stringMarkers[index];
+    const next = stringMarkers[index + 1];
+
+    let rawValue: string;
+    if (next) {
+      rawValue = raw
+        .slice(current.valueStart, next.start)
+        .replace(/"\s*,\s*$/, "");
+    } else {
+      const tail = raw.slice(current.valueStart);
+      const endMatch = /"\s*\}?\s*$/.exec(tail);
+      if (!endMatch) {
+        return null;
+      }
+      rawValue = tail.slice(0, endMatch.index);
+    }
+
+    let value = unescapeJsonStringLiteral(rawValue);
+    if (CONTENT_BEARING_FIELDS.has(current.key)) {
+      value = stripMarkdownFence(value);
+    }
+    args[current.key] = value;
+  }
+
+  for (const key of fieldKeys) {
+    if (key in args) {
+      continue;
+    }
+    const boolMatch = new RegExp(`"${key}"\\s*:\s*(true|false)`).exec(raw);
+    if (boolMatch) {
+      args[key] = boolMatch[1] === "true";
+    }
+  }
+
+  if (!validateRequiredFields(handler.schema, args)) {
+    return null;
+  }
+
+  return { name: toolName, args };
+};
+
+/**
+ * Parses a single tool call from JSON string with lenient recovery.
+ *
+ * @remarks
+ * First attempts strict JSON.parse. If that fails, attempts to recover the
+ * tool call using position-based parsing. Logs recovered calls for debugging.
+ *
+ * @param rawJsonString - The raw JSON string to parse
+ * @param registry - The tool handler registry
+ *
+ * @returns Parsed tool call, or null if parsing failed
+ */
+export const parseAgentToolCall = (
+  rawJsonString: string,
+  registry: ToolHandler[],
+): ParsedToolCall | null => {
+  try {
+    const parsedObject = JSON.parse(rawJsonString) as Record<string, unknown>;
+    const toolName = parsedObject.tool;
+    if (typeof toolName !== "string") {
+      return null;
+    }
+
+    const handler = registry.find(
+      (entry) => entry.schema.function.name === toolName,
+    );
+    if (!handler) {
+      return null;
+    }
+
+    const { tool: _tool, ...rest } = parsedObject;
+    const args = rest as Record<string, unknown>;
+
+    if (!validateRequiredFields(handler.schema, args)) {
+      return null;
+    }
+
+    return { name: toolName, args };
+  } catch {
+    const recovered = recoverMalformedToolCall(rawJsonString, registry);
+    if (recovered) {
+      console.error(
+        "[Agent] Recovered malformed tool call via lenient parse:",
+        recovered.name,
+      );
+    }
+    return recovered;
+  }
+};
+
+/**
+ * Result type for parsing all tool calls from text.
+ *
+ * @remarks
+ * Contains the parsed tool calls and a flag indicating whether any malformed
+ * blocks were encountered.
+ */
+export type ParseToolCallsResult = {
+  /** Array of successfully parsed tool calls */
+  calls: ParsedToolCall[];
+  /** True if any tool blocks failed to parse */
+  hadMalformedBlock: boolean;
+};
+
+/**
+ * Parses all tool calls from text containing <<TOOL>> blocks.
+ *
+ * @remarks
+ * Uses regex to find all <<TOOL>>...<<END>> blocks and parses each one.
+ * Tracks whether any blocks failed to parse for debugging.
+ *
+ * @param text - The text containing tool blocks
+ * @param registry - The tool handler registry
+ *
+ * @returns Parse result with calls and malformed block flag
+ */
+export const parseAllToolCalls = (
+  text: string,
+  registry: ToolHandler[],
+): ParseToolCallsResult => {
+  const parsedCalls: ParsedToolCall[] = [];
+  let hadMalformedBlock = false;
   TOOL_BLOCK_REGEX.lastIndex = 0;
-  // Step 3-5: Iterate through all matches in the text
   let regexMatch: RegExpExecArray | null;
   while ((regexMatch = TOOL_BLOCK_REGEX.exec(text)) !== null) {
-    const parsedCall = parseAgentToolCall(regexMatch[1].trim());
+    const parsedCall = parseAgentToolCall(regexMatch[1].trim(), registry);
     if (parsedCall) {
       parsedCalls.push(parsedCall);
     } else {
-      // Log error if parsing fails (show first 200 chars for debugging)
+      hadMalformedBlock = true;
       console.error(
         "[Agent] Failed to parse tool call JSON:",
         regexMatch[1].slice(0, 200),
       );
     }
   }
-  // Step 6: Return array of all successfully parsed tool calls
-  return parsedCalls;
+  return { calls: parsedCalls, hadMalformedBlock };
 };
 
 /**
- * <Summary>
- * What it does:
- *   Extracts the first tool call from a text response.
+ * Extracts the first tool call from text containing <<TOOL>> blocks.
  *
- * How it does it (step by step):
- *   1. Parse all tool calls from the text.
- *   2. Return the first one or null if none found.
+ * @remarks
+ * Convenience function that parses all tool calls and returns the first one,
+ * or null if no tool calls were found.
  *
- * Parameters:
- *   @param text - The LLM response text containing tool blocks.
+ * @param text - The text containing tool blocks
+ * @param registry - The tool handler registry
  *
- * Returns:
- *   First tool call or null if no tool calls found.
- *
- *   - Agent.run — extracts single tool call per turn.
- * </Summary>
+ * @returns First parsed tool call, or null if none found
  */
-export const extractToolFromText = (text: string): AgentToolCall | null => {
-  // Step 1-2: Parse all tool calls and return first one
-  const allToolCalls = parseAllToolCalls(text);
-  return allToolCalls[0] ?? null;
-};
+export const extractToolFromText = (
+  text: string,
+  registry: ToolHandler[],
+): ParsedToolCall | null => parseAllToolCalls(text, registry).calls[0] ?? null;
+
+/** Regex pattern matching think block field boundaries */
+const THINK_FIELD_BOUNDARY =
+  /^\s*(?:know|need|action|risk|verify|purpose|exits|setup\s+commands|verify\s+commands|off-limits)\s*:/im;
+
+/** Regex pattern for pipe-delimited string values */
+const PIPE_STRING_RE = /<\|"\|>([\s\S]*?)<\|"\|>/g;
 
 /**
- * <Summary>
- * What it does:
- *   Detects when the model output code/markdown instead of tool calls.
+ * Strips wrapping parentheses or braces from a string.
  *
- * How it does it (step by step):
- *   1. Trim whitespace from text.
- *   2. Return false for empty text.
- *   3. Check for code fences (``` or ~~~).
- *   4. Check for partial code fences in long text.
- *   5. Count lines that look like code (imports, declarations, etc.).
- *   6. Return true if enough code-like lines exist.
+ * @remarks
+ * Removes outer { } or ( ) characters if they wrap the entire string.
+ * Used when parsing finish arguments that the model may have wrapped.
  *
- * Parameters:
- *   @param text - The LLM response text to analyze.
+ * @param raw - The string to strip
  *
- * Returns:
- *   True if text looks like code/markdown dump, false otherwise.
- *
- *   - Agent.run — decides whether to send correction message.
- * </Summary>
+ * @returns String without wrapping delimiters
  */
-export const looksLikeMarkdownOrCodeDump = (text: string): boolean => {
-  // Step 1: Trim whitespace from text
-  const trimmedText = text.trim();
-  // Step 2: Return false for empty text
-  if (trimmedText.length === 0) {
-    return false;
-  }
-  // Step 3: Check for code fences (``` or ~~~)
+const stripWrappingParensOrBraces = (raw: string): string => {
+  const trimmed = raw.trim();
   if (
-    /```[\s\S]*?```/.test(trimmedText) ||
-    /~~~[\s\S]*?~~~/.test(trimmedText)
+    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+    (trimmed.startsWith("(") && trimmed.endsWith(")"))
   ) {
-    return true;
+    return trimmed.slice(1, -1).trim();
   }
-  // Step 4: Check for partial code fences in long text
-  if (trimmedText.includes("```") && trimmedText.length > 200) {
-    return true;
-  }
-  // Step 5: Count lines that look like code
-  const lines = trimmedText.split("\n");
-  let codeLikeLineCount = 0;
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    // Check for common code patterns
-    if (
-      /^(import |export |const |let |var |function |class |interface |type )/.test(
-        trimmedLine,
-      ) ||
-      /[{};]\s*$/.test(trimmedLine)
-    ) {
-      codeLikeLineCount += 1;
-    }
-  }
-  // Step 6: Return true if enough code-like lines exist
-  return codeLikeLineCount >= 8 && lines.length >= 10;
+  return trimmed;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Incremental parser that extracts tool calls from streaming LLM responses.
+ * Extracts pipe-delimited string values from text.
  *
- * How it fits in the system:
- *   As the LLM streams tokens, this parser buffers them and detects
- *   when tool call markers appear. It emits text outside tool blocks
- *   and returns completed tool JSON when a tool block closes.
+ * @remarks
+ * Finds all occurrences of <|"|>value<|"|> patterns and returns
+ * the trimmed values. Used for parsing finish arguments in pipe format.
  *
- *   - Agent.run — parses streaming LLM responses.
- * </Summary>
+ * @param raw - The text containing pipe-delimited values
+ *
+ * @returns Array of extracted string values
  */
-export class ToolStreamParser {
-  /** Buffer for accumulating incoming stream chunks. */
-  private streamBuffer = "";
-
-  /** Flag indicating if we're currently inside a tool block. */
-  private insideToolBlock = false;
-
-  /**
-   * <Summary>
-   * What it does:
-   *   Feeds a chunk of text to the parser and emits text/tool calls.
-   *
-   * How it does it (step by step):
-   *   1. Append chunk to buffer.
-   *   2. If not in tool block, look for TOOL_START marker.
-   *   3. Emit text before marker and keep potential partial marker.
-   *   4. If marker found, emit text before it and enter tool mode.
-   *   5. If in tool block, look for TOOL_END marker.
-   *   6. If end found, parse JSON and return tool call.
-   *   7. Return null if no complete tool call yet.
-   *
-   * Parameters:
-   *   @param chunk - New text chunk from the stream.
-   *   @param emitText - Callback to emit text outside tool blocks.
-   *
-   * Returns:
-   *   Completed tool call or null if not yet complete.
-   * </Summary>
-   */
-  feed = (
-    chunk: string,
-    emitText: (text: string) => void,
-  ): AgentToolCall | null => {
-    // Step 1: Append chunk to buffer
-    this.streamBuffer += chunk;
-
-    // Step 2-4: If not in tool block, look for TOOL_START marker
-    if (!this.insideToolBlock) {
-      const startIndex = this.streamBuffer.indexOf(TOOL_START);
-      if (startIndex === -1) {
-        // No marker yet, emit text but keep potential partial marker
-        if (this.streamBuffer.length > TOOL_START.length) {
-          const keepBuffer = this.streamBuffer.slice(-TOOL_START.length);
-          const textToEmit = this.streamBuffer.slice(0, -TOOL_START.length);
-          if (textToEmit.length > 0) {
-            emitText(textToEmit);
-          }
-          this.streamBuffer = keepBuffer;
-        }
-        return null;
-      }
-      // Marker found, emit text before it and enter tool mode
-      const textBeforeMarker = this.streamBuffer.slice(0, startIndex);
-      if (textBeforeMarker.length > 0) {
-        emitText(textBeforeMarker);
-      }
-      this.streamBuffer = this.streamBuffer.slice(
-        startIndex + TOOL_START.length,
-      );
-      this.insideToolBlock = true;
+const extractPipeDelimitedStrings = (raw: string): string[] => {
+  const values: string[] = [];
+  PIPE_STRING_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = PIPE_STRING_RE.exec(raw)) !== null) {
+    const value = match[1].trim();
+    if (value.length > 0) {
+      values.push(value);
     }
+  }
+  return values;
+};
 
-    // Step 5-6: If in tool block, look for TOOL_END marker
-    if (this.insideToolBlock) {
-      const endIndex = this.streamBuffer.indexOf(TOOL_END);
-      if (endIndex === -1) {
-        return null; // Still waiting for end marker
+/**
+ * Extracts a named pipe-delimited value from text.
+ *
+ * @remarks
+ * Looks for a pattern like "field: <|"|>value<|"|>" and returns the value.
+ * Case-insensitive field matching.
+ *
+ * @param raw - The text containing the named value
+ * @param field - The field name to extract
+ *
+ * @returns The extracted value, or null if not found
+ */
+const extractNamedPipeValue = (raw: string, field: string): string | null => {
+  const pattern = new RegExp(
+    `${field}\\s*:\\s*<\\|"\\|>([\\s\\S]*?)<\\|"\\|>`,
+    "i",
+  );
+  const match = pattern.exec(raw);
+  const value = match?.[1]?.trim();
+  return value && value.length > 0 ? value : null;
+};
+
+/**
+ * Attempts to parse finish arguments from various JSON formats.
+ *
+ * @remarks
+ * Tries multiple parsing strategies: raw JSON, with wrapping braces removed,
+ * and with braces added if missing. Returns null if all attempts fail.
+ *
+ * @param raw - The raw string to parse
+ *
+ * @returns Parsed object, or null if parsing failed
+ */
+const tryParseFinishArgsJson = (
+  raw: string,
+): Record<string, unknown> | null => {
+  const candidates = [raw.trim()];
+  const stripped = stripWrappingParensOrBraces(raw);
+  if (stripped !== raw.trim()) {
+    candidates.push(stripped);
+  }
+  if (!stripped.startsWith("{")) {
+    candidates.push(`{${stripped}}`);
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
       }
-      const jsonString = this.streamBuffer.slice(0, endIndex).trim();
-      this.streamBuffer = this.streamBuffer.slice(endIndex + TOOL_END.length);
-      this.insideToolBlock = false;
-      // Step 7: Parse and return tool call
-      return parseAgentToolCall(jsonString);
+    } catch {
+      // try next candidate
     }
+  }
+  return null;
+};
 
+/**
+ * Recovers a finish tool call when the model only wrote finish into the think
+ * action line (often with invented delimiters) and never emitted a real tool call.
+ *
+ * @remarks
+ * Parses the think block to extract finish arguments from various formats:
+ * JSON, pipe-delimited values, or bare strings. Handles multiple argument formats
+ * the model might invent. Returns a finish tool call with summary and keyFindings.
+ *
+ * @param thinkText - The think block text containing the finish action
+ *
+ * @returns Parsed finish tool call, or null if recovery failed
+ */
+export const recoverFinishFromThink = (
+  thinkText: string,
+): ParsedToolCall | null => {
+  const actionMatch = /^\s*action:\s*finish\b(.*)$/im.exec(thinkText);
+  if (!actionMatch) {
     return null;
-  };
+  }
 
-  /**
-   * <Summary>
-   * What it does:
-   *   Flushes any remaining text buffer outside tool blocks.
-   *
-   * How it does it (step by step):
-   *   1. Check if we're not in a tool block and have buffered text.
-   *   2. Emit the buffered text.
-   *   3. Clear the buffer.
-   *
-   * Parameters:
-   *   @param emitText - Callback to emit remaining text.
-   * </Summary>
-   */
-  flushText = (emitText: (text: string) => void): void => {
-    // Step 1-3: Emit remaining text if not in tool block
-    if (!this.insideToolBlock && this.streamBuffer.length > 0) {
-      emitText(this.streamBuffer);
-      this.streamBuffer = "";
+  const actionStart = actionMatch.index ?? 0;
+  const afterActionHeader = actionStart + actionMatch[0].length;
+  const firstLineArgs = actionMatch[1] ?? "";
+  const remainder = thinkText.slice(afterActionHeader);
+  const boundaryMatch = THINK_FIELD_BOUNDARY.exec(remainder);
+  const restArgs = boundaryMatch
+    ? remainder.slice(0, boundaryMatch.index)
+    : remainder;
+  const actionArgsRaw = `${firstLineArgs}${restArgs}`.trim();
+
+  const args: Record<string, unknown> = {};
+
+  const jsonArgs = actionArgsRaw ? tryParseFinishArgsJson(actionArgsRaw) : null;
+  if (jsonArgs) {
+    if (typeof jsonArgs.summary === "string" && jsonArgs.summary.trim()) {
+      args.summary = jsonArgs.summary.trim();
     }
-  };
+    if (Array.isArray(jsonArgs.keyFindings)) {
+      args.keyFindings = jsonArgs.keyFindings
+        .map((finding) => String(finding).trim())
+        .filter((finding) => finding.length > 0);
+    }
+  }
 
-  /**
-   * <Summary>
-   * What it does:
-   *   Resets the parser state for reuse with a new stream.
-   *
-   * How it does it (step by step):
-   *   1. Clear the stream buffer.
-   *   2. Reset the inside tool block flag.
-   * </Summary>
-   */
-  reset = (): void => {
-    // Step 1-2: Clear buffer and reset state
-    this.streamBuffer = "";
-    this.insideToolBlock = false;
-  };
-}
+  if (!args.summary) {
+    const pipeSummary = extractNamedPipeValue(actionArgsRaw, "summary");
+    if (pipeSummary) {
+      args.summary = pipeSummary;
+    }
+  }
+
+  if (!args.keyFindings) {
+    const keyFindingsMatch = /keyFindings\s*:\s*\[([\s\S]*?)\]/i.exec(
+      actionArgsRaw,
+    );
+    if (keyFindingsMatch) {
+      const findings = extractPipeDelimitedStrings(keyFindingsMatch[1]);
+      if (findings.length > 0) {
+        args.keyFindings = findings;
+      }
+    }
+  }
+
+  if (
+    !args.summary &&
+    actionArgsRaw.length > 0 &&
+    !actionArgsRaw.includes(":")
+  ) {
+    const bare = stripWrappingParensOrBraces(actionArgsRaw).replace(
+      /^["']|["']$/g,
+      "",
+    );
+    if (bare.length > 0) {
+      args.summary = bare;
+    }
+  }
+
+  if (!args.summary) {
+    const knowMatch = /^\s*know:\s*(.+)$/im.exec(thinkText);
+    const knowText = knowMatch?.[1]?.trim();
+    args.summary =
+      knowText && knowText.length > 0 ? knowText : "Subtask complete.";
+  }
+
+  return { name: "finish", args };
+};

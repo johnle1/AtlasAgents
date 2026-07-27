@@ -6,18 +6,28 @@
   "bin": {
     "loopy": "dist/index.js"
   },
+  "files": [
+    "dist",
+    "default-skills"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "start": "node dist/index.js",
-    "test": "npm run build && node --test dist/connection/commands.test.js dist/connection/connection.test.js dist/fileProxy/pathUtils.test.js dist/ui/spinnerSync.test.js dist/ui/statusVisual.test.js dist/ui/historySanitize.test.js dist/ui/taskBoardLayout.test.js"
+    "test": "npm run build && node --test dist/connection/commands.test.js dist/connection/connection.test.js dist/fileProxy/pathUtils.test.js dist/mcp/tokenSaveClient.test.js dist/ui/spinnerSync.test.js dist/ui/statusVisual.test.js dist/ui/historySanitize.test.js dist/ui/taskBoardLayout.test.js"
   },
   "keywords": [],
   "author": "",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnle1/LoopyCode.git",
+    "directory": "packages/client"
+  },
   "type": "module",
   "dependencies": {
-    "@loopycode/shared": "file:../shared",
+    "@loopycode/shared": "^0.1.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@rsocket/core": "1.0.0-alpha.3",
     "@rsocket/tcp-client": "1.0.0-alpha.3",
     "@shikijs/cli": "^4.1.0",

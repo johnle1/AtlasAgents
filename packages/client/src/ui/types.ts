@@ -8,13 +8,13 @@
  * wire payloads directly.
  */
 import type {
-  AgentPlan,
+  SubagentPlan,
+  SubagentStage,
   AgentStage,
-  AdvisorStage,
   PlanExecution,
   StatusIcon,
   TaskLifecycleState,
-} from "../frames.js";
+} from "../types/frames.js";
 
 /**
  * Display styling for plain-text history lines.
@@ -46,8 +46,8 @@ export type HistoryItem =
       kind: "think";
       /** Collapsible reasoning block content. */
       text: string;
-      /** When `true`, styled as advisor output rather than agent output. */
-      advisor?: boolean;
+      /** When `true`, styled as agent output rather than subagent output. */
+      agent?: boolean;
     }
   | {
       kind: "plan";
@@ -57,8 +57,8 @@ export type HistoryItem =
       steps: string[];
       /** Identified risks or open questions. */
       risks: string[];
-      /** Per-agent assignments from the advisor. */
-      agents: AgentPlan[];
+      /** Per-agent assignments from the agent. */
+      agents: SubagentPlan[];
       agentCount: number;
       execution: PlanExecution;
       /** Short label for the execution mode (e.g. `"sequential"`). */
@@ -81,7 +81,7 @@ export type HistoryItem =
 export type SpinnerMode = "thinking" | "working";
 
 /**
- * Active bottom-line spinner shown while the advisor or an agent is working.
+ * Active bottom-line spinner shown while the agent or a subagent is working.
  *
  * @remarks
  * Only the `active: true` variant exists — absence of spinner state is
@@ -89,7 +89,7 @@ export type SpinnerMode = "thinking" | "working";
  */
 export type SpinnerState = {
   active: true;
-  /** Label beside the spinner (e.g. `"Advisor"`, `"Agent 2"`). */
+  /** Label beside the spinner (e.g. `"Agent"`, `"Agent 2"`). */
   label: string;
   mode: SpinnerMode;
 };
@@ -98,14 +98,14 @@ export type SpinnerState = {
 export type PlanDecision = "implement" | "skip" | "edit";
 
 /**
- * One agent or advisor status row in the status area.
+ * One subagent or agent status row in the status area.
  */
-export type AgentStatusState = {
-  id: number | "advisor";
+export type SubagentStatusState = {
+  id: number | "agent";
   label: string;
   icon: StatusIcon;
   message: string;
-  stage?: AgentStage | AdvisorStage;
+  stage?: SubagentStage | AgentStage;
 };
 
 /** A task waiting in the queue before assignment. */
@@ -117,7 +117,7 @@ export type PendingTaskState = {
 };
 
 /** One task on an agent's board. */
-export type AgentTaskState = {
+export type SubagentTaskState = {
   id: number;
   text: string;
   state: TaskLifecycleState;
@@ -126,11 +126,11 @@ export type AgentTaskState = {
 /**
  * Snapshot of one agent's assigned tasks and current activity.
  */
-export type AgentBoardState = {
+export type SubagentBoardState = {
   id: number;
   label: string;
-  tasks: AgentTaskState[];
-  activity?: { stage: AgentStage; message: string } | null;
+  tasks: SubagentTaskState[];
+  activity?: { stage: SubagentStage; message: string } | null;
 };
 
 /**
@@ -200,8 +200,8 @@ export type PromptRequest =
       max: number;
     }
   | {
-      type: "planEdit";
-      /** Initial step lines loaded into the editor. */
+      type: "planFeedback";
+      /** Proposed step lines shown as read-only reference while typing feedback. */
       initial: string[];
     }
   | {

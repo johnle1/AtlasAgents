@@ -1,16 +1,17 @@
 /**
- * <Summary>
- * What it does:
- *   Dependency contracts for the orchestration layer so Advisor, Agent, and
- *   AdvisorOrchestrator compile before concrete Ollama, config, memory, and
- *   skills implementations exist.
+ * Dependency contracts for the orchestration layer.
  *
- * How it fits in the system:
- *   Defines interfaces that decouple orchestration from concrete implementations.
- *   Server bootstrap will eventually construct real classes implementing these
- *   interfaces and inject them into AdvisorOrchestrator. This enables dependency
- *   injection and makes the system more testable and modular.
- * </Summary>
+ * @remarks
+ * Defines interfaces that decouple orchestration from concrete implementations.
+ * Server bootstrap constructs real classes implementing these interfaces and
+ * injects them into AgentOrchestrator. This enables dependency injection and
+ * makes the system more testable and modular. Allows Agent, Subagent, and
+ * AgentOrchestrator to compile before concrete Ollama, config, memory, and
+ * skills implementations exist.
+ *
+ * Re-exports all interfaces from focused files to provide a single import point
+ * for all orchestration interfaces. Also re-exports types from memory and ollama
+ * modules that orchestration needs.
  */
 
 // Re-export all interfaces from focused files

@@ -1,7 +1,18 @@
+/**
+ * Client facade for the single persistent RSocket TCP session to the server.
+ *
+ * @remarks
+ * All interactive CLI ↔ server traffic (commands, task streams, plan replies)
+ * goes through {@link Connection}. Supporting modules handle envelopes
+ * (`commands.ts`), streams (`streaming.ts`), reconnect policy (`lifecycle.ts`),
+ * and the inbound file responder (`fileResponder.ts`).
+ */
+
 import { RSocketConnector, type RSocket } from "@rsocket/core";
-import { TcpClientTransport } from "@rsocket/tcp-client";
-import type { Config } from "../config.js";
-import type { TaskFrame } from "../frames.js";
+import type { Config } from "../config/index.js";
+import { createTlsClientTransport } from "./tls/tlsClientTransport.js";
+import { checkAndPinFingerprint } from "./tls/fingerprintStore.js";
+import type { TaskFrame } from "../types/frames.js";
 import type { LocalFileProxy } from "../localFileProxy.js";
 import {
   clearMemory as clearMemoryFn,
@@ -24,38 +35,91 @@ import type {
   StatusListener,
 } from "./types.js";
 import { authMetadata, requireSocket } from "./utils.js";
-import { CONNECT_RETRY_INTERVAL_MS } from "./constants.js";
+import {
+  CONNECT_RETRY_INTERVAL_MS,
+  HEALTH_CHECK_INTERVAL_MS,
+  HEALTH_CHECK_TIMEOUT_MS,
+} from "./constants.js";
 import { ConnectionLifecycle } from "./lifecycle.js";
 
-export type { PullProgress, TaskFrame } from "../frames.js";
+export type { PullProgress, TaskFrame } from "../types/frames.js";
 
 /**
- * <Summary>
- * What it does:
- *   Manages the single persistent RSocket TCP connection to the LoopyCode
- *   server, sending tasks as requestStream and commands as requestResponse.
+ * Manages one persistent RSocket TCP connection to the LoopyCode server.
  *
- * How it fits in the system:
- *   Sits between the CLI input loop (index.ts / CommandHandler) and the
- *   server. All server communication flows through this class so transport
- *   logic is centralised in one place.
- * </Summary>
+ * @remarks
+ * Responsibilities:
+ * - TCP + RSocket handshake with JSON MIME types and a file-proxy responder
+ * - Status listeners + automatic reconnect (via {@link ConnectionLifecycle})
+ * - Periodic `session.exists` health probes that close a half-dead socket
+ * - Session {@link AbortSignal} aborted on disconnect so UI/work can cancel
+ * - Thin wrappers that `waitUntilConnected` then delegate to command/stream helpers
+ *
+ * **Ordering:** call {@link setFileProxy} before {@link connect} — the handshake
+ * embeds the responder and refuses to start without a proxy.
+ *
+ * Reconnect uses exponential backoff with jitter (see `constants.ts`) unless
+ * suppressed during {@link reload} so an intentional close does not race a
+ * reconnect against changing host/port/password.
+ *
+ * @example
+ * ```ts
+ * const connection = new Connection(config);
+ * connection.setFileProxy(fileProxy);
+ * await connection.connect();
+ *
+ * const models = await connection.fetchModels();
+ * await connection.sendTask({
+ *   task: "Explain this code",
+ *   maxSubagents: 2,
+ *   onFrame: (frame) => console.log(frame.kind),
+ *   onToken: (token) => process.stdout.write(token),
+ * });
+ * ```
  */
 export class Connection {
-  /** Current client configuration (server, port, models, password, etc.). */
+  /** Live client config (host, port, password, models, timeout, …). */
   private config: Config;
 
-  /** Live RSocket instance after successful connect, null when disconnected. */
+  /** Connected RSocket instance, or `null` when disconnected. */
   private rsocket: RSocket | null = null;
 
-  /** In-flight connect promise used as a mutex to prevent duplicate connections. */
+  /**
+   * In-flight `connect()` promise acting as a mutex.
+   * Concurrent callers share one handshake instead of opening duplicate sockets.
+   */
   private establishing: Promise<void> | null = null;
 
+  /** Status machine + reconnect scheduler for this connection. */
   private readonly lifecycle: ConnectionLifecycle;
 
-  /** Local file proxy used by the RSocket responder for server-initiated file ops. */
+  /**
+   * Proxy handling server → client file routes.
+   * Required before connect; see {@link setFileProxy}.
+   */
   private fileProxy: LocalFileProxy | null = null;
 
+  /** Interval timer for health probes; cleared on disconnect. */
+  private healthCheckTimerHandle: ReturnType<typeof setInterval> | null = null;
+
+  /** Guards against overlapping `session.exists` probes. */
+  private healthCheckInFlight = false;
+
+  /**
+   * Aborted when the session ends so in-flight client work can stop promptly.
+   * Replaced on each successful connect via {@link beginSession}.
+   */
+  private sessionAbortController: AbortController | null = null;
+
+  /**
+   * Creates a disconnected connection bound to `config`.
+   *
+   * @remarks
+   * Does not open a socket. Injects lifecycle deps that call back into
+   * {@link connect} and clear `this.rsocket` on close.
+   *
+   * @param config - Initial server address, auth, models, and timeout.
+   */
   constructor(config: Config) {
     this.config = config;
     this.lifecycle = new ConnectionLifecycle({
@@ -69,96 +133,160 @@ export class Connection {
   }
 
   /**
-   * <Summary>
-   * What it does:
-   *   Registers a listener for connection status changes and returns an
-   *   unsubscribe function.
+   * Registers a connection-status listener and returns an unsubscribe function.
    *
-   * How it does it (step by step):
-   *   1. Adds the callback to the statusListeners set.
-   *   2. Immediately invokes the callback with the current status.
-   *   3. Returns a function that removes the callback from the set.
+   * @remarks
+   * The callback runs immediately with the current status, then on every
+   * distinct transition (`Disconnected` / `Connecting` / `Connected` /
+   * `Reconnecting`).
    *
-   * Parameters:
-   *   @param statusListenerCallback - Callback invoked with the new status string.
+   * @param statusListenerCallback - Invoked with the latest {@link ConnectionStatus}.
+   * @returns Unsubscribe function (safe to call more than once).
    *
-   * Returns:
-   *   @returns Call this to unsubscribe.
-   *
-   *   None.
-   * </Summary>
+   * @example
+   * ```ts
+   * const unsubscribe = connection.onConnectionStatus((status) => {
+   *   console.log("Status:", status);
+   * });
+   * unsubscribe();
+   * ```
    */
   onConnectionStatus = (statusListenerCallback: StatusListener): (() => void) =>
     this.lifecycle.onConnectionStatus(statusListenerCallback);
 
   private emitStatus = (nextStatus: ConnectionStatus): void => {
-    // ===== STEP 1: Delegate to Lifecycle Manager =====
-    // Step 1a: Pass the new status to the lifecycle manager for emission
-    // Step 1b: The lifecycle manager handles notifying all registered listeners
     this.lifecycle.emitStatus(nextStatus);
   };
 
+  /**
+   * Shared close path: stop probes, abort session work, then lifecycle teardown.
+   */
   private handleSocketClosed = (): void => {
+    this.stopHealthMonitor();
+    this.endSession();
     this.lifecycle.handleSocketClosed();
   };
 
-  /** @internal Used by connection tests for reload reconnect suppression. */
+  /** Starts a fresh AbortController for the newly connected session. */
+  private beginSession = (): void => {
+    // Abort any leftover controller first so listeners never see two live sessions.
+    this.endSession();
+    this.sessionAbortController = new AbortController();
+  };
+
+  /** Aborts and drops the current session controller, if any. */
+  private endSession = (): void => {
+    if (this.sessionAbortController) {
+      this.sessionAbortController.abort();
+      this.sessionAbortController = null;
+    }
+  };
+
+  /**
+   * Abort signal for the current RSocket session, if one is active.
+   *
+   * @remarks
+   * Abort fires when the session ends from disconnect, intentional reload, or
+   * network loss. Subscribe so long-running UI/work can cancel instead of
+   * hanging on a dead socket.
+   *
+   * @returns Session `AbortSignal`, or `undefined` when disconnected.
+   *
+   * @example
+   * ```ts
+   * const signal = connection.getSessionAbortSignal();
+   * signal?.addEventListener("abort", () => cancelLocalWork());
+   * ```
+   */
+  getSessionAbortSignal = (): AbortSignal | undefined =>
+    this.sessionAbortController?.signal;
+
+  private stopHealthMonitor = (): void => {
+    if (this.healthCheckTimerHandle) {
+      clearInterval(this.healthCheckTimerHandle);
+      this.healthCheckTimerHandle = null;
+    }
+  };
+
+  private startHealthMonitor = (): void => {
+    // Always clear first so reload/reconnect never stacks intervals.
+    this.stopHealthMonitor();
+    this.healthCheckTimerHandle = setInterval(() => {
+      void this.runHealthCheck();
+    }, HEALTH_CHECK_INTERVAL_MS);
+  };
+
+  /**
+   * Probes `session.exists`; closes the socket on timeout/failure to force reconnect.
+   */
+  private runHealthCheck = async (): Promise<void> => {
+    if (this.lifecycle.getStatus() !== "Connected") return;
+    const rsocket = this.rsocket;
+    if (!rsocket) return;
+    // Skip if a previous probe is still racing the timeout Promise.
+    if (this.healthCheckInFlight) return;
+
+    this.healthCheckInFlight = true;
+    let healthCheckTimeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        sendCommandFn(rsocket, "session.exists", {}, this.meta()),
+        new Promise<never>((_, reject) => {
+          healthCheckTimeoutId = setTimeout(
+            () => reject(new Error("Health check timeout")),
+            HEALTH_CHECK_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      // Socket swapped mid-probe (reload) — do not act on the stale instance.
+      if (this.rsocket !== rsocket) return;
+    } catch {
+      // Only close if this is still the active socket; closing a new one would drop a healthy session.
+      if (this.rsocket === rsocket) {
+        rsocket.close();
+      }
+    } finally {
+      if (healthCheckTimeoutId !== undefined) {
+        clearTimeout(healthCheckTimeoutId);
+      }
+      this.healthCheckInFlight = false;
+    }
+  };
+
+  /** @internal Test hook: whether lifecycle is suppressing auto-reconnect. */
   get suppressReconnect(): boolean {
     return this.lifecycle.isReconnectSuppressed();
   }
 
+  /** @internal Test hook: exposes the health-check runner for timer tests. */
+  get healthCheckRunner(): () => Promise<void> {
+    return this.runHealthCheck;
+  }
+
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Blocks until an RSocket connection is live, retrying connect attempts
-   *   until config.timeout milliseconds have elapsed.
+   * Blocks until `this.rsocket` is set, retrying connect until `config.timeout`.
    *
-   * How it does it (step by step):
-   *   1. Calculates a deadline from Date.now() + config.timeout.
-   *   2. Loops: if rsocket exists, returns immediately.
-   *   3. If past deadline, throws a timeout error with host and port.
-   *   4. Tries this.connect(); if it succeeds and rsocket is set, returns.
-   *   5. On connect failure, sleeps 200ms and retries.
+   * @remarks
+   * Used by public APIs so callers need not call {@link connect} explicitly.
+   * Failed attempts wait {@link CONNECT_RETRY_INTERVAL_MS} before retrying.
    *
-   * Parameters:
-   *   None.
-   *
-   * Returns:
-   *   @returns Resolves when connected.
-   *
-   * @throws {Error} — When the timeout elapses without a successful connection.
-   * </Summary>
+   * @throws {@link Error} When the deadline passes without a live socket,
+   *   including host/port and timeout in the message.
    */
   private waitUntilConnected = async (): Promise<void> => {
-    // ===== STEP 1: Calculate Deadline =====
-    // Step 1a: Compute timeout deadline from now + config timeout value
-    // Step 1b: This ensures we don't wait indefinitely for a connection
     const deadline = Date.now() + this.config.timeout;
-
-    // ===== STEP 2: Loop Until Connected or Timeout =====
-    // Step 2a: Start retry loop
     for (;;) {
-      // ===== STEP 2b: Check if Already Connected =====
-      // If rsocket exists, connection is live; return immediately
       if (this.rsocket) return;
-
-      // ===== STEP 2c: Check if Past Deadline =====
-      // If current time exceeds deadline, give up and throw timeout error
       if (Date.now() > deadline) {
         throw new Error(
           `Not connected to ${this.config.server}:${this.config.port} (timeout ${this.config.timeout}ms)`,
         );
       }
-
-      // ===== STEP 2d: Attempt to Connect =====
-      // Try to establish connection; if it succeeds and rsocket is set, return
       try {
         await this.connect();
         if (this.rsocket) return;
       } catch {
-        // ===== STEP 2e: Connect Failed; Sleep Before Retry =====
-        // Sleep 200ms to avoid tight retry loop on repeated failures
+        // Soft-fail: keep retrying until the deadline for transient startup races.
         await new Promise((resolve) =>
           setTimeout(resolve, CONNECT_RETRY_INTERVAL_MS),
         );
@@ -167,50 +295,33 @@ export class Connection {
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Opens the TCP socket and performs the RSocket handshake if not already
-   *   connected, using config.server and config.port.
+   * Opens TCP and completes the RSocket handshake (idempotent).
    *
-   * How it does it (step by step):
-   *   1. Returns immediately if rsocket is already set (idempotent).
-   *   2. Returns the existing promise if a connect is already in flight (mutex).
-   *   3. Emits "connecting" status.
-   *   4. Creates TcpClientTransport pointed at config.server:config.port.
-   *   5. Creates RSocketConnector with JSON MIME types, keep-alive, and file responder.
-   *   6. Calls connector.connect() to perform the TCP + RSocket SETUP handshake.
-   *   7. Stores the rsocket instance and resets reconnectAttempt to 0.
-   *   8. Registers an onClose callback that triggers handleSocketClosed.
-   *   9. Emits "connected" status.
-   *   10. On failure: nulls rsocket, emits "disconnected", and rethrows.
-   *   11. Clears the establishing promise in a finally block.
+   * @remarks
+   * - Already connected → resolves immediately.
+   * - Handshake in flight → returns the same `establishing` Promise (mutex).
+   * - Requires {@link setFileProxy} first or throws.
    *
-   * Parameters:
-   *   None.
+   * On success: resets reconnect backoff, registers `onClose`, emits
+   * `"Connected"`, begins a session abort controller, and starts health checks.
+   * On failure: clears the socket, emits `"Disconnected"`, and rethrows.
    *
-   * Returns:
-   *   @returns Resolves when the connection is established.
+   * @returns Resolves when connected (or already connected).
+   * @throws {@link Error} When `fileProxy` is missing, or TCP/handshake fails.
    *
-   * @throws {Error} — When TCP connection or RSocket handshake fails.
-   * </Summary>
+   * @example
+   * ```ts
+   * connection.setFileProxy(fileProxy);
+   * await connection.connect();
+   * ```
    */
   connect = async (): Promise<void> => {
-    // ===== STEP 1: Check for Existing Connection =====
-    // Step 1a: If already connected, return immediately (idempotent)
     if (this.rsocket) return;
-
-    // ===== STEP 2: Check for In-Flight Connection =====
-    // Step 2a: If a connection is already being established, return that promise
-    // Step 2b: This prevents multiple simultaneous connection attempts (mutex pattern)
+    // Coalesce concurrent connect() callers onto one handshake Promise.
     if (this.establishing) return this.establishing;
 
-    // ===== STEP 3: Start Connection Process =====
-    // Step 3a: Create and store the connection promise
     this.establishing = (async () => {
-      // ===== STEP 4: Emit Connecting Status =====
-      // Step 4a: Notify listeners that connection is in progress
-      this.emitStatus("connecting");
+      this.emitStatus("Connecting");
 
       try {
         if (!this.fileProxy) {
@@ -219,175 +330,144 @@ export class Connection {
           );
         }
 
-        // ===== STEP 5: Create TCP Transport =====
-        // Step 5a: Initialize TcpClientTransport with server host and port from config
-        const transport = new TcpClientTransport({
-          connectionOptions: {
-            host: this.config.server,
-            port: this.config.port,
+        const transport = createTlsClientTransport({
+          host: this.config.server,
+          port: this.config.port,
+          onCertificate: (fingerprint256) => {
+            const decision = checkAndPinFingerprint(
+              this.config.server,
+              this.config.port,
+              fingerprint256,
+            );
+            if (!decision.trust) {
+              process.stderr.write(
+                `\nWARNING: server certificate fingerprint changed for ${this.config.server}:${this.config.port}\n` +
+                  `  expected: ${decision.pinnedFingerprint}\n` +
+                  `  received: ${fingerprint256}\n` +
+                  "Refusing to connect. If the server certificate was legitimately " +
+                  "regenerated, clear the pin and reconnect to trust it again.\n\n",
+              );
+              return "reject";
+            }
+            if (decision.firstConnection) {
+              process.stderr.write(
+                `Trusting new server certificate for ${this.config.server}:${this.config.port} ` +
+                  `(fingerprint: ${fingerprint256}). Verify this out-of-band if possible.\n`,
+              );
+            }
+            return "trust";
           },
         });
 
-        // ===== STEP 6: Create RSocket Connector =====
-        // Step 6a: Initialize RSocketConnector with transport and setup configuration
         const connector = new RSocketConnector({
           transport,
           setup: {
             dataMimeType: "application/json",
             metadataMimeType: "application/json",
+            // keepAlive/lifetime are RSocket heartbeats (ms), separate from our JSON health probe.
             keepAlive: 30_000,
             lifetime: 120_000,
           },
-          // Step 6b: Register responder for server-initiated file operations
           responder: createFileResponder(this.fileProxy),
         });
 
-        // ===== STEP 7: Perform RSocket Handshake =====
-        // Step 7a: Connect to server and complete TCP + RSocket SETUP handshake
         const rsocket = await connector.connect();
-
-        // ===== STEP 8: Store RSocket Instance =====
-        // Step 8a: Save the live connection for future use
         this.rsocket = rsocket;
-
-        // ===== STEP 9: Reset Reconnect Counter =====
-        // Step 9a: Since we're now connected, reset the exponential backoff counter
         this.lifecycle.resetReconnectAttempt();
 
-        // ===== STEP 10: Register Close Handler =====
-        // Step 10a: When socket closes, trigger handleSocketClosed for cleanup and reconnect
-        // Step 10b: Ignore stale onClose from a replaced socket during reload()
         rsocket.onClose(() => {
+          // Ignore close events from a socket that is no longer current (reload race).
           if (this.rsocket !== rsocket) return;
           this.handleSocketClosed();
         });
 
-        // ===== STEP 11: Emit Connected Status =====
-        // Step 11a: Notify listeners that connection is established
-        this.emitStatus("connected");
+        this.emitStatus("Connected");
+        this.beginSession();
+        this.startHealthMonitor();
       } catch (err) {
-        // ===== STEP 12: Handle Connection Failure =====
-        // Step 12a: Clear the rsocket reference since connection failed
         this.rsocket = null;
-
-        // Step 12b: Emit disconnected status to notify listeners
-        this.emitStatus("disconnected");
-
-        // Step 12c: Re-throw error so caller knows connection failed
+        this.emitStatus("Disconnected");
         throw err;
       }
     })().finally(() => {
-      // ===== STEP 13: Clear Establishing Promise =====
-      // Step 13a: Always clear the establishing promise whether success or failure
-      // Step 13b: This allows new connection attempts after failure
       this.establishing = null;
     });
 
-    // ===== STEP 14: Return Connection Promise =====
-    // Step 14a: Return the establishing promise to caller
     return this.establishing;
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Cancels any pending reconnect timer so a stale setTimeout does not fire.
-   *
-   * How it does it (step by step):
-   *   1. Checks if reconnectTimer is set.
-   *   2. Calls clearTimeout on it.
-   *   3. Nulls the handle.
-   *
-   * Parameters:
-   *   None.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   *
-   *   None (uses clearTimeout).
-   * </Summary>
+   * Cancels a pending reconnect timer via the lifecycle manager.
    */
   private clearReconnectTimer = (): void => {
     this.lifecycle.cancelReconnect();
   };
 
+  /**
+   * Replaces config in memory without reconnecting.
+   *
+   * @remarks
+   * Safe for model/temperature tweaks. For host/port/password changes use
+   * {@link reload}, which reconnects when those fields differ.
+   *
+   * @param config - New configuration object to store.
+   */
   updateConfig = (config: Config): void => {
-    // ===== STEP 1: Replace Config Reference =====
-    // Step 1a: Store the new config in the instance
-    // Step 1b: This does NOT trigger reconnection. Use reload() for connection-level changes.
     this.config = config;
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Stores a reference to the LocalFileProxy so incoming RSocket file requests
-   *   from the server can be handled.
+   * Stores the local file proxy used by the inbound RSocket responder.
    *
-   * How it does it (step by step):
-   *   1. Stores the proxy reference for use in the RSocket responder callback.
+   * @remarks
+   * Must run before {@link connect}; otherwise connect throws. The proxy is
+   * captured into the responder at handshake time.
    *
-   * Parameters:
-   *   @param proxy - The file proxy instance.
+   * @param proxy - Workspace file proxy implementation.
    *
-   * Returns:
-   *   void — called for side effects only.
-   *
-   *   None.
-   * </Summary>
+   * @example
+   * ```ts
+   * connection.setFileProxy(fileProxy);
+   * await connection.connect();
+   * ```
    */
   setFileProxy = (proxy: LocalFileProxy): void => {
-    // ===== STEP 1: Store File Proxy Reference =====
-    // Step 1a: Save the proxy so the RSocket responder can access it
-    // Step 1b: Used in connect() responder to handle incoming file.* operations
     this.fileProxy = proxy;
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Replaces the configuration and reconnects to the server if connection
-   *   settings (server, port, password) have changed.
+   * Applies new config and reconnects only if connection settings changed.
    *
-   * How it does it (step by step):
-   *   1. Snapshots the current server, port, and password values.
-   *   2. Replaces this.config with the new config.
-   *   3. Compares the old and new connection settings.
-   *   4. If unchanged, returns immediately (no reconnect needed).
-   *   5. Sets suppressReconnect flag to prevent auto-reconnect on close.
-   *   6. Cancels any pending reconnect timer.
-   *   7. Closes the old RSocket connection.
-   *   8. Clears suppressReconnect flag.
-   *   9. Establishes a new connection with the updated config.
+   * @remarks
+   * Compares `server`, `port`, and `password`. Unchanged → updates the stored
+   * config and returns without touching the socket. Changed → suppresses
+   * auto-reconnect, cancels timers, stops health checks, closes the old
+   * socket, then {@link connect}s with the new settings. Suppression is always
+   * cleared in `finally` so later unexpected closes can reconnect again.
    *
-   * Parameters:
-   *   @param config - The new configuration object.
+   * @param config - Full replacement configuration.
+   * @returns Resolves when reconnect finishes, or immediately if transport
+   *   settings were unchanged.
+   * @throws {@link Error} When reconnect `connect()` fails (suppression still cleared).
    *
-   * Returns:
-   *   @returns Resolves when reconnect completes or immediately
-   *     if connection settings are unchanged.
-   * </Summary>
+   * @example
+   * ```ts
+   * Host changed → reconnect
+   * await connection.reload({ ...config, server: "new-host", port: 8080 });
+   *
+   * Models only → no reconnect
+   * await connection.reload({ ...config, subagentModel: "gemma3:27b" });
+   * ```
    */
   reload = async (config: Config): Promise<void> => {
-    // ===== STEP 1: Snapshot Previous Connection Settings =====
-    // Step 1a: Save the current server, port, and password for comparison
-    // Step 1b: This allows us to detect if connection-level settings actually changed
     const previousConnectionSettings = {
       server: this.config.server,
       port: this.config.port,
       password: this.config.password,
     };
 
-    // ===== STEP 2: Install New Config =====
-    // Step 2a: Replace config immediately so we have the new values
-    // Step 2b: This ensures all methods use the updated configuration going forward
     this.config = config;
 
-    // ===== STEP 3: Check if Connection Settings Changed =====
-    // Step 3a: Compare previous and new connection-level fields
-    // Step 3b: If unchanged, just update config and return (no reconnect needed)
-    // Step 3c: This avoids unnecessary disconnection when only non-connection settings changed
     if (
       previousConnectionSettings.server === config.server &&
       previousConnectionSettings.port === config.port &&
@@ -396,130 +476,78 @@ export class Connection {
       return;
     }
 
-    // ===== STEP 4: Suppress Auto-Reconnect During Close =====
-    // Step 4a: Set flag so that when the old socket closes, it doesn't auto-reconnect
-    // Step 4b: We want to reconnect to the NEW server, not the old one
-    // Step 4c: This prevents a race condition where the old socket triggers reconnect to old server
+    // Prevent the old socket's onClose from scheduling reconnect mid-reload.
     this.lifecycle.setSuppressReconnect(true);
-
-    // ===== STEP 5: Cancel Pending Reconnect Timer =====
-    // Step 5a: Clear any existing reconnect timer
-    // Step 5b: This prevents a delayed reconnect attempt from firing after we close the socket
     this.clearReconnectTimer();
+    this.stopHealthMonitor();
 
-    // ===== STEP 6: Close Old Connection =====
-    // Step 6a: Save reference to the old RSocket before closing
-    // Step 6b: This allows us to close it after nulling the reference
     const oldRSocket = this.rsocket;
-
-    // Step 6c: Null out the reference immediately to mark as disconnected
-    // Step 6d: This prevents any new operations from trying to use the closing socket
     this.rsocket = null;
-
-    // Step 6e: Close the old RSocket (if it exists)
-    // Step 6f: This gracefully terminates the TCP connection
     oldRSocket?.close();
+    // The onClose guard (`this.rsocket !== rsocket`) skips handleSocketClosed
+    // when we null the reference before closing. Call endSession directly so
+    // the session AbortController is always aborted, regardless of that guard.
+    this.endSession();
 
-    // ===== STEP 7: Connect to New Server =====
-    // Step 7a: Establish connection with the updated config
-    // Step 7b: Keep suppressReconnect true until connect settles so a late
-    //          old-socket onClose cannot schedule a competing reconnect
+    let connectFailed = false;
     try {
-      // Reset reconnect counter for fresh backoff sequence on new server
       this.lifecycle.resetReconnectAttempt();
       await this.connect();
+    } catch (err) {
+      // Track that connect() threw so we can schedule a reconnect below.
+      connectFailed = true;
+      throw err;
     } finally {
-      // Step 7c: Clear the suppress flag once connection attempt completes
-      // Step 7d: This allows normal auto-reconnect behavior for future disconnections
       this.lifecycle.setSuppressReconnect(false);
+      // If connect() failed, no onClose callback will fire to kick off the
+      // backoff loop. Schedule reconnect now that suppression is cleared so
+      // the connection can recover instead of staying stuck in Disconnected.
+      if (connectFailed) {
+        this.lifecycle.scheduleReconnect();
+      }
     }
   };
 
   /**
-   * <Summary>
-   * What it does:
-   *   Builds the auth metadata Buffer for the current config.
+   * Auth metadata for the current password in `this.config`.
    *
-   * How it does it (step by step):
-   *   1. Delegates to authMetadata utility with this.config.
-   *
-   * Parameters:
-   *   None.
-   *
-   * Returns:
-   *   @returns UTF-8 JSON password metadata for RSocket frames.
-   * </Summary>
+   * @returns UTF-8 JSON `{ password }` Buffer for RSocket frames.
    */
   private meta = (): Buffer => authMetadata(this.config);
 
   /**
-   * <Summary>
-   * What it does:
-   *   Returns the live RSocket or throws if disconnected.
+   * Live socket accessor for command/stream helpers.
    *
-   * How it does it (step by step):
-   *   1. Delegates to requireSocket with this.rsocket.
-   *
-   * Parameters:
-   *   None.
-   *
-   * Returns:
-   *   @returns The live RSocket connection object.
-   *
-   * @throws {Error} — When the connection is not established.
-   * </Summary>
+   * @returns Connected {@link RSocket}.
+   * @throws {@link Error} When disconnected (`"RSocket is not connected"`).
    */
   private socket = (): RSocket => requireSocket(this.rsocket);
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Sends a command envelope via RSocket requestResponse and returns parsed data.
+   * Sends a `requestResponse` command and returns parsed `data`.
    *
-   * How it does it (step by step):
-   *   1. Waits until the RSocket connection is live.
-   *   2. Delegates to sendCommand in commands.js with socket and metadata.
+   * @remarks
+   * Waits for a live connection, then delegates to `sendCommand` in `commands.ts`.
    *
-   * Parameters:
-   *   @param type - Command route e.g. "models.list", "memory.get".
-   *   @param payload - JSON-serialisable command payload.
-   *
-   * Returns:
-   *   @returns Parsed data field from the server response.
-   *
-   * @throws {Error} — When the server returns ok: false or connection fails.
-   * </Summary>
+   * @typeParam TResponse - Expected `data` shape for this route.
+   * @param type - Route such as `"models.list"` or `"memory.get"`.
+   * @param payload - Command-specific JSON body.
+   * @returns Parsed `data` from a successful envelope.
+   * @throws {@link Error} On connect timeout, transport failure, or `ok: false`.
    */
   sendCommand = async <TResponse>(
     type: string,
     payload: unknown,
   ): Promise<TResponse> => {
-    // ===== STEP 1: Wait for Connection =====
-    // Step 1a: Block until RSocket is live, retrying with backoff if needed
     await this.waitUntilConnected();
-
-    // ===== STEP 2: Delegate to Command Helper =====
-    // Step 2a: Pass live socket, route, payload, and auth metadata to sendCommand
     return sendCommandFn(this.socket(), type, payload, this.meta());
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Fetches installed Ollama models with full metadata from the server.
+   * Fetches installed Ollama models with full metadata.
    *
-   * How it does it (step by step):
-   *   1. Waits until connected.
-   *   2. Delegates to fetchModelsDetailed in commands.js.
-   *
-   * Parameters:
-   *   None.
-   *
-   * Returns:
-   *   @returns Array of model metadata objects.
-   * </Summary>
+   * @returns Array of model metadata objects from the server.
+   * @throws {@link Error} On connect failure or invalid `models.list` response.
    */
   fetchModelsDetailed = async () => {
     await this.waitUntilConnected();
@@ -527,21 +555,15 @@ export class Connection {
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Fetches installed Ollama model names from the server.
+   * Fetches installed Ollama model names.
    *
-   * How it does it (step by step):
-   *   1. Waits until connected.
-   *   2. Delegates to fetchModels in commands.js.
+   * @returns Model name strings suitable for selection UIs.
+   * @throws {@link Error} On connect failure or invalid list response.
    *
-   * Parameters:
-   *   None.
-   *
-   * Returns:
-   *   @returns Array of model name strings.
-   * </Summary>
+   * @example
+   * ```ts
+   * const names = await connection.fetchModels();
+   * ```
    */
   fetchModels = async (): Promise<string[]> => {
     await this.waitUntilConnected();
@@ -549,39 +571,18 @@ export class Connection {
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Deprecated alias for fetchModels, kept for backward compatibility.
+   * Alias of {@link fetchModels} retained for older call sites.
    *
-   * How it does it (step by step):
-   *   1. Delegates to this.fetchModels().
-   *
-   * Parameters:
-   *   None.
-   *
-   * Returns:
-   *   @returns Array of model names.
-   * </Summary>
+   * @deprecated Use {@link fetchModels} instead.
+   * @returns Model name strings.
    */
   listModels = async (): Promise<string[]> => this.fetchModels();
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Uploads local skill files to the server for advisor/agent use.
+   * Uploads local skill markdown files for agent/subagent use.
    *
-   * How it does it (step by step):
-   *   1. Waits until connected.
-   *   2. Delegates to syncSkills in commands.js.
-   *
-   * Parameters:
-   *   @param skills - Skill objects with name and markdown content.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   * </Summary>
+   * @param skills - Skill name + content payloads to sync.
+   * @throws {@link Error} On connect or command failure.
    */
   syncSkills = async (skills: SkillPayload[]): Promise<void> => {
     await this.waitUntilConnected();
@@ -589,21 +590,10 @@ export class Connection {
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Fetches all stored memory entries from the server's preference store.
+   * Loads all memory preference entries from the server.
    *
-   * How it does it (step by step):
-   *   1. Waits until connected.
-   *   2. Delegates to getMemory in commands.js.
-   *
-   * Parameters:
-   *   None.
-   *
-   * Returns:
-   *   @returns Array of topics with their rules.
-   * </Summary>
+   * @returns Topics with their rules; empty when none stored.
+   * @throws {@link Error} On connect or command failure.
    */
   getMemory = async () => {
     await this.waitUntilConnected();
@@ -611,21 +601,10 @@ export class Connection {
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Deletes all rules for a specific topic from server memory.
+   * Deletes memory rules for a single topic.
    *
-   * How it does it (step by step):
-   *   1. Waits until connected.
-   *   2. Delegates to forgetMemory in commands.js.
-   *
-   * Parameters:
-   *   @param topic - Topic name to forget e.g. "coding-style".
-   *
-   * Returns:
-   *   void — called for side effects only.
-   * </Summary>
+   * @param topic - Exact topic key to forget.
+   * @throws {@link Error} On connect or command failure.
    */
   forgetMemory = async (topic: string): Promise<void> => {
     await this.waitUntilConnected();
@@ -633,21 +612,9 @@ export class Connection {
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Wipes all memory entries from the server's preference store.
+   * Wipes the entire server-side memory store for this user/session.
    *
-   * How it does it (step by step):
-   *   1. Waits until connected.
-   *   2. Delegates to clearMemory in commands.js.
-   *
-   * Parameters:
-   *   None.
-   *
-   * Returns:
-   *   void — called for side effects only.
-   * </Summary>
+   * @throws {@link Error} On connect or command failure.
    */
   clearMemory = async (): Promise<void> => {
     await this.waitUntilConnected();
@@ -655,36 +622,33 @@ export class Connection {
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Streams a user task to the server and dispatches frames/tokens to callbacks.
+   * Streams a user task and dispatches frames / tokens to callbacks.
    *
-   * How it does it (step by step):
-   *   1. Waits until connected.
-   *   2. Delegates to sendTask in streaming.js with config and callbacks.
+   * @remarks
+   * Uses models and temperatures from the current config. `onToken` enables
+   * token-by-token CLI output; `onFrame` receives the full task event stream.
    *
-   * Parameters:
-   *   @param opts - Task options with text, maxAgents, onFrame, onToken.
+   * @param taskOptions - Task text, optional `maxSubagents`, and stream callbacks.
+   * @returns Resolves when the server completes the task stream.
+   * @throws {@link Error} On connect failure or mid-stream RSocket / handler errors.
    *
-   * Returns:
-   *   @returns Resolves when the server finishes streaming.
-   * </Summary>
+   * @example
+   * ```ts
+   * await connection.sendTask({
+   *   task: "Explain this code",
+   *   maxSubagents: 2,
+   *   onFrame: (frame) => console.log(frame.kind),
+   *   onToken: (token) => process.stdout.write(token),
+   * });
+   * ```
    */
   sendTask = async (taskOptions: {
     task: string;
-    maxAgents?: 1 | 2 | "max" | number;
+    maxSubagents?: 1 | 2 | "max" | number;
     onFrame: (frame: TaskFrame) => void | Promise<void>;
     onToken?: (token: string) => void;
   }): Promise<void> => {
-    // ===== STEP 1: Wait for Connection =====
-    // Step 1a: Block until RSocket is live before starting the task stream
-    // Step 1b: This ensures we have a valid connection before sending the task
     await this.waitUntilConnected();
-
-    // ===== STEP 2: Delegate to Streaming Helper =====
-    // Step 2a: Pass task text, config, metadata, socket, and callbacks to sendTask
-    // Step 2b: The streaming helper manages the requestStream protocol and frame handling
     await sendTaskFn(
       taskOptions.task,
       this.config,
@@ -692,26 +656,25 @@ export class Connection {
       this.socket(),
       taskOptions.onFrame,
       taskOptions.onToken,
-      taskOptions.maxAgents,
+      taskOptions.maxSubagents,
     );
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Streams long-running server operations (model pull, explore) to callbacks.
+   * Streams long-running operations such as model pull or explore.
    *
-   * How it does it (step by step):
-   *   1. Waits until connected.
-   *   2. Delegates to sendStream in streaming.js.
+   * @param streamOptions - Discriminated operation kind, payload, and `onFrame`.
+   * @returns Resolves when the server completes the stream.
+   * @throws {@link Error} On connect failure or stream errors.
    *
-   * Parameters:
-   *   @param opts - Operation kind, payload, and onFrame callback.
-   *
-   * Returns:
-   *   @returns Resolves when the server finishes streaming.
-   * </Summary>
+   * @example
+   * ```ts
+   * await connection.sendStream({
+   *   kind: "models.pull",
+   *   payload: { name: "gemma3:27b" },
+   *   onFrame: (frame) => console.log(frame),
+   * });
+   * ```
    */
   sendStream = async (
     streamOptions:
@@ -726,42 +689,32 @@ export class Connection {
           onFrame: (frame: TaskFrame) => void | Promise<void>;
         },
   ): Promise<void> => {
-    // ===== STEP 1: Wait for Connection =====
-    // Step 1a: Block until RSocket is live before starting the operation stream
-    // Step 1b: This ensures we have a valid connection before starting the streaming operation
     await this.waitUntilConnected();
-
-    // ===== STEP 2: Delegate to Streaming Helper =====
-    // Step 2a: Pass operation options, metadata, and socket to sendStream
-    // Step 2b: The streaming helper manages the requestStream protocol for long-running operations
     await sendStreamFn(streamOptions, this.meta(), this.socket());
   };
 
   /**
-   * @async
-   * <Summary>
-   * What it does:
-   *   Responds to a pending server plan request (implement, skip, or edit).
+   * Answers a pending plan-review prompt from the server.
    *
-   * How it does it (step by step):
-   *   1. Waits until connected.
-   *   2. Delegates to respondPlan in commands.js.
+   * @param id - Plan id from the server’s plan frame.
+   * @param decision - `"implement"`, `"skip"`, or `"edit"`.
+   * @param feedback - Free-text feedback when `decision` is `"edit"`; the
+   *   agent re-plans using this feedback.
+   * @returns Resolves when the server acknowledges the decision.
+   * @throws {@link Error} On connect or command failure.
    *
-   * Parameters:
-   *   @param id - Plan ID from the server frame.
-   *   @param decision - User's plan decision.
-   *   @param {string[]} [steps] — Modified steps when decision is "edit".
-   *
-   * Returns:
-   *   @returns Resolves when the server acknowledges.
-   * </Summary>
+   * @example
+   * ```ts
+   * await connection.respondPlan(planId, "implement");
+   * await connection.respondPlan(planId, "edit", "Add tests for the edge cases");
+   * ```
    */
   respondPlan = async (
     id: string,
     decision: "implement" | "skip" | "edit",
-    steps?: string[],
+    feedback?: string,
   ): Promise<void> => {
     await this.waitUntilConnected();
-    await respondPlanFn(this.socket(), this.meta(), id, decision, steps);
+    await respondPlanFn(this.socket(), this.meta(), id, decision, feedback);
   };
 }

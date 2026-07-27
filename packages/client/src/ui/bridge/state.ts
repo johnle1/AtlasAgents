@@ -1,251 +1,96 @@
 /**
- * <Summary>
- * What it does:
- *   Provides the global state management for the Ink UI bridge system, including
- *   bridge hooks, pending approvals/prompts, and streaming handlers.
+ * Global state store for the Ink UI bridge.
  *
- * How it fits in the system:
- *   This module maintains the global state that allows server-side code to communicate
- *   with the Ink-based UI. It stores callback hooks for state updates, tracks pending
- *   user interactions (approvals and prompts), and manages the streaming token handler.
- * </Summary>
+ * @remarks
+ * This module acts as a singleton data store keeping track of UI status, active hooks,
+ * pending user interactions (prompts and approvals), and streaming token handlers.
  */
 
-import type { Config } from "../../config.js";
-import type {
-  AgentBoardState,
-  AgentStatusState,
-  ApprovalRequest,
-  ApprovalResult,
-  HistoryItem,
-  PromptRequest,
-  PromptResult,
-  SpinnerState,
-} from "../types.js";
+import type { BridgeHooks, PendingApproval, PendingPrompt } from "./types.js";
+
+export type { BridgeHooks, PendingApproval, PendingPrompt } from "./types.js";
 
 /**
- * <Summary>
- * What it does:
- *   Defines the callback hooks that the UI component registers to receive
- *   state update notifications from the bridge system.
- *
- * How it fits in the system:
- *   These hooks are called by bridge functions to update the UI when various
- *   events occur, such as history being appended, streaming text changing,
- *   agent status updating, or approval requests pending.
- *
- * Used by:
- *   - useBridgeSetup hook — registers these hooks with the bridge system.
- *
- * Produced by:
- *   - UI components — provide these callbacks to receive state updates.
- * </Summary>
- */
-export type BridgeHooks = {
-  /** Callback invoked when a history item is appended. */
-  onHistoryAppend?: (historyItem: HistoryItem) => void;
-  /** Callback invoked when streaming text is set or cleared. */
-  onStreamingSet?: (streamingText: string | null) => void;
-  /** Callback invoked when spinner state changes. */
-  onSpinner?: (spinnerState: SpinnerState | null) => void;
-  /** Callback invoked to update agent statuses map. */
-  onAgentStatuses?: (
-    statusUpdater: (
-      previousStatusMap: Map<number | "advisor", AgentStatusState>,
-    ) => Map<number | "advisor", AgentStatusState>,
-  ) => void;
-  /** Callback invoked to update agent boards array. */
-  onAgentBoards?: (
-    boardUpdater: (previousBoards: AgentBoardState[]) => AgentBoardState[],
-  ) => void;
-  /** Callback invoked when an approval request changes. */
-  onApprovalChange?: (approvalRequest: ApprovalRequest | null) => void;
-  /** Callback invoked when a prompt request changes. */
-  onPromptChange?: (promptRequest: PromptRequest | null) => void;
-  /** Callback invoked when busy state changes. */
-  onBusy?: (isBusy: boolean) => void;
-  /** Callback invoked when current working directory changes. */
-  onCwd?: (currentWorkingDirectory: string) => void;
-  /** Callback invoked when banner should be refreshed. */
-  onBannerRefresh?: (configuration: Config) => void;
-};
-
-/**
- * <Summary>
- * What it does:
- *   Represents a pending approval request with its resolver function.
- *
- * Used by:
- *   - state module — stores pending approvals in the global state.
- *
- * Produced by:
- *   - requestApproval function — creates this when an approval is requested.
- * </Summary>
- */
-export type PendingApproval = {
-  /** The approval request to present to the user. */
-  req: ApprovalRequest;
-  /** Function to resolve the approval with the user's decision. */
-  resolve: (approvalResult: ApprovalResult) => void;
-};
-
-/**
- * <Summary>
- * What it does:
- *   Represents a pending prompt request with its resolver function.
- *
- * Used by:
- *   - state module — stores pending prompts in the global state.
- *
- * Produced by:
- *   - requestPrompt function — creates this when a prompt is requested.
- * </Summary>
- */
-export type PendingPrompt = {
-  /** The prompt request to present to the user. */
-  req: PromptRequest;
-  /** Function to resolve the prompt with the user's input. */
-  resolve: (promptResult: PromptResult) => void;
-};
-
-/**
- * <Summary>
- * What it does:
- *   Defines the internal state structure for the bridge system.
- *
- * Used by:
- *   - state module — maintains the global bridge state.
- *
- * Produced by:
- *   - State management functions — create and maintain this state.
- * </Summary>
+ * The internal structure of the global bridge state.
  */
 type BridgeState = {
-  /** The registered bridge hooks for state update notifications. */
   hooks: BridgeHooks;
-  /** Flag indicating whether the Ink UI is currently active. */
   inkUIActive: boolean;
-  /** The currently pending approval request (if any). */
+  taskActive: boolean;
   pendingApproval: PendingApproval | null;
-  /** The currently pending prompt request (if any). */
   pendingPrompt: PendingPrompt | null;
-  /** The handler for streaming tokens (if registered). */
   streamingTokenHandler: ((token: string) => void) | null;
 };
 
-/**
- * <Summary>
- * What it does:
- *   The global state object for the bridge system.
- *
- * How it fits in the system:
- *   This singleton object maintains all bridge state across the application.
- *   It is accessed and modified by the state getter/setter functions.
- * </Summary>
- */
 const bridgeGlobalState: BridgeState = {
   hooks: {},
   inkUIActive: false,
+  taskActive: false,
   pendingApproval: null,
   pendingPrompt: null,
   streamingTokenHandler: null,
 };
 
 /**
- * <Summary>
- * What it does:
- *   Retrieves the registered bridge hooks from global state.
+ * Retrieves the currently registered bridge hooks.
  *
- * How it does it (step by step):
- *   1. Returns the hooks object from the global state.
- *
- * Returns:
- *   @returns The registered bridge hooks.
- * </Summary>
+ * @returns The active bridge hooks object.
  */
 export const getBridgeHooks = (): BridgeHooks => bridgeGlobalState.hooks;
 
 /**
- * <Summary>
- * What it does:
- *   Sets the bridge hooks in global state.
+ * Updates the active bridge hooks registry.
  *
- * How it does it (step by step):
- *   1. Updates the hooks object in the global state.
- *
- * Parameters:
- *   @param bridgeHooks - The bridge hooks to register.
- *
- * Returns:
- *   void — called for side effects only.
- * </Summary>
+ * @param bridgeHooks - The new bridge hooks object.
  */
 export const setBridgeHooks = (bridgeHooks: BridgeHooks): void => {
   bridgeGlobalState.hooks = bridgeHooks;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Retrieves the Ink UI active flag from global state.
+ * Gets the active rendering state of the Ink CLI UI.
  *
- * How it does it (step by step):
- *   1. Returns the inkUIActive flag from the global state.
- *
- * Returns:
- *   @returns True if Ink UI is active, false otherwise.
- * </Summary>
+ * @returns True if the Ink CLI UI is active, false otherwise.
  */
 export const getInkUIActive = (): boolean => bridgeGlobalState.inkUIActive;
 
 /**
- * <Summary>
- * What it does:
- *   Sets the Ink UI active flag in global state.
+ * Sets the active rendering state of the Ink CLI UI.
  *
- * How it does it (step by step):
- *   1. Updates the inkUIActive flag in the global state.
- *
- * Parameters:
- *   @param isActive - Whether the Ink UI is active.
- *
- * Returns:
- *   void — called for side effects only.
- * </Summary>
+ * @param isActive - True if the Ink CLI UI is active, false otherwise.
  */
 export const setInkUIActiveValue = (isActive: boolean): void => {
   bridgeGlobalState.inkUIActive = isActive;
 };
 
 /**
- * <Summary>
- * What it does:
- *   Retrieves the pending approval entry from global state.
+ * Gets the active state of task execution.
  *
- * How it does it (step by step):
- *   1. Returns the pendingApproval entry from the global state.
+ * @returns True if a task is actively running.
+ */
+export const getTaskActiveValue = (): boolean => bridgeGlobalState.taskActive;
+
+/**
+ * Sets the active state of task execution.
  *
- * Returns:
- *   @returns The pending approval or null.
- * </Summary>
+ * @param isTaskActive - True if a task is actively running.
+ */
+export const setTaskActiveValue = (isTaskActive: boolean): void => {
+  bridgeGlobalState.taskActive = isTaskActive;
+};
+
+/**
+ * Retrieves the currently active pending approval entry.
+ *
+ * @returns The pending approval entry, or `null`.
  */
 export const getPendingApprovalEntry = (): PendingApproval | null =>
   bridgeGlobalState.pendingApproval;
 
 /**
- * <Summary>
- * What it does:
- *   Sets the pending approval entry in global state.
+ * Updates the active pending approval entry.
  *
- * How it does it (step by step):
- *   1. Updates the pendingApproval entry in the global state.
- *
- * Parameters:
- *   @param approvalEntry - The approval entry to set.
- *
- * Returns:
- *   void — called for side effects only.
- * </Summary>
+ * @param approvalEntry - The approval entry to set, or `null` to clear.
  */
 export const setPendingApprovalEntry = (
   approvalEntry: PendingApproval | null,
@@ -254,34 +99,17 @@ export const setPendingApprovalEntry = (
 };
 
 /**
- * <Summary>
- * What it does:
- *   Retrieves the pending prompt entry from global state.
+ * Retrieves the currently active pending prompt entry.
  *
- * How it does it (step by step):
- *   1. Returns the pendingPrompt entry from the global state.
- *
- * Returns:
- *   @returns The pending prompt or null.
- * </Summary>
+ * @returns The pending prompt entry, or `null`.
  */
 export const getPendingPromptEntry = (): PendingPrompt | null =>
   bridgeGlobalState.pendingPrompt;
 
 /**
- * <Summary>
- * What it does:
- *   Sets the pending prompt entry in global state.
+ * Updates the active pending prompt entry.
  *
- * How it does it (step by step):
- *   1. Updates the pendingPrompt entry in the global state.
- *
- * Parameters:
- *   @param promptEntry - The prompt entry to set.
- *
- * Returns:
- *   void — called for side effects only.
- * </Summary>
+ * @param promptEntry - The prompt entry to set, or `null` to clear.
  */
 export const setPendingPromptEntry = (
   promptEntry: PendingPrompt | null,
@@ -290,34 +118,17 @@ export const setPendingPromptEntry = (
 };
 
 /**
- * <Summary>
- * What it does:
- *   Retrieves the streaming token handler from global state.
+ * Gets the currently registered streaming token handler.
  *
- * How it does it (step by step):
- *   1. Returns the streamingTokenHandler from the global state.
- *
- * Returns:
- *   @returns The streaming handler or null.
- * </Summary>
+ * @returns The active callback function, or `null`.
  */
 export const getStreamingTokenHandler = (): ((token: string) => void) | null =>
   bridgeGlobalState.streamingTokenHandler;
 
 /**
- * <Summary>
- * What it does:
- *   Sets the streaming token handler in global state.
+ * Registers or clears the streaming token handler.
  *
- * How it does it (step by step):
- *   1. Updates the streamingTokenHandler in the global state.
- *
- * Parameters:
- *   @param tokenHandler - The token handler to set.
- *
- * Returns:
- *   void — called for side effects only.
- * </Summary>
+ * @param tokenHandler - The callback function, or `null` to clear.
  */
 export const setStreamingTokenHandler = (
   tokenHandler: ((token: string) => void) | null,

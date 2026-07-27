@@ -1,24 +1,41 @@
 /**
- * <Summary>
- * What it does:
- *   React hook that sets up the bridge system between server communication
- *   and the Ink-based UI, registering state update callbacks and configuring
- *   terminal features like alternate screen mode.
+ * React hook that sets up the bridge system between server communication and the Ink-based UI.
  *
- * How it fits in the system:
- *   This hook is called in the AppContent component to establish the communication
- *   bridge between server-side code and the React UI. It registers callbacks for
- * all state updates (history, streaming, agent status, approvals, etc.) and manages
- *   terminal mode settings for the Ink UI.
- * </Summary>
+ * @remarks
+ * This hook is the single point of integration between the RSocket server connection
+ * and the React UI state. It registers bridge hooks that allow non-React code (server
+ * RPC handlers, agent logic) to trigger React state updates. It also manages the
+ * terminal's alternate screen buffer mode, which provides a full-screen TUI experience.
+ *
+ * The bridge hooks registered here are invoked by functions in `uiBridge.ts` when
+ * the server sends messages (e.g., history append, spinner update, agent status).
+ * This decouples server-side code from React — server code calls bridge functions,
+ * which invoke the registered hooks, which update React state.
+ *
+ * @example
+ * ```tsx
+ * useBridgeSetup({
+ *   setHistory,
+ *   setStreamingText,
+ *   setSpinner,
+ *   setBusy,
+ *   setTaskActive,
+ *   setPrompt,
+ *   setApproval,
+ *   setPromptReq,
+ *   setBannerEntries,
+ *   setSubagentStatuses,
+ *   setSubagentBoards,
+ * });
+ * ```
  */
 
 import { useEffect, useRef } from "react";
 
-import { loadConfig } from "../../config.js";
-import { buildPromptLabel } from "../../pathDisplay.js";
+import { loadConfig } from "../../config/index.js";
+import { buildPromptLabel } from "../../utils/pathDisplay.js";
 import { buildBannerLines } from "../../renderer/banner.js";
-import type { AppContextValue } from "../../DataContext.js";
+import type { BridgeSetupContext } from "./types.js";
 import {
   enterAlternateScreen,
   exitAlternateScreen,
@@ -31,54 +48,23 @@ import {
 } from "../uiBridge.js";
 
 /**
- * <Summary>
- * What it does:
- *   Defines the subset of AppContextValue needed for bridge setup.
+ * Hook to initialize and clean up global event listener hooks linking server RSocket frames to React state.
  *
- * Used by:
- *   - useBridgeSetup hook — receives these dependencies.
+ * @remarks
+ * This hook runs once on mount and cleans up on unmount. It:
+ * 1. Activates the Ink UI bridge so server code knows the UI is ready
+ * 2. Enters alternate screen mode if configured (full-screen TUI)
+ * 3. Registers bridge hooks that map server messages to React state updates
+ * 4. Registers a streaming token handler for LLM response streaming
+ * 5. On cleanup: deactivates the bridge, resets state, and exits alternate mode
  *
- * Produced by:
- *   - AppContext — provides these state setter functions.
- * </Summary>
- */
-type BridgeSetupContext = Pick<
-  AppContextValue,
-  | "setHistory"
-  | "setStreamingText"
-  | "setSpinner"
-  | "setBusy"
-  | "setTaskActive"
-  | "setPrompt"
-  | "setApproval"
-  | "setPromptReq"
-  | "setBannerEntries"
-  | "setAgentStatuses"
-  | "setAgentBoards"
->;
-
-/**
- * <Summary>
- * What it does:
- *   Sets up the bridge system by registering state update callbacks and
- *   configuring terminal features.
+ * The alternate screen buffer is a terminal feature that saves the current screen
+ * content to a separate buffer and switches to a new buffer. When the app exits,
+ * the original buffer is restored, making it look like the TUI never happened.
+ * This provides a clean full-screen experience without scrolling the user's
+ * terminal history.
  *
- * How it does it (step by step):
- *   1. Creates a ref to track alternate screen mode usage.
- *   2. On mount, activates Ink UI and loads configuration.
- *   3. Checks config for alternate screen mode preference.
- *   4. Enters alternate screen mode if configured.
- *   5. Registers bridge hooks for all state updates.
- *   6. Registers streaming handler for token processing.
- *   7. On unmount, deactivates Ink UI and cleans up registrations.
- *   8. Exits alternate screen mode if it was used.
- *
- * Parameters:
- *   @param bridgeSetupDependencies - State setter functions from context.
- *
- * Returns:
- *   void — called for side effects only.
- * </Summary>
+ * @param context - Picked state setters from the app context.
  */
 export const useBridgeSetup = ({
   setHistory,
@@ -90,56 +76,48 @@ export const useBridgeSetup = ({
   setApproval,
   setPromptReq,
   setBannerEntries,
-  setAgentStatuses,
-  setAgentBoards,
+  setSubagentStatuses,
+  setSubagentBoards,
 }: BridgeSetupContext): void => {
-  // ===== STEP 1: Create Ref for Alternate Screen Tracking =====
-  // Step 1a: Create a ref to track whether alternate screen mode is in use
-  // Step 1b: This ref persists across re-renders to ensure proper cleanup
+  // Track whether we entered alternate screen mode so we can exit it on cleanup.
+  // Using a ref instead of state avoids triggering re-renders when this changes.
   const useAlternateScreenRef = useRef(false);
 
-  // ===== STEP 2: Setup Bridge System on Mount =====
   useEffect(() => {
-    // ===== STEP 2a: Activate Ink UI =====
-    // Step 2a-i: Set Ink UI active flag to enable bridge communication
+    // Activate the Ink UI bridge so server-side code knows the React UI is ready.
+    // This is checked by functions like requestApproval and requestPrompt to decide
+    // whether to show interactive prompts or resolve with defaults.
     setInkActive(true);
 
-    // ===== STEP 2b: Load Configuration =====
-    // Step 2b-i: Load the application configuration
-    // Step 2b-ii: Check if alternate screen mode is enabled in config
+    // Load config to check if the user wants alternate screen mode (full-screen TUI).
+    // This is a user preference that can be set via /set ui.useAlternateBuffer true.
     const applicationConfig = loadConfig();
     useAlternateScreenRef.current =
       applicationConfig.ui?.useAlternateBuffer === true;
 
-    // ===== STEP 2c: Enter Alternate Screen Mode if Configured =====
-    // Step 2c-i: If alternate screen mode is enabled, enter it
-    // Step 2c-ii: This provides a full-screen UI without scrollback
+    // Enter alternate screen mode if configured. This switches to a new terminal
+    // buffer, saving the current screen content. When we exit, the original buffer
+    // is restored, providing a clean full-screen experience.
     if (useAlternateScreenRef.current) {
       enterAlternateScreen();
     }
 
-    // ===== STEP 2d: Register Bridge Hooks =====
-    // Step 2d-i: Register callbacks for all state update notifications
-    // Step 2d-ii: This connects server-side events to UI state updates
+    // Register the bridge hooks that map server messages to React state updates.
+    // Each hook is invoked by a corresponding function in uiBridge.ts when the
+    // server sends an RSocket message. For example, when the server sends a history
+    // append message, uiBridge.appendHistory calls onHistoryAppend, which updates
+    // the React history state.
     registerBridgeHooks({
-      // History append handler
       onHistoryAppend: (historyItem) =>
         setHistory((previousHistory) => [...previousHistory, historyItem]),
-      // Streaming text handler
       onStreamingSet: (streamingText) => setStreamingText(streamingText),
-      // Spinner state handler
       onSpinner: (spinnerState) => setSpinner(spinnerState),
-      // Busy state handler
       onBusy: (isBusy) => setBusy(isBusy),
       onTaskActive: (isTaskActive) => setTaskActive(isTaskActive),
-      // Working directory change handler
       onCwd: (currentWorkingDirectory) =>
         setPrompt(buildPromptLabel(currentWorkingDirectory)),
-      // Approval request change handler
       onApprovalChange: (approvalRequest) => setApproval(approvalRequest),
-      // Prompt request change handler
       onPromptChange: (promptRequest) => setPromptReq(promptRequest),
-      // Banner refresh handler
       onBannerRefresh: (configuration) =>
         setBannerEntries(
           buildBannerLines(configuration).map((bannerLine, lineIndex) => ({
@@ -148,15 +126,14 @@ export const useBridgeSetup = ({
             line: bannerLine,
           })),
         ),
-      // Agent statuses update handler
-      onAgentStatuses: (statusUpdater) => setAgentStatuses(statusUpdater),
-      // Agent boards update handler
-      onAgentBoards: (boardUpdater) => setAgentBoards(boardUpdater),
+      onSubagentStatuses: (statusUpdater) => setSubagentStatuses(statusUpdater),
+      onSubagentBoards: (boardUpdater) => setSubagentBoards(boardUpdater),
     });
 
-    // ===== STEP 2e: Register Streaming Token Handler =====
-    // Step 2e-i: Register a handler for streaming tokens from the server
-    // Step 2e-ii: This handler appends tokens to the current streaming text
+    // Register the streaming token handler for LLM response streaming.
+    // When the server streams tokens (e.g., during a subagent response), this handler
+    // appends each token to the streaming text state. The UI renders this as
+    // progressively updating text below the history.
     registerStreamingHandler((streamingToken) => {
       setStreamingText(
         (previousStreamingText) =>
@@ -164,25 +141,26 @@ export const useBridgeSetup = ({
       );
     });
 
-    // ===== STEP 3: Cleanup on Unmount =====
-    // Step 3a: Return cleanup function to run on component unmount
     return () => {
-      // Step 3a-i: Deactivate Ink UI
+      // Deactivate the Ink UI bridge so server code knows the UI is no longer available.
+      // This causes functions like requestApproval to resolve with defaults instead
+      // of waiting for user input.
       setInkActive(false);
 
-      // Step 3a-ii: Reset bridge-backed state while hooks are still registered
+      // Reset bridge state properties before unregistering hooks. This prevents
+      // the UI from getting stuck in a busy/loading state if the component unmounts
+      // mid-task (e.g., due to a connection error or user exit).
       resetBridgeTaskActive(false);
       resetBridgeBusy(false);
       resetBridgeSpinner(null);
 
-      // Step 3a-iii: Clear bridge hooks to prevent memory leaks
+      // Unregister the bridge hooks and streaming handler to prevent memory leaks
+      // and stale callbacks. Passing an empty object clears all registered hooks.
       registerBridgeHooks({});
-
-      // Step 3a-iv: Clear streaming handler
       registerStreamingHandler(null);
 
-      // Step 3a-v: Exit alternate screen mode if it was used
-      // Step 3a-iv-1: This restores normal terminal display
+      // Exit alternate screen mode if we entered it, restoring the original terminal
+      // buffer. This makes the TUI disappear cleanly without leaving artifacts.
       if (useAlternateScreenRef.current) {
         exitAlternateScreen();
       }
@@ -197,7 +175,7 @@ export const useBridgeSetup = ({
     setApproval,
     setPromptReq,
     setBannerEntries,
-    setAgentStatuses,
-    setAgentBoards,
+    setSubagentStatuses,
+    setSubagentBoards,
   ]);
 };
