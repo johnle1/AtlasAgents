@@ -151,3 +151,6 @@ deploy.sh
 .deploy-staging/
 .DS_Store
 Deploy/
+# AI Assistant
+.claude/
+.cursor/
