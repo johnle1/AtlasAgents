@@ -28,12 +28,12 @@ LoopyCode is a self-hosted, client/server AI coding agent. You run **`loopy-serv
 npm install -g loopycode-server
 npm install -g loopycode
 
-# 1. Start the server, from the directory you want the agent to work on
-mkdir -p ~/my-project && cd ~/my-project
-loopy-server
+# 1. Start the server
+loopy-server start
 
-# 2. In another terminal, start the client
-loopycode
+# 2. Start the client, from the directory you want the agent to work on
+mkdir -p ~/my-project && cd ~/my-project
+loopycode start
 ```
 
 **Option B: build from source** (for contributing to LoopyCode itself)
@@ -47,11 +47,11 @@ npm run build -w @loopycode/shared
 npm run build -w loopycode-server
 npm run build -w loopycode
 
-# 2. Start the server, from the directory you want the agent to work on
-mkdir -p ~/my-project && cd ~/my-project
+# 2. Start the server
 node /path/to/LoopyCode/packages/server/dist/server/index.js
 
-# 3. In another terminal, start the client
+# 3. Start the client, from the directory you want the agent to work on
+mkdir -p ~/my-project && cd ~/my-project
 node /path/to/LoopyCode/packages/client/dist/index.js
 ```
 
