@@ -70,11 +70,11 @@ const parsePort = (raw: string): number | undefined => {
  * @example
  * printCliHelp();
  * // Output:
- * // Usage: loopy [options] [start]
+ * // Usage: loopycode [options] [start]
  * // ...
  */
 export const printCliHelp = (): void => {
-  console.log(`Usage: loopy [options] [start]
+  console.log(`Usage: loopycode [options] [start]
 
 Connect to the LoopyCode RSocket server (options override ~/.agent-cli/config.json for this run only).
 
@@ -95,10 +95,10 @@ asks for your config passphrase first):
                           configured server (re-trust on next connect)
 
 Examples:
-  loopy
-  loopy start --host 0.0.0.0 --port 7000
-  loopy --address 10.0.0.7 --port 8001 --password
-  loopy --reset
+  loopycode
+  loopycode start --host 0.0.0.0 --port 7000
+  loopycode --address 10.0.0.7 --port 8001 --password
+  loopycode --reset
 `);
 };
 
@@ -121,12 +121,12 @@ const readStringFlag = (value: unknown): string =>
  *
  * @remarks
  * `--password` is declared as a boolean, and `parseArgs` runs with
- * `strict: false` and `allowPositionals: true` — so `loopy --password hunter2`
+ * `strict: false` and `allowPositionals: true` — so `loopycode --password hunter2`
  * parses cleanly, ignores `hunter2`, and prompts anyway. The user's secret is
  * then sitting in shell history and `ps` output for nothing. Better to fail
  * loudly than to silently discard it.
  *
- * The documented `start` positional is excluded, so `loopy --password start`
+ * The documented `start` positional is excluded, so `loopycode --password start`
  * is read as "prompt me, and start" rather than as a leaked secret.
  *
  * @param args - The argument list passed to `parseArgs` (argv minus node/script).
@@ -218,7 +218,7 @@ export const parseCliArgs = (argv: string[]): CliParseResult => {
   }
 
   // --address is the config-repair spelling of the host; --host/--server are
-  // accepted as aliases so `loopy --reset --host x` does the obvious thing.
+  // accepted as aliases so `loopycode --reset --host x` does the obvious thing.
   const address = readStringFlag(values.address);
   const host =
     address ||

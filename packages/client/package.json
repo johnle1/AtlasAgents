@@ -4,7 +4,7 @@
   "description": "LoopyCode CLI client",
   "main": "dist/index.js",
   "bin": {
-    "loopy": "dist/index.js"
+    "loopycode": "dist/index.js"
   },
   "files": [
     "dist",

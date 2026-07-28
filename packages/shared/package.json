@@ -1,6 +1,6 @@
 {
   "name": "@loopycode/shared",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Shared utilities for LoopyCode client and server",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

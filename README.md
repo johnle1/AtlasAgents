@@ -1,81 +1,112 @@
 # LoopyCode
 
-LoopyCode is a self-hosted, client/server AI coding agent. You run **`loopy-server`** on a machine with access to an LLM (local via [Ollama](https://ollama.com), or any OpenAI-compatible endpoint such as vLLM), and connect to it from **`loopy`**, a terminal client, over an encrypted RSocket/TCP connection. This monorepo contains both, plus the types/utilities they share.
+LoopyCode is a self-hosted, client/server AI coding agent. You run **`loopy-server`** on a machine with access to an LLM (local via [Ollama](https://ollama.com), or any OpenAI-compatible endpoint such as vLLM), and connect to it from **`loopycode`**, a terminal client, over an encrypted RSocket/TCP connection.
 
-| Workspace | Path | What it is |
-|-----------|------|------------|
-| `loopycode` | `packages/client` | The `loopy` terminal client (Ink/React TUI). Connects to a server, runs the REPL. |
-| `loopycode-server` | `packages/server` | The `loopy-server` agent runtime: task orchestration, memory, skills, provider routing, TLS/auth. |
-| `@loopycode/shared` | `packages/shared` | Shared diff/type utilities used by both. |
+## Features
 
-None of these packages are published to npm yet, so everything below is built and run from source.
+- **Self-hosted** — your code and prompts never leave a machine you control; the LLM can be fully local (Ollama) or point at any OpenAI-compatible backend (vLLM, etc.).
+- **Encrypted client/server** — TLS with trust-on-first-use certificate pinning, plus password authentication.
+- **Task orchestration** — a lead agent plans a task, then a pool of subagents execute subtasks (read/edit files, run commands), escalating back to the lead agent when stuck.
+- **Persistent memory** — session continuity, learned preferences, and reusable patterns are extracted from past tasks and consolidated over time.
+- **Skills** — markdown instruction files that the client syncs to the server; the server picks the most relevant one per task.
+- **Hardware-aware provider setup** — `loopy-detect-hardware` inspects the host (NVIDIA GPU / AWS Trainium / GCP TPU / CPU) and suggests a `vllm serve` configuration.
+- **Optional code-index integration** — [TokenSave](#optional-tokensave) speeds up workspace search/navigation via MCP.
 
-## How it fits together
+`loopycode` and `loopycode-server` are published to npm — install them directly, or build from this monorepo if you're contributing.
 
-- **Orchestration** (`packages/server/src/orchestration`): a lead agent breaks a task into a plan, then a pool of subagents execute subtasks (read/edit files, run commands), escalating back to the lead agent when stuck.
-- **Memory** (`packages/server/src/memory`): session continuity, learned preferences, and reusable patterns are extracted from past tasks and consolidated periodically, so the agent improves within a given `loopy-server` data directory over time.
-- **Skills** (`user-data/skills/` server-side, `~/.agent-cli/skills/` client-side): markdown instruction files the client syncs to the server; the server picks the most relevant one per task.
-- **Providers**: any role (agent/subagent) can be pointed at `ollama` or at a named OpenAI-compatible backend. `loopy-detect-hardware` inspects the host (NVIDIA GPU / AWS Trainium / GCP TPU / CPU) and suggests a `vllm serve` provider configuration.
+## Requirements
 
-The directory you launch `loopy-server` from is both its **data root** (`user-data/`, `tls/` get created there) and its **workspace root** (the files it reads/edits). In practice: run it from inside the project you want the agent to work on, and add `user-data/` and `tls/` to that project's `.gitignore`.
+- Node.js 22
+- An LLM backend: [Ollama](https://ollama.com) installed locally
+- Optional: Rust/`cargo`, if you want the [TokenSave](#optional-tokensave) integration
 
-## Build
+## Quick Start
 
-Run **`npm install` from the repository root** (not from `packages/client`, `packages/server`, or `packages/shared`). The root `package.json` uses npm workspaces (`packages/*`), which includes `packages/shared` as `@loopycode/shared`. Installing inside a single package folder will not link the local shared package correctly.
-
-Requires Node.js 24 (matches CI in [.github/workflows/test.yml](.github/workflows/test.yml)).
+**Option A: install from npm** (recommended for most users)
 
 ```bash
-cd /path/to/LoopyCode
-npm install
+npm install -g loopycode-server
+npm install -g loopycode
+
+# 1. Start the server, from the directory you want the agent to work on
+mkdir -p ~/my-project && cd ~/my-project
+loopy-server
+
+# 2. In another terminal, start the client
+loopycode
+```
+
+**Option B: build from source** (for contributing to LoopyCode itself)
+
+```bash
+# 1. Clone and build
+git clone <this-repo> LoopyCode
+cd LoopyCode
+npm install                              # run from the repo root — see note below
 npm run build -w @loopycode/shared
 npm run build -w loopycode-server
 npm run build -w loopycode
-```
 
-## Run the server
-
-```bash
-mkdir -p ~/my-project && cd ~/my-project   # the folder loopy-server will operate on
+# 2. Start the server, from the directory you want the agent to work on
+mkdir -p ~/my-project && cd ~/my-project
 node /path/to/LoopyCode/packages/server/dist/server/index.js
-# or, once linked globally: loopy-server
+
+# 3. In another terminal, start the client
+node /path/to/LoopyCode/packages/client/dist/index.js
 ```
 
-On first run it will interactively prompt for:
+> **Note on `npm install`:** run it from the **repository root**, not from `packages/client`, `packages/server`, or `packages/shared`. The root `package.json` uses npm workspaces (`packages/*`), which includes `packages/shared` as `@loopycode/shared`. Installing inside a single package folder will not link the local shared package correctly.
+
+The first time you run `loopy-server`, it interactively prompts for:
 
 1. **A password** — required, used by clients to authenticate. Can't be empty.
 2. **A TCP port** — defaults to `7000` if left blank.
 
-It then generates a self-signed TLS certificate under `./tls/` (2048-bit, ~2-year validity) and writes its config to `./user-data/config.json`, both relative to the directory you launched it from. Reuse the same directory on later starts so the password, cert, and learned memory persist.
+It then generates a self-signed TLS certificate under `./tls/` and writes its config to `./user-data/config.json`, both relative to the directory you launched it from. Reuse the same directory on later starts so the password, cert, and learned memory persist. If a role is configured to use `ollama`, the server checks `http://localhost:11434` and auto-runs `ollama serve` if it isn't already up — but you must install Ollama and `ollama pull` at least one model yourself first.
 
-If a role is configured to use the `ollama` provider, the server checks `http://localhost:11434` and auto-runs `ollama serve` if it isn't already up — but you must install Ollama yourself first, and `ollama pull` at least one model before the agent can use it.
+The first time you run `loopycode`, it walks you through a setup wizard (server address → port → password) and saves the result to `~/.agent-cli/config.json`.
 
-To detect your hardware and get a suggested provider config for a local vLLM server instead of Ollama:
+**First prompt:** once connected, just type a task at the REPL prompt and press enter — e.g. `explain what this repo does`. Use `/exit` to quit.
 
-```bash
-loopy-detect-hardware        # print a suggested config + vllm serve command
-loopy-detect-hardware --write  # also add it to config.json
+## Security
+
+- All client/server traffic runs over an encrypted RSocket/TCP connection secured with TLS.
+- The server generates a self-signed certificate (2048-bit, ~2-year validity) on first run.
+- The client pins the server's certificate fingerprint on first connect (trust-on-first-use). If the server's cert changes later (e.g. after `--regen-cert`), reconnect with `loopycode --trust-fingerprint` to re-pin it.
+- Clients authenticate with the password set on the server's first run.
+- The directory you launch `loopy-server` from is both its **data root** (`user-data/`, `tls/` are created there) and its **workspace root** (the files it reads/edits). Add `user-data/` and `tls/` to that project's `.gitignore`.
+
+### Config encryption at rest
+
+Both `config.json` files encrypt their sensitive fields (AES-256-GCM, scrypt-derived key) rather than storing them in plaintext — each behind its own passphrase, prompted once per launch:
+
+| Config file                       | Encrypted fields                                                                | Passphrase prompted            |
+| --------------------------------- | ------------------------------------------------------------------------------- | ------------------------------ |
+| Client `~/.agent-cli/config.json` | `password` (server auth password) and `server` (host)                           | Once per `loopycode` launch    |
+| Server `./user-data/config.json`  | `providers` map (`baseUrl`/`apiKey` for third-party OpenAI-compatible backends) | Once per `loopy-server` launch |
+
+Everything else in each file (port, model names, timeouts, workspace path, pinned TLS fingerprints, etc.) stays plaintext — only the fields above are sensitive enough to encrypt. The client and server passphrases are independent of each other and of the server's auth password; neither passphrase is itself written to disk. Forgetting a passphrase isn't a dead end: after 3 wrong attempts you're offered a reset (backs up the existing encrypted file, then discards and re-prompts for a fresh passphrase). An older plaintext `config.json` is migrated to the encrypted format automatically the next time it's loaded.
+
+## Providers (Ollama, vLLM)
+
+Any role (agent/subagent) can be pointed at `ollama` or at a named OpenAI-compatible backend.
+
+- **Ollama**: install it yourself. The server auto-starts `ollama serve` if needed.
+- **vLLM (or other OpenAI-compatible endpoints)**: run `loopy-detect-hardware` to get a suggested provider config for your hardware:
+
+  ```bash
+  loopy-detect-hardware          # print a suggested config + vllm serve command
+  loopy-detect-hardware --write  # also add it to config.json
+  ```
+
+- Manage providers from the client with `/providers list|add|remove`, and models with `/models list|find|pull|delete|show|running`.
+
+## Common commands
+
+### CLI flags (`loopycode`)
+
 ```
-
-Rotate the TLS certificate (e.g. after it expires) with:
-
-```bash
-loopy-server --regen-cert
-```
-
-## Run the client
-
-```bash
-node /path/to/LoopyCode/packages/client/dist/index.js
-# or, once linked globally: loopy
-```
-
-The first run walks you through a setup wizard (server address → port → password), then saves the result to `~/.agent-cli/config.json`. The client pins the server's TLS certificate fingerprint on first connect (trust-on-first-use); if the server's cert changes later (e.g. after `--regen-cert`), reconnect with `--trust-fingerprint` to re-pin it.
-
-### CLI flags
-
-```
-Usage: loopy [options] [start]
+Usage: loopycode [options] [start]
 
 Options:
   -H, --host <host>       Server host (e.g. 0.0.0.0, localhost)
@@ -94,40 +125,68 @@ asks for your config passphrase first):
                           configured server (re-trust on next connect)
 
 Examples:
-  loopy
-  loopy start --host 0.0.0.0 --port 7000
-  loopy --address 10.0.0.7 --port 8001 --password
-  loopy --reset
+  loopycode
+  loopycode start --host 0.0.0.0 --port 7000
+  loopycode --address 10.0.0.7 --port 8001 --password
+  loopycode --reset
 ```
 
-`--host`/`--server`/`--port` alone only override the connection for that one run. `--reset`, `--password`, `--address`, and `--trust-fingerprint` switch into config-repair mode instead: they persist to `config.json` and exit without contacting the server, which is the only way back in if the server's address/port/password changed out from under you.
+`--host`/`--server`/`--port` alone only override the connection for that one run. `--reset`, `--password`, `--address`, and `--trust-fingerprint` switch into config-repair mode instead: they persist to `config.json` and exit without contacting the server.
 
-### In-app commands
+Rotate the server's TLS certificate (e.g. after it expires):
 
-Once connected, the REPL takes slash-commands:
+```bash
+loopy-server --regen-cert
+```
 
-| Command | Purpose |
-|---|---|
-| `/set password\|server\|port\|agent\|subagent` | Change connection/role settings for the current session |
-| `/agent` | Inspect/control the lead agent |
-| `/config` | Show current configuration |
-| `/skills list\|add\|sync` | Manage skill files |
-| `/memory show\|forget\|clear` | Inspect or clear learned memory |
-| `/models list\|find\|pull\|delete\|show\|running` | Manage models on the configured provider |
-| `/providers list\|add\|remove` | Manage LLM provider backends |
-| `/new` | Start a new task |
-| `/explore` | Explore-only mode (read, no edits) |
-| `/tokensave init\|status` | Manage the optional TokenSave code-index integration |
-| `/workspace` | Workspace info/controls |
-| `/cwd` | Show/change the working directory |
-| `/think` | Toggle/adjust reasoning verbosity |
-| `/spinner` | Toggle the loading spinner |
-| `/theme` | Pick a color theme |
-| `/exit` | Quit |
+### In-app commands (REPL)
+
+| Command                                           | Purpose                                                 |
+| ------------------------------------------------- | ------------------------------------------------------- |
+| `/set password\|server\|port\|agent\|subagent`    | Change connection/role settings for the current session |
+| `/agent`                                          | Inspect/control the lead agent                          |
+| `/config`                                         | Show current configuration                              |
+| `/skills list\|add\|sync`                         | Manage skill files                                      |
+| `/memory show\|forget\|clear`                     | Inspect or clear learned memory                         |
+| `/models list\|find\|pull\|delete\|show\|running` | Manage models on the configured provider                |
+| `/providers list\|add\|remove`                    | Manage LLM provider backends                            |
+| `/new`                                            | Start a new task                                        |
+| `/explore`                                        | Explore-only mode (read, no edits)                      |
+| `/tokensave init\|status`                         | Manage the optional TokenSave code-index integration    |
+| `/workspace`                                      | Workspace info/controls                                 |
+| `/cwd`                                            | Show/change the working directory                       |
+| `/think`                                          | Toggle/adjust reasoning verbosity                       |
+| `/spinner`                                        | Toggle the loading spinner                              |
+| `/theme`                                          | Pick a color theme                                      |
+| `/exit`                                           | Quit                                                    |
 
 ### Optional: TokenSave
 
 `/tokensave` integrates with TokenSave, a separate Rust-based code-intelligence indexer that speeds up workspace search/navigation via MCP. Install it with `cargo install tokensave`, then run `/tokensave init` inside the client.
+
+## Troubleshooting
+
+- **Client won't connect / "certificate fingerprint mismatch"** — the server's cert changed (e.g. you ran `loopy-server --regen-cert`, or pointed at a different server). Run `loopycode --trust-fingerprint` to re-pin it.
+- **Forgot the server password, or the address/port changed** — run `loopycode --reset` to clear the saved password, address, port, and pinned fingerprint, then reconnect through the setup wizard. Or use `loopycode --password` / `loopycode --address <host>` / `loopycode --port <port>` to fix a single value without a full reset.
+- **Agent can't reach the model / Ollama errors** — make sure Ollama is installed and you've run `ollama pull <model>` at least once; the server only auto-starts `ollama serve`, it doesn't install Ollama or pull models for you.
+- **Not sure which provider config fits your hardware** — run `loopy-detect-hardware` for a suggested vLLM config, or `--write` to apply it directly.
+- **`npm install` fails to link `@loopycode/shared`** — you likely ran it inside `packages/client` or `packages/server` instead of the repo root; see the [Quick Start](#quick-start) note.
+- **Port already in use** — pass a different port with `loopy-server` (prompted on first run) or override the client's target with `loopycode --port <port>`.
+
+## Architecture (for contributors)
+
+| Workspace           | Path              | What it is                                                                                        |
+| ------------------- | ----------------- | ------------------------------------------------------------------------------------------------- |
+| `loopycode`         | `packages/client` | The `loopycode` terminal client (Ink/React TUI). Connects to a server, runs the REPL.             |
+| `loopycode-server`  | `packages/server` | The `loopy-server` agent runtime: task orchestration, memory, skills, provider routing, TLS/auth. |
+| `@loopycode/shared` | `packages/shared` | Shared diff/type utilities used by both.                                                          |
+
+- **Orchestration** (`packages/server/src/orchestration`): a lead agent breaks a task into a plan, then a pool of subagents execute subtasks (read/edit files, run commands), escalating back to the lead agent when stuck.
+- **Memory** (`packages/server/src/memory`): session continuity, learned preferences, and reusable patterns are extracted from past tasks and consolidated periodically, so the agent improves within a given `loopy-server` data directory over time.
+- **Skills** (`user-data/skills/` server-side, `~/.agent-cli/skills/` client-side): markdown instruction files the client syncs to the server; the server picks the most relevant one per task.
+- **Providers**: any role (agent/subagent) can be pointed at `ollama` or at a named OpenAI-compatible backend. `loopy-detect-hardware` inspects the host (NVIDIA GPU / AWS Trainium / GCP TPU / CPU) and suggests a `vllm serve` provider configuration.
+
+The directory you launch `loopy-server` from is both its **data root** (`user-data/`, `tls/` get created there) and its **workspace root** (the files it reads/edits). In practice: run it from inside the project you want the agent to work on, and add `user-data/` and `tls/` to that project's `.gitignore`.
 
 ## Testing
 
@@ -143,7 +202,7 @@ npm run test:e2e
 
 ## Publishing
 
-`packages/client` and `packages/server` depend on `@loopycode/shared` via a semver range (`^0.1.0`). Inside this workspace, npm links the local `packages/shared` build automatically — no registry publish is required for local development. Outside the workspace, that same version range resolves `@loopycode/shared` from the npm registry, which is what makes each package independently installable.
+`packages/client` and `packages/server` depend on `@loopycode/shared` via a semver range (`^1.0.0`). Inside this workspace, npm links the local `packages/shared` build automatically — no registry publish is required for local development. Outside the workspace, that same version range resolves `@loopycode/shared` from the npm registry, which is what makes each package independently installable.
 
 `@loopycode/shared` must be published before `loopycode` or `loopycode-server`, since both depend on it by version range:
 
@@ -155,8 +214,8 @@ npm publish -w loopycode
 
 Once published, each package installs independently:
 
-| Package | Install |
-|---------|---------|
-| `@loopycode/shared` | `npm install @loopycode/shared` |
-| `loopycode-server` | `npm install -g loopycode-server` |
-| `loopycode` | `npm install -g loopycode` |
+| Package             | Install                           |
+| ------------------- | --------------------------------- |
+| `@loopycode/shared` | `npm install @loopycode/shared`   |
+| `loopycode-server`  | `npm install -g loopycode-server` |
+| `loopycode`         | `npm install -g loopycode`        |

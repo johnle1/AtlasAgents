@@ -126,7 +126,7 @@ them on-the-fly). You do NOT need to run `tsc` first.
 
 ### System tests — build required
 
-System tests spawn the compiled `loopy` binary. Build it first:
+System tests spawn the compiled `loopycode` binary. Build it first:
 
 ```bash
 cd packages/client

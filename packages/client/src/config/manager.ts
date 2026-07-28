@@ -49,7 +49,7 @@ export const hasConfigFile = (): boolean => fs.existsSync(CONFIG_FILE);
  *
  * An empty password is the signal, because the server rejects unauthenticated
  * clients outright: a blank password means "never configured" (fresh install)
- * or "deliberately cleared" (`loopy --reset`), and both should land the user in
+ * or "deliberately cleared" (`loopycode --reset`), and both should land the user in
  * the setup wizard rather than in a doomed connection attempt.
  *
  * @param config - A loaded configuration object.

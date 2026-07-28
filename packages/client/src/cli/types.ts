@@ -37,7 +37,7 @@ export type CliOverrides = Partial<Pick<Config, "server" | "port">>;
  * output), only via a masked prompt.
  *
  * @example
- * // loopy --reset --address 10.0.0.7 --port 8001 --password
+ * // loopycode --reset --address 10.0.0.7 --port 8001 --password
  * const request: ConfigRepairRequest = {
  *   reset: true,
  *   password: true,

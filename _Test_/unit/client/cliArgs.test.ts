@@ -8,7 +8,7 @@
  * only way to change connection settings while the client cannot reach the
  * server, so it must trigger on exactly the intended flags — and, just as
  * importantly, must *not* trigger on the pre-existing session flags, which
- * would silently turn a one-off `loopy --host x` into a permanent change.
+ * would silently turn a one-off `loopycode --host x` into a permanent change.
  *
  * `parseCliArgs` takes a full argv, so every case prefixes the two entries
  * Node supplies (`node` and the script path) that the parser slices off.
@@ -22,7 +22,7 @@ import {
 import type { Config } from "../../../packages/client/src/config/index.js";
 
 /** Builds an argv the way Node presents it, so tests read as typed commands. */
-const argv = (...args: string[]): string[] => ["node", "loopy", ...args];
+const argv = (...args: string[]): string[] => ["node", "loopycode", ...args];
 
 describe("parseCliArgs — session override mode (unchanged behaviour)", () => {
   it("keeps --host and --port as session overrides without entering repair mode", () => {
