@@ -21,6 +21,13 @@ export interface SessionInfo {
 
   /** Stable id for this TCP/RSocket connection */
   requesterId: string;
+
+  /**
+   * Highest wire-protocol version this client understands, from its RSocket
+   * SETUP payload. Absent for a pre-negotiation client, which is treated as
+   * the legacy protocol.
+   */
+  protocol?: number;
 }
 
 /**
@@ -100,6 +107,31 @@ export interface ChatOptions {
    * think is unset, the client defaults to `true`.
    */
   think?: boolean | "low" | "medium" | "high" | "max";
+  /**
+   * Ollama runtime context window, sent as `options.num_ctx`. Ollama-only —
+   * ignored by OpenAI-compatible providers, which build their request bodies
+   * from explicit fields and drop unrecognized options.
+   */
+  numCtx?: number;
+  /**
+   * How long Ollama keeps the model resident after this request, sent as the
+   * top-level `keep_alive` field (e.g. `"30m"`, or `-1` to never unload).
+   * Ollama-only — ignored by OpenAI-compatible providers.
+   */
+  keepAlive?: string | number;
+  /**
+   * Invoked with each incremental reasoning token from the provider's native
+   * thinking channel (Ollama `message.thinking`, OpenAI-compatible
+   * `delta.reasoning_content`).
+   *
+   * @remarks
+   * Fired by `chatWithTools` only. `chatStream` already yields thinking pieces
+   * in-band (interleaved with content) when `includeThinking` is set, so a
+   * `chatStream` consumer that also passed this callback would observe every
+   * reasoning piece twice. Never serialized into a request body — both
+   * providers build request bodies from explicit fields.
+   */
+  onThinkToken?: (token: string) => void;
 }
 
 /**

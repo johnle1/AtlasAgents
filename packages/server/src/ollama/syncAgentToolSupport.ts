@@ -16,7 +16,7 @@
  * with its own config flag (`agentModelSupportsTools`, `subagentModelSupportsTools`).
  */
 
-import type { ConfigRole } from "../config/configManager/index.js";
+import type { ConfigRole } from "../config/index.js";
 import type { IConfigManager } from "../orchestration/interfaces/configInterfaces.js";
 import type { IOllamaAdminClient } from "../orchestration/interfaces/ollamaInterfaces.js";
 import { logger } from "../utils/logger.js";
@@ -66,8 +66,12 @@ const getExistingToolSupport = async (
   role: ConfigRole,
 ): Promise<boolean> =>
   role === "agent"
-    ? (config as Pick<IConfigManager, "getAgentModelSupportsTools">).getAgentModelSupportsTools()
-    : (config as Pick<IConfigManager, "getSubagentModelSupportsTools">).getSubagentModelSupportsTools();
+    ? (
+        config as Pick<IConfigManager, "getAgentModelSupportsTools">
+      ).getAgentModelSupportsTools()
+    : (
+        config as Pick<IConfigManager, "getSubagentModelSupportsTools">
+      ).getSubagentModelSupportsTools();
 
 /**
  * Probes a model's tool-calling capability and persists the result to config.
@@ -162,8 +166,7 @@ export const syncAgentToolSupport = async (
   ollama: Pick<IOllamaAdminClient, "showModel">,
   config: Pick<IConfigManager, "set" | "getAgentModelSupportsTools">,
   modelName: string,
-): Promise<boolean> =>
-  syncModelToolSupport(ollama, config, "agent", modelName);
+): Promise<boolean> => syncModelToolSupport(ollama, config, "agent", modelName);
 
 /**
  * Probes the subagent model's tool-calling capability.

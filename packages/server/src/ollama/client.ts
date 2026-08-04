@@ -106,6 +106,34 @@ const ollamaThinkField = (
 };
 
 /**
+ * Maps ChatOptions runtime-tuning fields to Ollama API request fields.
+ *
+ * @remarks
+ * `num_ctx` and `keep_alive` sit at different nesting levels in Ollama's
+ * request body — `num_ctx` lives inside the `options` object alongside
+ * `temperature`, while `keep_alive` is a top-level sibling of `model` and
+ * `messages`. Both are omitted from the request entirely when unset, so a
+ * caller that never sets them (any non-Ollama-tuned call) produces the exact
+ * same wire body as before this option existed.
+ *
+ * @param options - Chat options from the caller.
+ * @returns Object spreadable into the request body: `options.num_ctx` plus
+ *   `temperature`, and a top-level `keep_alive` when configured.
+ */
+const ollamaRuntimeFields = (
+  options: ChatOptions,
+): {
+  options: { temperature: number; num_ctx?: number };
+  keep_alive?: string | number;
+} => ({
+  options: {
+    temperature: options.temperature,
+    ...(options.numCtx !== undefined ? { num_ctx: options.numCtx } : {}),
+  },
+  ...(options.keepAlive !== undefined ? { keep_alive: options.keepAlive } : {}),
+});
+
+/**
  * Builds an Undici HTTP agent with configured timeouts.
  *
  * @remarks
@@ -541,7 +569,7 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
           model,
           messages,
           stream: true,
-          options: { temperature: options.temperature },
+          ...ollamaRuntimeFields(options),
           ...ollamaThinkField(options),
         }),
         signal: options.signal,
@@ -590,7 +618,9 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
    * reason) but accumulates content, thinking, and structured tool calls
    * into a single result rather than yielding incrementally. An optional
    * `onToken` callback lets the caller observe content tokens as they arrive
-   * (e.g. for live UI updates) without changing the return shape.
+   * (e.g. for live UI updates) without changing the return shape. Reasoning
+   * tokens (`message.thinking`) are similarly observable via
+   * `options.onThinkToken`.
    *
    * Tool call arguments are defensively normalized: if Ollama sends a
    * non-object `arguments` value (or omits it), it's replaced with `{}`
@@ -634,7 +664,7 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
           messages,
           tools,
           stream: true,
-          options: { temperature: options.temperature },
+          ...ollamaRuntimeFields(options),
           ...ollamaThinkField(options),
         }),
         signal: options.signal,
@@ -680,6 +710,7 @@ export class OllamaClient implements IOllamaClient, IOllamaAdminClient {
       const thinkingPiece = responseChunk.message?.thinking;
       if (typeof thinkingPiece === "string" && thinkingPiece.length > 0) {
         thinking += thinkingPiece;
+        options.onThinkToken?.(thinkingPiece);
       }
 
       for (const toolCall of responseChunk.message?.tool_calls ?? []) {

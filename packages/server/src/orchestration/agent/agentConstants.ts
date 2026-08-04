@@ -92,6 +92,36 @@ export type SubagentPlanHooks = {
   onThink?: (thinkText: string) => void;
 
   /**
+   * Called with each newly-available slice of `<agent-think>` inner text as
+   * the model streams its response, letting callers render reasoning
+   * incrementally instead of waiting for the whole block.
+   *
+   * @remarks
+   * Purely additive to `onThink` — fires many times per iteration (as text
+   * becomes available), while `onThink` still fires once with the complete
+   * block. A caller that only wants today's behavior can ignore this hook.
+   *
+   * @param text - The next slice of think text (may be any length, including
+   *   a single character).
+   */
+  onThinkDelta?: (text: string) => void;
+
+  /**
+   * Called once per planning iteration when the model turn ends, closing out
+   * whatever `onThinkDelta` started.
+   *
+   * @remarks
+   * Fires even when the turn produced no complete think block (`null`) —
+   * e.g. the model opened `<agent-think>` but was truncated before closing
+   * it — so a caller streaming deltas always gets a matching close signal
+   * and never renders a permanently-open block.
+   *
+   * @param finalText - The complete think text for this iteration, or `null`
+   *   if none was found.
+   */
+  onThinkEnd?: (finalText: string | null) => void;
+
+  /**
    * Called after plan validation to allow external review and approval.
    *
    * @remarks

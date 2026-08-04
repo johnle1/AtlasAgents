@@ -205,6 +205,7 @@ export const runCommandTool: ToolHandler = {
     }
 
     try {
+      handlerContext.emitSubagentStatus("running", "◌", `Running: ${command}`);
       const commandResult = await handlerContext.terminal.runWithConfirmation(
         command,
         recorderContext,

@@ -23,6 +23,7 @@ import type {
   AppProps,
   ApprovalRequest,
   HistoryItem,
+  LiveThink,
   PromptRequest,
   SpinnerState,
   StaticEntry,
@@ -66,6 +67,14 @@ export type AppContextValue = {
   /** Live token stream appended below history while a model responds. */
   streamingText: string | null;
   setStreamingText: React.Dispatch<React.SetStateAction<string | null>>;
+
+  /**
+   * In-progress "thinking" streams, one per active `think-start`…`think-end`
+   * sequence. Rendered below `streamingText` and above `subagentBoards`;
+   * committed to `history` and removed here on `think-end`.
+   */
+  liveThinks: LiveThink[];
+  setLiveThinks: React.Dispatch<React.SetStateAction<LiveThink[]>>;
 
   spinner: SpinnerState | null;
   setSpinner: React.Dispatch<React.SetStateAction<SpinnerState | null>>;
@@ -209,6 +218,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({
   );
 
   const [streamingText, setStreamingText] = useState<string | null>(null);
+  const [liveThinks, setLiveThinks] = useState<LiveThink[]>([]);
   const [spinner, setSpinner] = useState<SpinnerState | null>(null);
 
   const [bannerEntries, setBannerEntries] = useState<StaticEntry[]>(() =>
@@ -295,6 +305,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({
       setHistory,
       streamingText,
       setStreamingText,
+      liveThinks,
+      setLiveThinks,
       spinner,
       setSpinner,
       bannerEntries,
@@ -342,6 +354,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({
     [
       history,
       streamingText,
+      liveThinks,
       spinner,
       bannerEntries,
       input,

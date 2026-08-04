@@ -18,6 +18,7 @@ import type { TaskFrame } from "../transport/frames.js";
 // ===== ORCHESTRATION TYPE IMPORTS =====
 import type { PlanReviewResponse } from "../orchestration/types.js";
 import type { Agent } from "../orchestration/agent/agent.js";
+import type { IModelPlacementReporter } from "../ollama/modelPlacement.js";
 import type { AgentOrchestrator } from "../orchestration/orchestrator/orchestrator.js";
 
 // ===== WORKSPACE TYPE IMPORTS =====
@@ -27,7 +28,7 @@ import type { TerminalExecutor } from "../workspace/execution/terminalExecutor.j
 import type { WorkspaceManager } from "../workspace/manager/workspaceManager.js";
 
 // ===== CONFIGURATION TYPE IMPORTS =====
-import type { ConfigManager } from "../config/configManager/index.js";
+import type { ConfigManager } from "../config/index.js";
 
 // ===== MEMORY TYPE IMPORTS =====
 import type { ContextBuilder } from "../memory/context/contextBuilder.js";
@@ -312,4 +313,16 @@ export type InitializedServices = {
    * for all subagent work.
    */
   orchestrator: AgentOrchestrator;
+
+  /**
+   * Reports models that spilled out of GPU memory, deduping warnings per
+   * client connection.
+   *
+   * @remarks
+   * Returned alongside the orchestrator (which also holds it) so connection
+   * teardown can call {@link IModelPlacementReporter.forgetScope}. It is a
+   * single process-lifetime instance keyed by per-connection ids, so its
+   * dedup state only shrinks if someone releases it.
+   */
+  modelPlacementReporter: IModelPlacementReporter;
 };

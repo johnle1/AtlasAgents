@@ -11,10 +11,7 @@
  */
 
 import * as fs from "node:fs";
-import {
-  decryptSecrets,
-  encryptSecrets,
-} from "../crypto/configCipher.js";
+import { decryptSecrets, encryptSecrets } from "@loopycode/shared";
 import type { Config, SecretConfigFields, StoredConfig } from "./types.js";
 import {
   CONFIG_DIR,

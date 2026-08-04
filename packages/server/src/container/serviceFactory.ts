@@ -23,7 +23,7 @@ import { Agent } from "../orchestration/agent/agent.js";
 import { AgentOrchestrator } from "../orchestration/orchestrator/orchestrator.js";
 
 // ===== CONFIGURATION IMPORTS =====
-import { ConfigManager } from "../config/configManager/index.js";
+import { ConfigManager } from "../config/index.js";
 
 // ===== MEMORY AND CONTEXT IMPORTS =====
 import { ContextBuilder } from "../memory/context/contextBuilder.js";
@@ -40,6 +40,10 @@ import { ProviderRegistry } from "../providers/providerRegistry.js";
 
 // ===== SKILLS MANAGEMENT IMPORTS =====
 import { SkillManager } from "../skills/skillManager.js";
+
+// ===== MODEL PLACEMENT IMPORTS =====
+import { createModelPlacementReporter } from "../ollama/modelPlacement.js";
+import { logger } from "../utils/logger.js";
 
 /**
  * Creates and initializes all application services with proper dependency injection.
@@ -159,6 +163,16 @@ export const createServices = (
     config: configManager,
   });
 
+  // Detects when a loaded model has spilled off the GPU onto CPU (typically
+  // 10-50x slower) and reports it once per client connection. Reads
+  // Ollama's admin API directly — not hardware probing, so it's fine to run
+  // during normal operation (unlike packages/server/src/hardware/, which is
+  // CLI-only by design).
+  const modelPlacementReporter = createModelPlacementReporter({
+    admin: ollamaClient,
+    log: logger,
+  });
+
   // Initialize orchestrator — the primary engine for executing planned tasks.
   // Coordinates all services to run subagent work and manage task lifecycle.
   const orchestrator = new AgentOrchestrator({
@@ -169,6 +183,7 @@ export const createServices = (
     agent: agent,
     providerRegistry: providerRegistry,
     config: configManager,
+    modelPlacementReporter: modelPlacementReporter,
   });
 
   // Return complete service graph with all initialized services.
@@ -184,5 +199,6 @@ export const createServices = (
     contextBuilder: contextBuilder,
     agent: agent,
     orchestrator: orchestrator,
+    modelPlacementReporter: modelPlacementReporter,
   };
 };

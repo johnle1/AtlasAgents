@@ -9,6 +9,7 @@ import type { OllamaClient } from "../ollama/client.js";
 import type { ProviderRegistry } from "../providers/providerRegistry.js";
 import type { IConfigManager } from "../orchestration/interfaces/configInterfaces.js";
 import type { MaxSubagentsParam } from "../orchestration/maxSubagents.js";
+import type { RouteId, StreamKind } from "@loopycode/shared";
 
 /**
  * Represents an authenticated TCP/RSocket session for routing and cleanup.
@@ -55,268 +56,25 @@ export interface Session {
 }
 
 /**
- * JSON body of a streamed `kind: "task"` request from the client.
+ * Client→server command route and stream kind vocabulary, plus the
+ * `kind: "task"` stream payload shape.
  *
  * @remarks
- * This interface defines the shape of the initial payload sent by the client
- * when starting a task execution stream. The `text` field contains the user's
- * natural language task description, while the model and temperature fields
- * control the AI inference behavior.
- *
- * The temperature values range from 0.0 (more deterministic) to 1.0 (more
- * creative). The `subagentModel` is used for the main coordinator agent, while
- * `subsubagentModel` is used for subtask execution agents.
- *
- * @example
- * ```ts
- * const request: TaskRequest = {
- *   text: "Add authentication to the API",
- *   subagentModel: "gemma3:27b",
- *   subsubagentModel: "gemma3:9b",
- *   agentTemp: 0.7,
- *   subagentTemp: 0.5
- * };
- * ```
+ * Sourced from `@loopycode/shared` so the client can validate route/stream
+ * names against the exact same union the server enforces, instead of
+ * sending unchecked strings. See `packages/shared/src/protocol/serverProtocol.ts`.
  */
-export interface TaskRequest {
-  /**
-   * The natural language task description from the user.
-   *
-   * @remarks
-   * This is the primary input to the task execution system. The text is
-   * passed to the AI agent as the user's request to be fulfilled.
-   */
-  text: string;
-
-  /**
-   * Model name for the main coordinator agent.
-   *
-   * @remarks
-   * This agent breaks down the task into subtasks and coordinates their
-   * execution. It typically uses a larger model for better planning and
-   * reasoning capabilities.
-   */
-  subagentModel: string;
-
-  /**
-   * Model name for subtask execution agents.
-   *
-   * @remarks
-   * These agents execute individual subtasks. They typically use smaller,
-   * faster models for efficiency since they handle focused, well-defined
-   * operations.
-   */
-  subsubagentModel: string;
-
-  /**
-   * Sampling temperature for the coordinator agent.
-   *
-   * @remarks
-   * Temperature controls randomness in the model's output. Lower values (0.0-0.3)
-   * produce more deterministic, focused responses. Higher values (0.7-1.0)
-   * produce more creative, diverse responses. A value of 0.7 is a common
-   * default for general-purpose task planning.
-   */
-  agentTemp: number;
-
-  /**
-   * Sampling temperature for subtask execution agents.
-   *
-   * @remarks
-   * Typically lower than `agentTemp` since subtask execution requires more
-   * focused, deterministic behavior. Values around 0.3-0.5 are common for
-   * code generation and other precise operations.
-   */
-  subagentTemp: number;
-}
-
-/**
- * Command route strings the server recognizes for requestResponse traffic.
- *
- * @remarks
- * This union type defines the complete set of command routes supported by
- * the server's request/response API. Each route corresponds to a specific
- * operation (e.g., listing models, updating configuration, managing providers).
- *
- * Routes are grouped by namespace:
- * - `models.*`: Model management operations
- * - `config.*`: Configuration management
- * - `providers.*`: Model provider management
- * - `skills.*`: Skill synchronization
- * - `memory.*`: Memory and learning operations
- * - `session.*`: Session management
- * - `plan.*`: Plan-related operations
- * - `mcp.tools.*`: MCP tool synchronization
- *
- * @example
- * ```ts
- * const route: RouteId = "models.list";
- * ```
- */
-export type RouteId =
-  | "models.list"
-  | "models.delete"
-  | "models.show"
-  | "models.running"
-  | "config.get"
-  | "config.set"
-  | "config.setModel"
-  | "providers.list"
-  | "providers.add"
-  | "providers.remove"
-  | "providers.listModels"
-  | "skills.sync"
-  | "memory.get"
-  | "memory.forget"
-  | "memory.clear"
-  | "session.exists"
-  | "session.clear"
-  | "plan.respond"
-  | "mcp.tools.sync";
-
-/**
- * Fixed list of all RouteId values for runtime validation.
- *
- * @remarks
- * This readonly array provides an O(1) way to check if a string is a valid
- * route identifier. It's used to construct a Set for fast membership testing
- * in the `isRouteId` type guard.
- *
- * The `as const` assertion ensures TypeScript treats this as a tuple of
- * literal string types rather than a generic string array.
- *
- * @example
- * ```ts
- * if (ROUTE_IDS.includes(clientRoute)) {
- *   // Route is valid
- * }
- * ```
- */
-export const ROUTE_IDS: readonly RouteId[] = [
-  "models.list",
-  "models.delete",
-  "models.show",
-  "models.running",
-  "config.get",
-  "config.set",
-  "config.setModel",
-  "providers.list",
-  "providers.add",
-  "providers.remove",
-  "providers.listModels",
-  "skills.sync",
-  "memory.get",
-  "memory.forget",
-  "memory.clear",
-  "session.exists",
-  "session.clear",
-  "plan.respond",
-  "mcp.tools.sync",
-] as const;
-
-// Pre-computed Set for O(1) membership testing in isRouteId
-const ROUTE_ID_SET = new Set<string>(ROUTE_IDS);
-
-/**
- * Type guard that narrows an arbitrary string to RouteId when it matches the known set.
- *
- * @remarks
- * This function provides runtime validation for route strings received from
- * untrusted clients. It uses a pre-computed Set for O(1) membership testing,
- * making it efficient for high-traffic scenarios.
- *
- * Use this function before indexing into the `RouterDeps.commands` map to
- * ensure the route is valid and avoid runtime errors.
- *
- * @param value - Raw route string from the client envelope.
- * @returns `true` when `value` is a supported route, enabling TypeScript to
- *   narrow the type from `string` to `RouteId`.
- *
- * @example
- * ```ts
- * const route = parseRouteFromClient(request);
- * if (isRouteId(route)) {
- *   // TypeScript now knows route is RouteId
- *   const handler = commands[route];
- * } else {
- *   throw new Error(`Unknown route: ${route}`);
- * }
- * ```
- */
-export const isRouteId = (value: string): value is RouteId => {
-  return ROUTE_ID_SET.has(value);
-};
-
-/**
- * Stream kind strings the server recognizes for requestStream traffic.
- *
- * @remarks
- * This union type defines the supported streaming operations. Unlike command
- * routes (which are request/response), streams maintain a long-lived connection
- * for sending incremental updates.
- *
- * The supported stream kinds are:
- * - `task`: Executes a user task and streams progress/results
- * - `models.pull`: Streams model download progress
- * - `explore`: Streams codebase exploration results
- *
- * @example
- * ```ts
- * const kind: StreamKind = "task";
- * ```
- */
-export type StreamKind = "task" | "models.pull" | "explore";
-
-/**
- * Fixed list of all StreamKind values for runtime validation.
- *
- * @remarks
- * This readonly array provides the complete set of valid stream kinds for
- * validation. Like `ROUTE_IDS`, it uses `as const` to preserve literal types
- * and is used to construct a Set for fast membership testing.
- *
- * @example
- * ```ts
- * if (STREAM_KINDS.includes(clientKind)) {
- *   // Stream kind is valid
- * }
- * ```
- */
-export const STREAM_KINDS: readonly StreamKind[] = [
-  "task",
-  "models.pull",
-  "explore",
-] as const;
-
-// Pre-computed Set for O(1) membership testing in isStreamKind
-const STREAM_KIND_SET = new Set<string>(STREAM_KINDS);
-
-/**
- * Type guard that narrows an arbitrary string to StreamKind when it matches the known set.
- *
- * @remarks
- * This function validates stream kind strings from clients, similar to
- * `isRouteId` but for streaming operations. It's used to ensure the client
- * requests a supported stream type before establishing the stream.
- *
- * @param value - Raw stream kind string from the client envelope.
- * @returns `true` when `value` is a supported stream kind, enabling TypeScript
- *   to narrow the type from `string` to `StreamKind`.
- *
- * @example
- * ```ts
- * const kind = parseStreamKindFromClient(request);
- * if (isStreamKind(kind)) {
- *   // TypeScript now knows kind is StreamKind
- *   const handler = streams[kind];
- * } else {
- *   throw new Error(`Unknown stream kind: ${kind}`);
- * }
- * ```
- */
-export const isStreamKind = (value: string): value is StreamKind => {
-  return STREAM_KIND_SET.has(value);
-};
+export type {
+  RouteId,
+  StreamKind,
+  TaskStreamPayload,
+} from "@loopycode/shared";
+export {
+  ROUTE_IDS,
+  isRouteId,
+  STREAM_KINDS,
+  isStreamKind,
+} from "@loopycode/shared";
 
 /**
  * Async function signature for one command route implementation.
@@ -393,44 +151,6 @@ export type StreamHandler = (
 ) => Promise<void>;
 
 /**
- * Async function signature for streaming task execution on the server.
- *
- * @remarks
- * This type is similar to `StreamHandler` but specifically for task execution.
- * It emits raw text tokens rather than structured frames, which are then
- * wrapped in frame format by the calling code.
- *
- * This handler is invoked by the Router's `routeTask` method when a client
- * initiates a task execution stream. The handler coordinates with the
- * AgentOrchestrator to plan and execute the task, streaming results back
- * to the client in real-time.
- *
- * @param session - The authenticated session context for this task.
- * @param req - The task request containing text, models, and temperature settings.
- * @param emit - Callback to send individual text tokens to the client.
- * @param signal - AbortSignal that becomes signaled when the client disconnects.
- * @returns A promise that resolves when task execution completes.
- *
- * @example
- * ```ts
- * const handler: TaskHandler = async (session, req, emit, signal) => {
- *   await orchestrator.runTask(
- *     session,
- *     req.text,
- *     (token) => emit(token),
- *     signal
- *   );
- * };
- * ```
- */
-export type TaskHandler = (
-  session: Session,
-  req: TaskRequest,
-  emit: (token: string) => void,
-  signal: AbortSignal,
-) => Promise<void>;
-
-/**
  * Injectable collaborators that the Router delegates to without owning state.
  *
  * @remarks
@@ -442,9 +162,6 @@ export type TaskHandler = (
  * a "not implemented" error rather than a silent failure. This allows the
  * router to be extended incrementally as new routes are added.
  *
- * The `task` handler is optional because task execution may be handled
- * through the general stream routing mechanism in some configurations.
- *
  * @example
  * ```ts
  * const deps: RouterDeps = {
@@ -453,7 +170,7 @@ export type TaskHandler = (
  *     "config.get": async () => await config.getAll()
  *   },
  *   streams: {
- *     "task": taskHandler,
+ *     "task": taskStreamHandler,
  *     "models.pull": pullHandler
  *   }
  * };
@@ -478,15 +195,6 @@ export interface RouterDeps {
    * This allows gradual implementation of stream handlers during development.
    */
   streams?: Partial<Record<StreamKind, StreamHandler>>;
-
-  /**
-   * Optional streaming task handler for AgentOrchestrator.
-   *
-   * @remarks
-   * If provided, this handler is used for task execution streams.
-   * If omitted, tasks may be handled through the general stream routing.
-   */
-  task?: TaskHandler;
 }
 
 /**

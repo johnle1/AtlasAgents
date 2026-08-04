@@ -89,10 +89,14 @@ export const SubagentTaskBoard: React.FC<Props> = ({ board }) => {
 
   const innerWidth = taskBoardInnerWidth();
 
+  // Current subagent activity (e.g. "Thinking…", "Running: npm test"),
+  // appended as a trailing board line — see buildTaskBoardLines.
+  const activityMessage = board.activity?.message;
+
   // Computes the formatted output lines, allocating text space dynamically.
   const contentLines = useMemo(
-    () => buildTaskBoardLines(visibleTasks, undefined, innerWidth),
-    [visibleTasks, innerWidth],
+    () => buildTaskBoardLines(visibleTasks, activityMessage, innerWidth),
+    [visibleTasks, activityMessage, innerWidth],
   );
 
   return (
@@ -104,11 +108,21 @@ export const SubagentTaskBoard: React.FC<Props> = ({ board }) => {
 
       {/* Render each subtask line by applying state-specific colors and symbols */}
       {contentLines.map((line) => {
+        // The trailing activity line (e.g. "Thinking…") has no source task to
+        // match against — render it as a plain dim status line instead.
+        if (line.isActivity) {
+          return (
+            <Text key={line.key} dimColor>
+              {"  "}↳ {line.text}
+            </Text>
+          );
+        }
+
         // Match the line back to the source task to resolve its active execution state.
         const task = visibleTasks.find((candidate) =>
           line.key.startsWith(`task-${candidate.id}-`),
         );
-        
+
         // Convert status state to a theme-compliant color palette and text styling.
         const visual = resolveTaskLifecycleVisual(
           task?.state ?? "waiting",

@@ -27,7 +27,7 @@
   ],
   "type": "commonjs",
   "dependencies": {
-    "@loopycode/shared": "^0.1.0",
+    "@loopycode/shared": "^1.0.0",
     "@rsocket/core": "^1.0.0-alpha.3",
     "@rsocket/tcp-server": "^1.0.0-alpha.3",
     "diff": "^9.0.0",

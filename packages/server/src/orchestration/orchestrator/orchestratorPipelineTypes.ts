@@ -23,6 +23,7 @@ import type { MaxSubagentsParam } from "../maxSubagents.js";
 import type { SessionInfo, TaskModelOverrides } from "../types.js";
 import type { Agent } from "../agent/agent.js";
 import type { TaskFrame } from "../../transport/frames.js";
+import type { IModelPlacementReporter } from "../../ollama/modelPlacement.js";
 
 /**
  * Dependency injection container for the orchestrator pipeline.
@@ -53,6 +54,14 @@ export type OrchestratorPipelineDeps = {
 
   /** Configuration manager for settings. */
   config: IConfigManager;
+
+  /**
+   * Reports when a loaded model has spilled off the GPU onto CPU, once per
+   * client connection. Optional so callers that don't need placement
+   * warnings (and existing test fakes) don't have to provide one — when
+   * absent, the pipeline simply skips the check.
+   */
+  modelPlacementReporter?: IModelPlacementReporter;
 };
 
 /**

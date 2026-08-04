@@ -2,10 +2,32 @@
  * Parses declarative JSON metadata from skill files (sidecar or inline block).
  */
 
-import type { LoadedSkill, SkillIndex, SkillMeta } from "./types.js";
+import type { LoadedSkill, SkillIndex, SkillIndexEntry, SkillMeta } from "./types.js";
+import {
+  BODY_FIELD_WEIGHT,
+  KEYWORD_FIELD_WEIGHT,
+  MIN_IDF,
+  NAME_FIELD_WEIGHT,
+} from "./skillConstants.js";
 
-/** Regular expression to match inline markdown JSON blocks at the start of a skill file. */
-const INLINE_META_RE = /^```json\s+skill-meta\s*\n([\s\S]*?)\n```\s*\n?/i;
+/**
+ * Regular expression to match an inline markdown JSON metadata block at the
+ * start of a skill file, optionally preceded by a single markdown title
+ * heading line (e.g. `# Testing skill`).
+ *
+ * @remarks
+ * Every skill fixture and every real skill file authored against this
+ * format starts with a `#` title heading — a strictly first-byte-of-file
+ * anchor (the original pattern here) never actually matched any of them,
+ * so `SkillMeta.keywords`/`domain`/`priority`/`stacks` silently fell back
+ * to empty for every skill that had a title, which in practice is all of
+ * them. The optional heading-capture group (group 1) fixes that while
+ * staying conservative: the fence must still open the very next line, so
+ * this can't accidentally match a code block appearing later in a skill's
+ * prose (e.g. one demonstrating the metadata syntax itself).
+ */
+const INLINE_META_RE =
+  /^(#[^\n]*\n+)?```json\s+skill-meta\s*\r?\n([\s\S]*?)\r?\n```\s*\r?\n?/i;
 
 /** Default empty metadata object structure. */
 const EMPTY_META: SkillMeta = {
@@ -87,7 +109,10 @@ export const parseSkillDocument = (
   let meta = sidecarRaw !== undefined ? normaliseSkillMeta(sidecarRaw) : null;
   const inline = INLINE_META_RE.exec(markdown);
   if (inline) {
-    const parsed = parseSkillMetaJson(inline[1]);
+    // Group 1 is the optional leading heading line, group 2 is the JSON body —
+    // see INLINE_META_RE's doc comment for why the heading is captured
+    // separately rather than consumed as part of the stripped-out match.
+    const parsed = parseSkillMetaJson(inline[2] ?? "");
     if (parsed) {
       meta = meta
         ? {
@@ -98,22 +123,48 @@ export const parseSkillDocument = (
           }
         : parsed;
     }
-    body = markdown.slice(inline[0].length).trimStart();
+    // Keep the heading (if any) as part of the body — only the metadata
+    // block itself should be stripped out.
+    const headingPrefix = inline[1] ?? "";
+    body = (headingPrefix + markdown.slice(inline[0].length)).trimStart();
   }
   return { body, meta: meta ?? { ...EMPTY_META } };
 };
 
 /**
- * Indexes skills by their stack mappings, tracking domain skills and resolving priority conflicts.
+ * Indexes skills by their stack mappings, tokenizing every skill for scoring
+ * and computing an IDF (inverse document frequency) weight per token.
  *
  * @param skills - loaded skills map
- * @returns index mapping stacks to skills and tracking domain skills
+ * @param tokenize - tokenizer used for skill names and body content (callers
+ *   pass {@link tokenise} from `skillHelpers.ts`; injected rather than
+ *   imported directly here to avoid a circular module dependency, since
+ *   `skillHelpers.ts` already imports from this module)
+ * @returns index mapping stacks to skills, tracking domain skills, and
+ *   holding per-skill token sets plus corpus-wide IDF weights for scoring
+ *
+ * @remarks
+ * Reads each skill's full `content` once (to tokenize it) but the returned
+ * index retains only the resulting token sets — not the content itself —
+ * so repeated calls to `scoreSkillForTask` never re-scan skill bodies, and
+ * the resident index is sized by vocabulary, not by total skill-file bytes.
+ *
+ * IDF uses the standard BM25-style formula
+ * `ln(1 + (S - df + 0.5) / (df + 0.5))`, floored at {@link MIN_IDF} so a
+ * token that's merely common (rather than universal) doesn't get
+ * near-zeroed — a small corpus of skills produces noisy document
+ * frequencies (df=1 vs df=2 swings the weight hard), and the floor keeps
+ * that noise from suppressing a real match entirely.
  */
 export const buildSkillIndex = (
   skills: Map<string, LoadedSkill>,
+  tokenize: (text: string) => string[],
 ): SkillIndex => {
   const stackToSkill = new Map<string, string>();
   const domainSkillNames = new Set<string>();
+  const entries = new Map<string, SkillIndexEntry>();
+  const documentFrequency = new Map<string, number>();
+
   for (const [name, skill] of skills) {
     if (skill.meta.domain) {
       domainSkillNames.add(name);
@@ -127,36 +178,82 @@ export const buildSkillIndex = (
         stackToSkill.set(stackId, name);
       }
     }
+
+    const nameTokens = new Set(tokenize(name));
+    const bodyTokens = new Set(tokenize(skill.content));
+    const keywordSet = new Set(skill.meta.keywords);
+    const docTokens = new Set<string>([
+      ...nameTokens,
+      ...bodyTokens,
+      ...keywordSet,
+    ]);
+    entries.set(name, { name, meta: skill.meta, nameTokens, bodyTokens, keywordSet, docTokens });
+
+    for (const token of docTokens) {
+      documentFrequency.set(token, (documentFrequency.get(token) ?? 0) + 1);
+    }
   }
-  return { stackToSkill, domainSkillNames };
+
+  const skillCount = skills.size;
+  const idf = new Map<string, number>();
+  for (const [token, docFreq] of documentFrequency) {
+    const rawIdf = Math.log(1 + (skillCount - docFreq + 0.5) / (docFreq + 0.5));
+    idf.set(token, Math.max(rawIdf, MIN_IDF));
+  }
+
+  return { stackToSkill, domainSkillNames, entries, idf, skillCount };
 };
 
 /**
- * Scores a skill's relevance to a task using keyword matching.
- * Keywords match (3 pts), name match (2 pts), content preview match (1 pt).
+ * Scores a skill's relevance to a task using IDF-weighted field matching.
  *
- * @param skill - skill to score
- * @param taskWords - array of lowercase task keywords
- * @returns relevance score
+ * @param entry - indexed skill (tokenized name/body/keywords)
+ * @param taskWordSet - set of lowercase task keywords
+ * @param idf - per-token IDF weights from {@link buildSkillIndex}
+ * @returns relevance score (unbounded, non-negative float — compare only
+ *   against other scores from the same index, never against a fixed
+ *   constant)
+ *
+ * @remarks
+ * `score = Σ_w idf(w) · (KEYWORD_FIELD_WEIGHT·[w∈keywords] + NAME_FIELD_WEIGHT·[w∈name] + BODY_FIELD_WEIGHT·[w∈body])`.
+ *
+ * Two changes from a plain field-weighted sum:
+ * 1. **IDF weighting** — a task word that appears in every skill (e.g. a
+ *    generic term used in every skill's preamble) contributes almost
+ *    nothing; a word unique to one skill contributes heavily. Without this,
+ *    a skill with a long `keywords` list wins largely by volume rather than
+ *    by matching anything distinctive about the task.
+ * 2. **Whole-body matching** — `bodyTokens` covers the entire skill content,
+ *    not a fixed-length preview, so a match late in a long skill file still
+ *    counts.
+ *
+ * O(k) per skill, where k = `taskWordSet.size` — each word is one O(1) Set
+ * lookup per field, independent of skill name/body length.
  */
 export const scoreSkillForTask = (
-  skill: LoadedSkill,
-  taskWords: string[],
+  entry: SkillIndexEntry,
+  taskWordSet: ReadonlySet<string>,
+  idf: ReadonlyMap<string, number>,
 ): number => {
-  const nameLower = skill.name.toLowerCase();
-  const preview = skill.content.slice(0, 200).toLowerCase();
-  const keywordSet = new Set(skill.meta.keywords);
   let score = 0;
-  for (const word of taskWords) {
-    if (keywordSet.has(word)) {
-      score += 3;
+  for (const word of taskWordSet) {
+    const weight = idf.get(word);
+    if (weight === undefined) {
+      // Word appears in zero skills' docTokens, so it can't match any
+      // field below regardless of weight — skip the (irrelevant) lookups.
+      continue;
     }
-    if (nameLower.includes(word)) {
-      score += 2;
+    let fieldScore = 0;
+    if (entry.keywordSet.has(word)) {
+      fieldScore += KEYWORD_FIELD_WEIGHT;
     }
-    if (preview.includes(word)) {
-      score += 1;
+    if (entry.nameTokens.has(word)) {
+      fieldScore += NAME_FIELD_WEIGHT;
     }
+    if (entry.bodyTokens.has(word)) {
+      fieldScore += BODY_FIELD_WEIGHT;
+    }
+    score += weight * fieldScore;
   }
   return score;
 };

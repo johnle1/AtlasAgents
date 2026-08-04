@@ -2,7 +2,23 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { HistoryItem } from "../types.js";
 import { formatAgentThinkForDisplay } from "../../renderer.js";
+import { tailRows } from "../thinkDisplay.js";
 import { useAppContext } from "../../state/DataContext.js";
+
+/**
+ * Maximum visual rows a single live think block may occupy, as a fraction of
+ * terminal height, before its live-view text is clamped to a tail.
+ *
+ * @remarks
+ * Divided further by the number of concurrently-open streams so several
+ * agents thinking at once can't push the input prompt off screen — see
+ * {@link LiveThinkView}. The full, untruncated text is unaffected: it still
+ * commits to scrollback in full on `think-end`.
+ */
+const LIVE_THINK_HEIGHT_FRACTION = 3;
+
+/** Floor on rows allotted per live think block, even with many concurrent streams. */
+const MIN_LIVE_THINK_ROWS = 4;
 
 /**
  * Detects whether a text block contains standard ANSI escape character codes.
@@ -57,13 +73,15 @@ export const renderHistoryItem = (
       const color =
         item.variant === "error"
           ? "red"
-          : item.variant === "success"
-            ? "green"
-            : item.variant === "user"
-              ? "cyan"
-              : item.variant === "assistant"
-                ? undefined
-                : "gray";
+          : item.variant === "warning"
+            ? "yellow"
+            : item.variant === "success"
+              ? "green"
+              : item.variant === "user"
+                ? "cyan"
+                : item.variant === "assistant"
+                  ? undefined
+                  : "gray";
 
       return (
         <Text key={key} {...(hasAnsiCodes ? {} : { color })}>
@@ -76,11 +94,7 @@ export const renderHistoryItem = (
         <Box key={key} flexDirection="column" marginY={1}>
           {/* Label indicating whether the thought trace belongs to the coordinator or a worker */}
           <Text dimColor>{item.agent ? "Agent thinking…" : "thinking…"}</Text>
-          <Text>
-            {item.agent
-              ? formatAgentThinkForDisplay(item.text)
-              : formatAgentThinkForDisplay(item.text)}
-          </Text>
+          <Text>{formatAgentThinkForDisplay(item.text)}</Text>
         </Box>
       );
     case "plan": {
@@ -172,4 +186,57 @@ export const HistoryView: React.FC = () => {
   return streamingText !== null && streamingText.length > 0 ? (
     <Text>{streamingText}</Text>
   ) : null;
+};
+
+/**
+ * Renders every in-progress "thinking" stream live, below frozen scrollback.
+ *
+ * @remarks
+ * One dim-labelled block per open `think-start`…`think-end` sequence — the
+ * lead agent and any number of concurrently-thinking subagents all render at
+ * once here, each identified by its own label. This is what lets reasoning
+ * appear incrementally at all: {@link Static} (used for committed history)
+ * renders its items once and never repaints them, so a block still being
+ * streamed has to live in ordinary React state below it. Once a stream ends,
+ * the completed block commits to history as a `kind: "think"` item and is
+ * removed from here.
+ *
+ * Each block's text is clamped to a fraction of the terminal height via
+ * {@link tailRows} so several concurrent streams can't push the input prompt
+ * off screen — the clamp only affects this live view; the full text still
+ * commits to scrollback.
+ *
+ * @example
+ * ```tsx
+ * import React from "react";
+ * import { render } from "ink";
+ * import { LiveThinkView } from "./HistoryView.js";
+ *
+ * // Note: Requires parent wrapper with active DataContext.
+ * render(<LiveThinkView />);
+ * ```
+ */
+export const LiveThinkView: React.FC = () => {
+  const { liveThinks } = useAppContext();
+  if (liveThinks.length === 0) {
+    return null;
+  }
+
+  const columns = process.stdout.columns ?? 80;
+  const totalRows = process.stdout.rows ?? 24;
+  const maxRowsPerBlock = Math.max(
+    MIN_LIVE_THINK_ROWS,
+    Math.floor(totalRows / LIVE_THINK_HEIGHT_FRACTION / liveThinks.length),
+  );
+
+  return (
+    <>
+      {liveThinks.map((liveThink) => (
+        <Box key={liveThink.id} flexDirection="column" marginY={1}>
+          <Text dimColor>{liveThink.label ?? "Agent"} thinking…</Text>
+          <Text>{tailRows(liveThink.text, columns, maxRowsPerBlock)}</Text>
+        </Box>
+      ))}
+    </>
+  );
 };

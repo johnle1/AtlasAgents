@@ -78,13 +78,14 @@ export type TaskBoardLine = {
  * Maps task status array into wrapped rendering lines.
  *
  * @param tasks - List of active tasks.
- * @param _activityMessage - Ignored; activity status is not shown on the task board.
+ * @param activityMessage - Current subagent activity (e.g. "Thinking…",
+ *   "Running: npm test"), appended as a trailing line when non-empty.
  * @param innerWidth - Target column wrap width.
  * @returns Array of renderable lines.
  */
 export const buildTaskBoardLines = (
   tasks: Array<{ id: number; text: string; state: string }>,
-  _activityMessage: string | undefined,
+  activityMessage: string | undefined,
   innerWidth: number,
 ): TaskBoardLine[] => {
   const lines: TaskBoardLine[] = [];
@@ -99,6 +100,16 @@ export const buildTaskBoardLines = (
         isRunning: task.state === "running",
         isActivity: false,
       });
+    });
+  }
+
+  if (activityMessage && activityMessage.trim().length > 0) {
+    lines.push({
+      key: "activity",
+      glyphPrefix: CONTINUATION_INDENT,
+      text: activityMessage.trim(),
+      isRunning: false,
+      isActivity: true,
     });
   }
 

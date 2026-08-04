@@ -71,7 +71,9 @@ export type SubagentBoardSnapshot = {
 
 export type TaskFrame =
   | { kind: "token"; text: string }
-  | { kind: "think"; text: string; agent?: boolean }
+  | { kind: "think-start"; id: string; agent?: boolean; source?: SubagentStatusSource }
+  | { kind: "think-delta"; id: string; text: string }
+  | { kind: "think-end"; id: string; text?: string }
   | {
       kind: "confirm-plan";
       id: string;
@@ -96,6 +98,7 @@ export type TaskFrame =
     }
   | { kind: "progress"; data: PullProgress }
   | { kind: "error"; message: string }
+  | { kind: "warning"; message: string }
   | { kind: "done" };
 
 export const encodeFrame = (frame: TaskFrame): Buffer =>

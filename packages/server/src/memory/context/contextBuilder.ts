@@ -14,8 +14,11 @@
  *
  * **Token Budgeting:**
  * - Reserves 20% of model context window for memory header
- * - Greedily fills budget: preferences first, then fixes, then patterns
- * - Smart truncation for large patterns (removes 16 chars at a time)
+ * - Greedily fills budget by value density: preferences first, then fixes,
+ *   then patterns, skipping over (not stopping at) rules that don't fit so
+ *   smaller lower-priority rules later in the list still get a chance
+ * - Smart truncation for large patterns (line-boundary cut, computed
+ *   directly from the token budget — see {@link truncateToTokenBudget})
  * - Caches model context windows to avoid repeated Ollama queries
  *
  * @example
@@ -43,20 +46,27 @@ import type {
   IOllamaAdminClient,
   IPreferenceStore,
   ISessionManager,
+  LanguageHint,
+  PreferenceRule,
 } from "../../orchestration/interfaces.js";
 
 // ===== TYPE IMPORTS =====
 import type { PatternFile } from "../types.js";
 
 // ===== CONTEXT BUILDING IMPORTS =====
-import { loadLanguageHints } from "./languageHints.js";
-import { DEFAULT_CONTEXT_WINDOW, TASK_TYPE_WORDS } from "./contextConstants.js";
+import { LANGUAGE_HINTS_FILENAME, loadLanguageHints } from "./languageHints.js";
+import {
+  DEFAULT_CONTEXT_WINDOW,
+  TASK_TYPE_WORDS,
+} from "./contextConstants.js";
 import {
   approxTokens,
   extractKeywords,
-  resolveContextLength,
   sortRules,
+  truncateToTokenBudget,
 } from "./contextHelpers.js";
+import { ContextWindowResolver } from "../../ollama/contextWindow.js";
+import { logger } from "../../utils/logger.js";
 
 export class ContextBuilder implements IContextBuilder {
   /**
@@ -64,12 +74,6 @@ export class ContextBuilder implements IContextBuilder {
    * Provides access to persisted user-specific configuration and learned patterns.
    */
   private readonly preferenceStore: IPreferenceStore;
-
-  /**
-   * Ollama client for querying model metadata and context windows.
-   * Used to determine token limits for different LLM models.
-   */
-  private readonly ollamaClient: IOllamaAdminClient;
 
   /**
    * Configuration manager for accessing agent model settings.
@@ -90,18 +94,30 @@ export class ContextBuilder implements IContextBuilder {
   private readonly sessionManager?: ISessionManager;
 
   /**
-   * Fraction of the model context window reserved for memory header (default 20%).
-   * The remaining 80% is reserved for the actual task response.
-   * Example: 4096 token context → 819 tokens for memory header.
+   * Resolves each model's effective runtime context window (`num_ctx`),
+   * caching the expensive `showModel()` lookup per tag. The single source of
+   * truth for both the wire value sent to Ollama and the number this class
+   * budgets a fraction of — see {@link ContextWindowResolver} for why those
+   * must never be computed separately.
    */
-  private readonly maxContextBudget = 0.2;
+  private readonly contextWindowResolver: ContextWindowResolver;
 
   /**
-   * Cache mapping model tags to their context window sizes in tokens.
-   * Avoids repeated Ollama API calls for the same model.
-   * Key: model tag (e.g., "llama2"), Value: context window in tokens.
+   * Per-file cache of pattern markdown content, keyed by filename, gated on
+   * mtime. Unlike skills or preferences (app-synced, invalidated on write),
+   * `user-data/patterns/*.md` files are hand-edited by the user with no
+   * corresponding write-path hook in this server — mtime comparison is the
+   * only available invalidation signal, so a stat-per-file is paid every
+   * `build()` call but a `readFile` only for files that actually changed.
    */
-  private readonly contextWindowCache = new Map<string, number>();
+  private readonly patternFileCache = new Map<string, { mtimeMs: number; body: string }>();
+
+  /**
+   * Cache of parsed `user-data/language-hints.json`, gated on the file's
+   * mtime for the same reason as {@link patternFileCache} — it's a
+   * user-editable file with no write-path hook to invalidate from.
+   */
+  private languageHintsCache: { mtimeMs: number; hints: LanguageHint[] } | null = null;
 
   /**
    * Initializes the context builder with required service dependencies.
@@ -123,10 +139,13 @@ export class ContextBuilder implements IContextBuilder {
     },
   ) {
     this.preferenceStore = dependencies.prefs;
-    this.ollamaClient = dependencies.ollama;
     this.configManager = dependencies.config;
     this.rootDirectory = dependencies.rootDir ?? process.cwd();
     this.sessionManager = dependencies.session;
+    this.contextWindowResolver = new ContextWindowResolver({
+      ollama: dependencies.ollama,
+      config: dependencies.config,
+    });
   }
 
   /**
@@ -142,41 +161,111 @@ export class ContextBuilder implements IContextBuilder {
    * allowing selective invalidation if model context changes.
    */
   clearContextWindowCache = (modelTag?: string): void => {
-    if (modelTag === undefined) {
-      this.contextWindowCache.clear();
-      return;
-    }
-    this.contextWindowCache.delete(modelTag);
+    this.contextWindowResolver.clearCache(modelTag);
   };
 
   /**
-   * Gets the model's context window size with caching.
+   * Resolves a model's effective runtime context window (`num_ctx`).
    *
    * @param modelTag - Ollama model tag (e.g., "llama2", "gemma3:27b")
-   * @returns Context window size in tokens (always positive)
+   * @returns The `num_ctx` to use for this model — see {@link ContextWindowResolver}.
    *
    * @remarks
-   * First call queries Ollama (~100-500ms), subsequent calls use cached value (microseconds).
-   * Caching prevents expensive repeated queries for the same model.
-   * Falls back to DEFAULT_CONTEXT_WINDOW if query fails or metadata incomplete.
-   * Cache can be invalidated via `clearContextWindowCache()`.
+   * Exposed so callers constructing an Ollama request for this same model
+   * (e.g. the orchestrator, before running the agent) can send the identical
+   * `num_ctx` this class budgets the memory header against. Delegates to the
+   * shared {@link ContextWindowResolver}, so the value and its caching are
+   * identical to what `build()` uses internally.
    */
-  private getContextWindow = async (modelTag: string): Promise<number> => {
-    if (this.contextWindowCache.has(modelTag)) {
-      return this.contextWindowCache.get(modelTag)!;
-    }
+  resolveNumCtx = async (modelTag: string): Promise<number> => {
+    return this.contextWindowResolver.resolve(modelTag);
+  };
 
-    let ollamaModelMetadata;
+  /**
+   * Clears the cached, parsed `language-hints.json`, forcing the next
+   * `build()`/`detectStack()` call to re-stat (and, if changed, re-read) it.
+   *
+   * @remarks
+   * Not wired to any automatic invalidation event — provided for symmetry
+   * with {@link clearContextWindowCache} and for tests. In normal operation
+   * the mtime check inside {@link loadLanguageHintsCached} already detects
+   * hand-edits to the file without needing this to be called.
+   */
+  clearLanguageHintsCache = (): void => {
+    this.languageHintsCache = null;
+  };
+
+  /**
+   * Clears the cached pattern file bodies, forcing the next `build()` to
+   * re-stat every file in `user-data/patterns/`.
+   *
+   * @remarks
+   * See {@link clearLanguageHintsCache} — provided for symmetry/tests; the
+   * per-file mtime check already detects hand-edits without this being called.
+   */
+  clearPatternCache = (): void => {
+    this.patternFileCache.clear();
+  };
+
+  /**
+   * Loads and parses `user-data/language-hints.json`, reusing the cached
+   * result when the file's mtime hasn't changed since the last load.
+   *
+   * @returns Parsed language hints (empty array if the file is missing).
+   *
+   * @remarks
+   * Delegates the actual read+parse to {@link loadLanguageHints} (unchanged
+   * logic) — this only adds a `stat`-gate in front of it, mirroring the
+   * `contextWindowCache` pattern above but keyed on file mtime instead of a
+   * model tag, since there's no explicit "hints changed" event to invalidate on.
+   */
+  private loadLanguageHintsCached = async (): Promise<LanguageHint[]> => {
+    const filePath = path.join(this.rootDirectory, "user-data", LANGUAGE_HINTS_FILENAME);
+
+    let mtimeMs: number;
     try {
-      ollamaModelMetadata = await this.ollamaClient.showModel(modelTag);
-    } catch {
-      this.contextWindowCache.set(modelTag, DEFAULT_CONTEXT_WINDOW);
-      return DEFAULT_CONTEXT_WINDOW;
+      mtimeMs = (await fs.stat(filePath)).mtimeMs;
+    } catch (err) {
+      const errorCode = (err as NodeJS.ErrnoException).code;
+      if (errorCode === "ENOENT") {
+        this.languageHintsCache = null;
+        return [];
+      }
+      throw err;
     }
 
-    const resolvedContextWindow = resolveContextLength(ollamaModelMetadata);
-    this.contextWindowCache.set(modelTag, resolvedContextWindow);
-    return resolvedContextWindow;
+    if (this.languageHintsCache && this.languageHintsCache.mtimeMs === mtimeMs) {
+      return this.languageHintsCache.hints;
+    }
+
+    const hints = await loadLanguageHints(this.rootDirectory);
+    this.languageHintsCache = { mtimeMs, hints };
+    return hints;
+  };
+
+  /**
+   * Detects a single dominant language/framework stack from task text, for
+   * passing to `SkillManager.selectForTask`'s `detectedStack` hint.
+   *
+   * @param taskText - Original user task description.
+   * @returns The first matching language hint's tag (e.g. `"python"`), or
+   *   `undefined` if no hint's needle appears in the task text.
+   *
+   * @remarks
+   * Reuses the same cached `language-hints.json` that keyword extraction
+   * already loads for `build()`, rather than introducing a second detection
+   * mechanism. First match wins — hint file order acts as priority when the
+   * task text could plausibly match more than one stack.
+   */
+  detectStack = async (taskText: string): Promise<string | undefined> => {
+    const languageHints = await this.loadLanguageHintsCached();
+    const lowerTaskText = taskText.toLowerCase();
+    for (const hint of languageHints) {
+      if (lowerTaskText.includes(hint.needle.toLowerCase())) {
+        return hint.tag;
+      }
+    }
+    return undefined;
   };
 
   /**
@@ -195,19 +284,26 @@ export class ContextBuilder implements IContextBuilder {
    * 5. Greedily filling token budget: preferences → fixes → patterns
    * 6. Formatting four sections: [Prior session], [User preferences], [Known fixes], [Project context]
    *
-   * Token budgeting is greedy: highest-value content (most-used rules) is prioritized.
-   * Large patterns are smart-truncated (16 chars at a time) to fit within budget.
+   * Token budgeting is greedy: highest-density content (usage per token spent)
+   * is prioritized, but a rule that doesn't fit is skipped rather than
+   * ending the round, so smaller lower-priority rules later in the sorted
+   * list still get a chance at leftover budget.
+   * Large patterns are smart-truncated (single line-boundary cut, computed
+   * directly from the budget) to fit within budget.
    *
    * Token Budget Strategy:
-   *   - Greedy first-fit allocation: prioritizes high-value (frequently-used) rules
+   *   - Greedy allocation by value density (usage per token), skipping
+   *     rules that don't fit rather than stopping at the first miss
    *   - Tracks used rule IDs to prevent duplication across sections
-   *   - Smart pattern truncation: removes 16 chars at a time until fits
+   *   - Smart pattern truncation: one direct cut to the token budget,
+   *     backed off to the nearest line boundary
    *   - Preserves readability: only truncates if content is >20% useful
    * </Summary>
    */
   build = async (
     taskText: string,
     agentModelOverride?: string,
+    agentProviderOverride?: string,
   ): Promise<string> => {
     // ===== STEP 1: Setup & Budget Calculation =====
     // Step 1a: Use task agent model when provided, else server config
@@ -215,14 +311,34 @@ export class ContextBuilder implements IContextBuilder {
       agentModelOverride?.trim() ||
       (await this.configManager.getAgentModel());
 
-    // Step 1b: Query Ollama for this model's context window (cached)
-    // Example: llama2 → 4096 tokens
-    const totalContextTokens = await this.getContextWindow(agentModelTag);
+    // Step 1b: Size the budget against this model's real context window.
+    //
+    // `num_ctx` is an Ollama runtime knob and only means something for a role
+    // actually on the "ollama" provider — the same guard `orchestratorPipeline`
+    // applies before sending it on the wire. Asking `resolveNumCtx` about an
+    // OpenAI-compatible tag queries the *local* Ollama for a model it has
+    // never pulled: the `/api/show` throws, the resolver falls back to
+    // OLLAMA_DEFAULT_NUM_CTX (4096), and the header budget silently collapses
+    // to ~819 tokens for a model whose window is typically 128k. That
+    // fallback is deliberately uncached, so it also paid a failing round-trip
+    // on every build. Non-Ollama providers expose no trained context length
+    // at all (`SingleModelAdmin.showModel` returns name + capabilities only),
+    // so DEFAULT_CONTEXT_WINDOW is the same assumption `resolveContextLength`
+    // already makes for a model with no metadata.
+    const agentProviderName =
+      agentProviderOverride?.trim() ||
+      (await this.configManager.getAgentProvider());
+    const totalContextTokens =
+      agentProviderName === "ollama"
+        ? await this.resolveNumCtx(agentModelTag)
+        : DEFAULT_CONTEXT_WINDOW;
 
-    // Step 1c: Reserve 20% of context for memory header (80% stays for response)
-    // Example: 4096 tokens total → 819 token budget for memory header
+    // Step 1c: Reserve configured fraction of context for memory header
+    // (remainder stays for response). Read fresh from config on every call
+    // (not cached) so `/set maxContextBudget` takes effect immediately.
+    const configuredMaxContextBudget = await this.configManager.getMaxContextBudget();
     const maxHeaderTokenBudget = Math.floor(
-      totalContextTokens * this.maxContextBudget,
+      totalContextTokens * configuredMaxContextBudget,
     );
 
     // ===== STEP 2: Load All Required Data =====
@@ -233,29 +349,61 @@ export class ContextBuilder implements IContextBuilder {
     // Returns array of { name, body } pairs
     const patternFiles = await this.loadPatterns();
 
-    // Step 2c: Load language hints for keyword matching
+    // Step 2c: Load language hints for keyword matching (mtime-cached — see
+    // loadLanguageHintsCached; re-parses only when the file actually changed)
     // Maps language names to their tags (TypeScript → typescript, etc.)
-    const languageHints = await loadLanguageHints(this.rootDirectory);
+    const languageHints = await this.loadLanguageHintsCached();
 
     // ===== STEP 3: Extract Task Keywords =====
     // Step 3a: Parse task text into language and task-type aware keywords
     // Example: "Refactor login React component" → { refactor, login, react, component }
     const taskKeywords = extractKeywords(taskText, languageHints);
 
-    // ===== STEP 4: Identify Relevant Rules (Two-Level Strategy) =====
-    // Step 4a: Find rules tagged with task keywords (best match)
-    // Example: rules tagged ["react", "refactor"] match this task
-    const primaryMatchedRules = allPreferenceRules.filter((preferenceRule) =>
-      preferenceRule.topics.some((ruleTopic) =>
-        taskKeywords.has(ruleTopic.toLowerCase()),
-      ),
+    // ===== STEP 4-5: Identify Relevant Rules (Single Pass) =====
+    // Step 4a: Task-type keywords, needed before the pass below since fix-rule
+    // membership depends on it.
+    // Example: task keywords = { refactor, login, react } → task types = { refactor }
+    const taskTypeSet = new Set(
+      [...taskKeywords].filter((keyword) => TASK_TYPE_WORDS.has(keyword)),
     );
 
-    // Step 4b: Find universal rules (no tags, always applicable)
-    // These are fallback rules like "Always include tests"
-    const universalRules = allPreferenceRules.filter(
-      (preferenceRule) => preferenceRule.topics.length === 0,
-    );
+    // Step 4b: Partition every rule into up to three groups in one pass,
+    // instead of three separate O(R) filter() calls over allPreferenceRules
+    // (each re-lowercasing every rule's topics independently). A rule's
+    // scope is checked once and gates membership in all three groups: a
+    // rule scoped to a specific language/domain (e.g. "python") only
+    // applies when the task text itself matched that scope as a keyword
+    // (via extractKeywords' language-hint tags); "all" always applies. This
+    // is what stops a Python style rule from being injected into a
+    // TypeScript task — previously `scope` was persisted but never read
+    // here at all.
+    const primaryMatchedRules: PreferenceRule[] = [];
+    const universalRules: PreferenceRule[] = [];
+    const taskTypeFixRules: PreferenceRule[] = [];
+
+    for (const preferenceRule of allPreferenceRules) {
+      const scopeApplies =
+        preferenceRule.scope === "all" ||
+        taskKeywords.has(preferenceRule.scope.toLowerCase());
+      if (!scopeApplies) {
+        continue;
+      }
+
+      const topicsLower = preferenceRule.topics.map((topic) => topic.toLowerCase());
+
+      // Example: rules tagged ["react", "refactor"] match this task
+      if (topicsLower.some((topic) => taskKeywords.has(topic))) {
+        primaryMatchedRules.push(preferenceRule);
+      }
+      // Fallback rules with no tags at all, e.g. "Always include tests"
+      if (preferenceRule.topics.length === 0) {
+        universalRules.push(preferenceRule);
+      }
+      // Example: rules tagged ["refactor"] → "known fixes for refactoring"
+      if (topicsLower.some((topic) => taskTypeSet.has(topic))) {
+        taskTypeFixRules.push(preferenceRule);
+      }
+    }
 
     // Step 4c: Use primary rules if found, else use universal, else empty
     // Fallback strategy ensures we always try to include SOMETHING relevant
@@ -265,24 +413,6 @@ export class ContextBuilder implements IContextBuilder {
         : universalRules.length > 0
           ? universalRules
           : [];
-
-    // ===== STEP 5: Identify Task-Type-Specific Fixes =====
-    // Step 5a: Extract only task-type keywords from all keywords
-    // Example: task keywords = { refactor, login, react } → task types = { refactor }
-    const taskTypeKeywordsOnly = [...taskKeywords].filter((keyword) =>
-      TASK_TYPE_WORDS.has(keyword),
-    );
-
-    // Step 5b: Create set for fast lookup of task types
-    const taskTypeSet = new Set(taskTypeKeywordsOnly);
-
-    // Step 5c: Find all rules tagged with task types
-    // Example: rules tagged ["refactor"] → "known fixes for refactoring"
-    const taskTypeFixRules = allPreferenceRules.filter((preferenceRule) =>
-      preferenceRule.topics.some((ruleTopic) =>
-        taskTypeSet.has(ruleTopic.toLowerCase()),
-      ),
-    );
 
     // ===== STEP 6: Sort Rule Candidates by Value =====
     // Step 6a: Sort preference rules (most-used first, then oldest first)
@@ -307,11 +437,12 @@ export class ContextBuilder implements IContextBuilder {
       // Step 7b: Estimate tokens needed for this line (includes newline)
       const tokenCostForLine = approxTokens(`${ruleLine}\n`);
 
-      // Step 7c: Check if this rule fits within remaining budget
-      // If budget exhausted, stop adding rules
+      // Step 7c: Check if this rule fits within remaining budget.
+      // Continue rather than break: sortedPreferenceRules is sorted by
+      // value density, but a later, smaller rule can still fit in leftover
+      // budget even if this one didn't.
       if (tokensUsedSoFar + tokenCostForLine > maxHeaderTokenBudget) {
-        // Budget exhausted; skip remaining rules
-        break;
+        continue;
       }
 
       // Step 7d: Rule fits! Add to output and update tracking
@@ -337,10 +468,11 @@ export class ContextBuilder implements IContextBuilder {
       // Step 8c: Estimate token cost
       const tokenCostForFixRule = approxTokens(`${fixRuleLine}\n`);
 
-      // Step 8d: Check if fits in remaining budget
+      // Step 8d: Check if fits in remaining budget. Continue, not break —
+      // same reasoning as Step 7c: a smaller rule later in the sorted list
+      // may still fit even if this one doesn't.
       if (tokensUsedSoFar + tokenCostForFixRule > maxHeaderTokenBudget) {
-        // Budget exhausted
-        break;
+        continue;
       }
 
       // Step 8e: Rule fits! Add to output and update tracking
@@ -384,26 +516,15 @@ export class ContextBuilder implements IContextBuilder {
         continue;
       }
 
-      // Step 9f: Smart truncation: calculate how much body text fits
-      const headerTokenCost = approxTokens(patternHeader);
-      const bodyTokenBudget = Math.max(
-        0,
-        remainingTokenBudget - headerTokenCost,
+      // Step 9f-g: Smart truncation — cut to the largest prefix (backed off
+      // to a line boundary) that fits header + body within the remaining
+      // budget. O(1) arithmetic via the exact inverse of approxTokens,
+      // instead of trimming 16 characters at a time in a loop.
+      const truncatedBody = truncateToTokenBudget(
+        patternFile.body,
+        patternHeader,
+        remainingTokenBudget,
       );
-
-      // Step 9g: Iteratively trim pattern body until it fits
-      // Removes 16 chars at a time (conservative)
-      let truncatedBody = patternFile.body;
-      while (
-        truncatedBody.length > 0 &&
-        approxTokens(`${patternHeader}${truncatedBody}`) > remainingTokenBudget
-      ) {
-        // Remove 16 chars from end and try again
-        truncatedBody = truncatedBody.slice(
-          0,
-          Math.max(0, truncatedBody.length - 16),
-        );
-      }
 
       // Step 9h: Skip if truncation left nothing meaningful
       if (truncatedBody.trim().length === 0) {
@@ -457,6 +578,20 @@ export class ContextBuilder implements IContextBuilder {
       );
     }
 
+    // Step 10e: Mark every rule that actually made it into the header as
+    // applied, in one batched write — this is what makes `timesApplied`
+    // (and therefore sortRules' density ranking) mean something over time.
+    // Previously nothing in the codebase called markApplied in production,
+    // so this counter never moved. Best-effort: a failure here shouldn't
+    // fail the whole build() call just because bookkeeping couldn't persist.
+    if (usedRuleIdsAlready.size > 0) {
+      try {
+        await this.preferenceStore.markManyApplied([...usedRuleIdsAlready]);
+      } catch (error) {
+        logger.error({ error }, "ContextBuilder: markManyApplied failed");
+      }
+    }
+
     // ===== STEP 11: Return Formatted Header =====
     // Step 11a: Return empty string if no sections generated
     if (headerSections.length === 0) {
@@ -475,7 +610,8 @@ export class ContextBuilder implements IContextBuilder {
   };
 
   /**
-   * Loads markdown pattern files from the patterns directory.
+   * Loads markdown pattern files from the patterns directory, reusing cached
+   * bodies for files whose mtime hasn't changed since the last load.
    *
    * @returns Array of pattern files with name and body, or empty array if directory not found
    * @throws Filesystem errors other than ENOENT (directory missing)
@@ -487,6 +623,14 @@ export class ContextBuilder implements IContextBuilder {
    *
    * Each pattern file becomes a separate context section entry with smart truncation
    * to fit within the token budget.
+   *
+   * **Caching:** still `stat`s every file on every call (there's no cheaper
+   * way to detect a hand-edit without a filesystem watcher), but only
+   * `readFile`s ones whose `mtimeMs` changed since the last call — on a
+   * quiet patterns directory this turns "read every pattern file every
+   * task" into "stat every pattern file every task, read only changed
+   * ones." Cache entries for files removed from disk are dropped so the
+   * cache can't grow unboundedly across churn.
    */
   private loadPatterns = async (): Promise<PatternFile[]> => {
     const patternDirectoryPath = path.join(
@@ -501,6 +645,7 @@ export class ContextBuilder implements IContextBuilder {
     } catch (err) {
       const errorCode = (err as NodeJS.ErrnoException).code;
       if (errorCode === "ENOENT") {
+        this.patternFileCache.clear();
         return [];
       }
       throw err;
@@ -511,13 +656,32 @@ export class ContextBuilder implements IContextBuilder {
       markdownFilename.toLowerCase().endsWith(".md"),
     );
 
+    // Drop cache entries for files no longer present, so a deleted-then-
+    // recreated-with-different-content file can never be served stale, and
+    // the cache doesn't grow unboundedly across pattern-file churn.
+    const currentFilenames = new Set(markdownFilenames);
+    for (const cachedFilename of this.patternFileCache.keys()) {
+      if (!currentFilenames.has(cachedFilename)) {
+        this.patternFileCache.delete(cachedFilename);
+      }
+    }
+
     const loadedPatternFiles: PatternFile[] = [];
     for (const markdownFilename of markdownFilenames) {
       const absoluteFilePath = path.join(
         patternDirectoryPath,
         markdownFilename,
       );
+      const mtimeMs = (await fs.stat(absoluteFilePath)).mtimeMs;
+      const cached = this.patternFileCache.get(markdownFilename);
+
+      if (cached && cached.mtimeMs === mtimeMs) {
+        loadedPatternFiles.push({ name: markdownFilename, body: cached.body });
+        continue;
+      }
+
       const fileContent = await fs.readFile(absoluteFilePath, "utf-8");
+      this.patternFileCache.set(markdownFilename, { mtimeMs, body: fileContent });
       loadedPatternFiles.push({ name: markdownFilename, body: fileContent });
     }
 

@@ -47,6 +47,36 @@ export type LoadedSkill = {
 };
 
 /**
+ * Tokenized, indexable view of one skill, built once per index (re)build.
+ *
+ * @remarks
+ * Deliberately excludes the full `content` string — only the token sets
+ * needed for scoring are retained, so the resident index stays proportional
+ * to vocabulary size rather than total skill-file bytes. The winning
+ * skill(s)' raw content is read from disk on demand at selection time
+ * instead (see `SkillManager.selectForTask`).
+ */
+export type SkillIndexEntry = {
+  /** The skill's basename, matching {@link LoadedSkill.name}. */
+  name: string;
+
+  /** The skill's metadata (stacks, domain flag, priority, declared keywords). */
+  meta: SkillMeta;
+
+  /** Tokenized skill name. */
+  nameTokens: Set<string>;
+
+  /** Tokenized full body content (not just a preview — see {@link scoreSkillForTask}). */
+  bodyTokens: Set<string>;
+
+  /** `meta.keywords` as a Set for O(1) membership checks during scoring. */
+  keywordSet: Set<string>;
+
+  /** Union of `nameTokens`, `bodyTokens`, and `keywordSet` — the set used for IDF document-frequency counting. */
+  docTokens: Set<string>;
+};
+
+/**
  * Defines the shape of the resolved index of loaded skills.
  *
  * @remarks
@@ -60,7 +90,21 @@ export type SkillIndex = {
   stackToSkill: Map<string, string>;
 
   /**
-   * Set of names of skills that are flagged as general domain-level skills.
+   * Set of names of skills that are flagged as general domain-level skills
+   * (`meta.domain === true`). Gates which skill can be selected as the
+   * second ("domain") result in {@link ISkillManager.selectForTask}.
    */
   domainSkillNames: Set<string>;
+
+  /** Tokenized entries, keyed by skill name, used for relevance scoring. */
+  entries: Map<string, SkillIndexEntry>;
+
+  /**
+   * Inverse document frequency per token, computed once at index-build time
+   * from `docTokens` across all skills. See {@link scoreSkillForTask}.
+   */
+  idf: Map<string, number>;
+
+  /** Total number of indexed skills (`entries.size`), cached for readability at IDF computation sites. */
+  skillCount: number;
 };

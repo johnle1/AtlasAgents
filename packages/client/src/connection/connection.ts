@@ -9,6 +9,7 @@
  */
 
 import { RSocketConnector, type RSocket } from "@rsocket/core";
+import type { RouteId } from "@loopycode/shared";
 import type { Config } from "../config/index.js";
 import { createTlsClientTransport } from "./tls/tlsClientTransport.js";
 import { checkAndPinFingerprint } from "./tls/fingerprintStore.js";
@@ -536,7 +537,7 @@ export class Connection {
    * @throws {@link Error} On connect timeout, transport failure, or `ok: false`.
    */
   sendCommand = async <TResponse>(
-    type: string,
+    type: RouteId,
     payload: unknown,
   ): Promise<TResponse> => {
     await this.waitUntilConnected();

@@ -21,6 +21,7 @@ export type BridgeSetupContext = Pick<
   AppContextValue,
   | "setHistory"
   | "setStreamingText"
+  | "setLiveThinks"
   | "setSpinner"
   | "setBusy"
   | "setTaskActive"
@@ -45,6 +46,7 @@ export type ConnectionDisconnectCleanupSetters = Pick<
   | "setBusy"
   | "setSpinner"
   | "setStreamingText"
+  | "setLiveThinks"
   | "setSubagentStatuses"
   | "setSubagentBoards"
 >;

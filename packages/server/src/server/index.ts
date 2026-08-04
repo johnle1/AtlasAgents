@@ -16,7 +16,7 @@
 import * as readline from "node:readline";
 import type { RSocket } from "@rsocket/core";
 import { AuthMiddleware } from "../auth/middleware.js";
-import { ConfigError, ConfigManager } from "../config/configManager/index.js";
+import { ConfigError, ConfigManager } from "../config/index.js";
 import { createContainer } from "../container/index.js";
 import { installUserDataDefaults } from "../setup/installUserDataDefaults.js";
 import { RSocketServer } from "./rsocket/rsocketServer.js";
@@ -367,8 +367,9 @@ const main = async (): Promise<void> => {
   if (usesOllamaProvider) {
     const installedModels = await app.ollama.listModels();
     if (installedModels.length === 0) {
-      logger.error("No models installed. Run: ollama pull <modelname>");
-      process.exit(1);
+      logger.warn(
+        "No Ollama models installed. Pull one with: ollama pull <modelname>",
+      );
     }
   }
 
@@ -442,6 +443,10 @@ const main = async (): Promise<void> => {
         perConnection.terminal.dispose();
         app.brokerByRequester.delete(requesterId);
       }
+      // The placement reporter is a process-lifetime singleton that dedupes
+      // by requesterId, so its state has to be released here too — otherwise
+      // it grows by an entry per connection for as long as the server runs.
+      app.modelPlacementReporter.forgetScope(requesterId);
     },
     clientPeers,
     cert,

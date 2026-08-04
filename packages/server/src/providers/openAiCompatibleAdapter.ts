@@ -430,8 +430,7 @@ export class OpenAiCompatibleAdapter implements IOllamaClient {
    * @param model - Model name for error context.
    * @param requestBody - The body to send to the API (messages, tools, etc.).
    * @param options - Request options (temperature, signal, etc.).
-   * @param processFrame - Callback invoked for each complete SSE frame, before yielding.
-   *   Should accumulate results; caller is responsible for yielding if needed.
+   * @yields Parsed SSE chunks in arrival order, as soon as each is received.
    * @throws {@link ModelProviderError} if the API returns an error.
    * @throws {@link AbortError} if canceled via options.signal.
    */
@@ -449,11 +448,15 @@ export class OpenAiCompatibleAdapter implements IOllamaClient {
    *   - thinking: accumulated reasoning tokens
    *   - toolCallsByIndex: Map of in-progress tool calls by index
    * @param onToken - Optional callback fired for each content token.
+   * @param onThinkToken - Optional callback fired for each reasoning token
+   *   (`delta.reasoning_content`), independent of `includeThinking` — reasoning
+   *   models on OpenAI-compatible backends emit this channel unprompted.
    */
   private ingestToolCallChunk(
     chunk: OpenAiStreamChunk,
     state: { content: string; thinking: string; toolCallsByIndex: Map<number, ToolCallAccumulator> },
     onToken?: (token: string) => void,
+    onThinkToken?: (token: string) => void,
   ): void {
     const delta = chunk.choices?.[0]?.delta;
     // If there's no delta, skip (shouldn't happen but be defensive).
@@ -474,6 +477,7 @@ export class OpenAiCompatibleAdapter implements IOllamaClient {
       delta.reasoning_content.length > 0
     ) {
       state.thinking += delta.reasoning_content;
+      onThinkToken?.(delta.reasoning_content);
     }
 
     // Extract and accumulate tool call fragments.
@@ -498,13 +502,28 @@ export class OpenAiCompatibleAdapter implements IOllamaClient {
     }
   }
 
-  private async openStreamAndProcess(
+  /**
+   * Opens an SSE stream to the OpenAI-compatible API and yields each parsed chunk.
+   *
+   * @remarks
+   * Extracted so `chatStream` and `chatWithTools` share one HTTP/SSE-parsing
+   * implementation. This is a genuine generator — chunks are yielded to the
+   * caller as soon as each SSE frame is parsed, not accumulated and replayed
+   * after the response finishes. That incrementality is what lets `chatStream`
+   * and `chatWithTools` observe content and reasoning tokens as they arrive.
+   *
+   * @param operation - Description of the operation (e.g. "chat stream") for error messages.
+   * @param model - Model name for error context.
+   * @param requestBody - The body to send to the API (messages, tools, etc.).
+   * @param options - Request options (temperature, signal, etc.).
+   */
+  private openStream = async function* (
+    this: OpenAiCompatibleAdapter,
     operation: string,
     model: string,
     requestBody: Record<string, unknown>,
     options: ChatOptions,
-    processFrame: (frame: OpenAiStreamChunk) => void,
-  ): Promise<void> {
+  ): AsyncGenerator<OpenAiStreamChunk> {
     // Construct the full endpoint URL for the chat completions API.
     const url = `${this.baseUrl}/${CHAT_COMPLETIONS_ENDPOINT}`;
 
@@ -562,14 +581,20 @@ export class OpenAiCompatibleAdapter implements IOllamaClient {
         const { frames, rest } = parseSseFrames(carry);
         carry = rest;
 
-        // Process all complete SSE frames received in this chunk.
+        // Yield each complete SSE frame received in this chunk, in order.
         for (const frame of frames) {
+          // Parse outside the yield so a consumer's break/throw during yield
+          // can never be caught by the malformed-JSON catch below.
+          let chunk: OpenAiStreamChunk | null = null;
           try {
-            // Parse the SSE payload as JSON and pass to the processor.
-            processFrame(JSON.parse(frame) as OpenAiStreamChunk);
+            chunk = JSON.parse(frame) as OpenAiStreamChunk;
           } catch {
             // If a frame is malformed JSON, skip it. This shouldn't happen in practice
             // because the backend sends valid JSON, but we're defensive.
+            chunk = null;
+          }
+          if (chunk) {
+            yield chunk;
           }
         }
       }
@@ -679,43 +704,39 @@ export class OpenAiCompatibleAdapter implements IOllamaClient {
     messages: Message[],
     options: ChatOptions,
   ): AsyncGenerator<string> {
-    // Accumulate tokens as they're received in SSE frames.
-    const tokens: string[] = [];
-
-    // Process each SSE chunk and extract content tokens.
-    const processFrame = (chunk: OpenAiStreamChunk): void => {
+    // Open the stream and yield each token as its chunk arrives — no
+    // accumulate-then-replay, so callers see content (and reasoning, when
+    // requested) at true generation speed.
+    for await (const chunk of this.openStream(
+      "chat stream",
+      model,
+      {
+        model,
+        messages: toOpenAiMessages(messages),
+        temperature: options.temperature,
+        stream: true,
+      },
+      options,
+    )) {
       const delta = chunk.choices?.[0]?.delta;
       if (!delta) {
-        return;
+        continue;
       }
 
-      // Accumulate any text content from this delta (non-empty strings only).
+      // Yield text content as soon as this delta arrives.
       if (typeof delta.content === "string" && delta.content.length > 0) {
-        tokens.push(delta.content);
+        yield delta.content;
       }
 
       // If the caller wants thinking tokens and they're present (reasoning models),
-      // accumulate them alongside content tokens.
+      // yield them alongside content tokens.
       if (
         options.includeThinking &&
         typeof delta.reasoning_content === "string" &&
         delta.reasoning_content.length > 0
       ) {
-        tokens.push(delta.reasoning_content);
+        yield delta.reasoning_content;
       }
-    };
-
-    // Open the stream and process all frames using the common helper.
-    await this.openStreamAndProcess("chat stream", model, {
-      model,
-      messages: toOpenAiMessages(messages),
-      temperature: options.temperature,
-      stream: true,
-    }, options, processFrame);
-
-    // Yield all accumulated tokens.
-    for (const token of tokens) {
-      yield token;
     }
   };
 
@@ -787,19 +808,21 @@ export class OpenAiCompatibleAdapter implements IOllamaClient {
       toolCallsByIndex: new Map<number, ToolCallAccumulator>(),
     };
 
-    // Process each SSE chunk using the extracted ingest method.
-    const processFrame = (chunk: OpenAiStreamChunk): void => {
-      this.ingestToolCallChunk(chunk, state, onToken);
-    };
-
-    // Open the stream and process all frames using the common helper.
-    await this.openStreamAndProcess("chat with tools", model, {
+    // Open the stream and ingest each chunk as it arrives.
+    for await (const chunk of this.openStream(
+      "chat with tools",
       model,
-      messages: toOpenAiMessages(messages),
-      tools: toOpenAiTools(tools),
-      temperature: options.temperature,
-      stream: true,
-    }, options, processFrame);
+      {
+        model,
+        messages: toOpenAiMessages(messages),
+        tools: toOpenAiTools(tools),
+        temperature: options.temperature,
+        stream: true,
+      },
+      options,
+    )) {
+      this.ingestToolCallChunk(chunk, state, onToken, options.onThinkToken);
+    }
 
     // Reconstruct complete tool calls from the accumulated fragments.
     const toolCalls: ChatWithToolsResult["toolCalls"] = [];

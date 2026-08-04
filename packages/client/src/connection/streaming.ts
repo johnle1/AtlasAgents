@@ -10,6 +10,7 @@
  */
 
 import type { Payload, RSocket } from "@rsocket/core";
+import type { TaskStreamPayload } from "@loopycode/shared";
 import type { TaskFrame } from "../types/frames.js";
 import { decodeFrame } from "../types/frames.js";
 import type { Config } from "../config/index.js";
@@ -170,23 +171,19 @@ export async function sendTask(
   onToken?: (token: string) => void,
   maxSubagents?: 1 | 2 | "max" | number,
 ): Promise<void> {
-  await streamRequest(
-    rsocket,
-    {
-      kind: "task",
-      text: task,
-      maxSubagents: maxSubagents ?? config.subagentCap,
-      subagentModel: config.subagentModel,
-      subsubagentModel: config.subsubagentModel,
-      agentProvider: config.agentProvider,
-      subagentProvider: config.subagentProvider,
-      agentTemp: config.agentTemp,
-      subagentTemp: config.subagentTemp,
-    },
-    metadata,
-    onFrame,
-    onToken,
-  );
+  const body: TaskStreamPayload = {
+    kind: "task",
+    text: task,
+    maxSubagents: maxSubagents ?? config.subagentCap,
+    subagentModel: config.subagentModel,
+    subsubagentModel: config.subsubagentModel,
+    agentProvider: config.agentProvider,
+    subagentProvider: config.subagentProvider,
+    agentTemp: config.agentTemp,
+    subagentTemp: config.subagentTemp,
+  };
+
+  await streamRequest(rsocket, body, metadata, onFrame, onToken);
 }
 
 /**

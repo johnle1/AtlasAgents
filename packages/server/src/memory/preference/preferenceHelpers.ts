@@ -35,29 +35,32 @@ export const tokenise = (text: string): Set<string> => {
 };
 
 /**
- * Calculates Jaccard similarity between two text strings.
+ * Calculates Jaccard similarity between two pre-tokenized word sets.
  *
- * @param textA - First text string
- * @param textB - Second text string
+ * @param tokenSetA - First token set (from {@link tokenise})
+ * @param tokenSetB - Second token set (from {@link tokenise})
  * @returns Jaccard similarity coefficient (0–1, where 1 = identical tokens)
  *
  * @remarks
  * **Algorithm:** Jaccard = |A ∩ B| / |A ∪ B| (shared tokens / unique tokens).
- * Both empty strings return 1 (identical). One empty returns 0 (no similarity).
+ * Both empty sets return 1 (identical). One empty returns 0 (no similarity).
+ * Iterates the smaller set for the intersection so cost is O(min(|A|,|B|))
+ * rather than always O(|A|).
  *
- * Used by {@link PreferenceManager.add} to deduplicate rules via text similarity ≥ 0.8.
+ * Split out from {@link textSimilarity} so callers that already hold cached
+ * token sets (e.g. an inverted-index similarity search) don't re-tokenize
+ * the same text on every comparison.
  *
  * @example
  * ```ts
- * textSimilarity("Use TypeScript", "Use TypeScript") // 1
- * textSimilarity("Use TypeScript", "Use Python")     // 0.5
- * textSimilarity("Use TypeScript", "Python")         // 0
+ * jaccardFromTokenSets(tokenise("Use TypeScript"), tokenise("Use TypeScript")) // 1
+ * jaccardFromTokenSets(tokenise("Use TypeScript"), tokenise("Use Python"))     // 0.5
  * ```
  */
-export const textSimilarity = (textA: string, textB: string): number => {
-  const tokenSetA = tokenise(textA);
-  const tokenSetB = tokenise(textB);
-
+export const jaccardFromTokenSets = (
+  tokenSetA: Set<string>,
+  tokenSetB: Set<string>,
+): number => {
   // Edge cases: both empty = identical; one empty = no similarity
   if (tokenSetA.size === 0 && tokenSetB.size === 0) {
     return 1;
@@ -66,10 +69,12 @@ export const textSimilarity = (textA: string, textB: string): number => {
     return 0;
   }
 
-  // Count shared tokens (intersection)
+  // Count shared tokens (intersection), iterating the smaller set
+  const [smaller, larger] =
+    tokenSetA.size <= tokenSetB.size ? [tokenSetA, tokenSetB] : [tokenSetB, tokenSetA];
   let intersectionCount = 0;
-  for (const word of tokenSetA) {
-    if (tokenSetB.has(word)) {
+  for (const word of smaller) {
+    if (larger.has(word)) {
       intersectionCount += 1;
     }
   }
@@ -79,6 +84,64 @@ export const textSimilarity = (textA: string, textB: string): number => {
 
   // Return Jaccard index
   return unionSize === 0 ? 0 : intersectionCount / unionSize;
+};
+
+/**
+ * Calculates Jaccard similarity between two text strings.
+ *
+ * @param textA - First text string
+ * @param textB - Second text string
+ * @returns Jaccard similarity coefficient (0–1, where 1 = identical tokens)
+ *
+ * @remarks
+ * Tokenizes both strings and delegates to {@link jaccardFromTokenSets}.
+ * Used by {@link PreferenceManager.add} to deduplicate rules via text similarity ≥ 0.8.
+ *
+ * @example
+ * ```ts
+ * textSimilarity("Use TypeScript", "Use TypeScript") // 1
+ * textSimilarity("Use TypeScript", "Use Python")     // 0.5
+ * textSimilarity("Use TypeScript", "Python")         // 0
+ * ```
+ */
+export const textSimilarity = (textA: string, textB: string): number =>
+  jaccardFromTokenSets(tokenise(textA), tokenise(textB));
+
+/**
+ * Checks whether a candidate token-set size could possibly reach a Jaccard
+ * similarity threshold against a target token-set size, without computing
+ * the actual intersection.
+ *
+ * @param candidateSize - Token count of the candidate set being tested
+ * @param targetSize - Token count of the set being matched against
+ * @param threshold - Minimum Jaccard similarity required (e.g. 0.8)
+ * @returns `false` if similarity ≥ `threshold` is mathematically impossible
+ *   for these sizes; `true` if it's still possible (does not guarantee it)
+ *
+ * @remarks
+ * For J(A,B) ≥ t to hold, |B| must fall within
+ * `[ceil(t·|A|), floor(|A|/t)]` — derived from `|A∩B| ≤ min(|A|,|B|)` and
+ * `J = |A∩B| / (|A|+|B|-|A∩B|)`. Used as an O(1) pre-filter before the O(n)
+ * exact {@link jaccardFromTokenSets} check, so an inverted-index similarity
+ * search can discard most candidates without touching their token sets.
+ *
+ * @example
+ * ```ts
+ * passesLengthFilter(10, 3, 0.8)  // false — 3 is too small to reach 0.8 vs 10
+ * passesLengthFilter(9, 10, 0.8)  // true — worth an exact check
+ * ```
+ */
+export const passesLengthFilter = (
+  candidateSize: number,
+  targetSize: number,
+  threshold: number,
+): boolean => {
+  if (targetSize === 0) {
+    return candidateSize === 0;
+  }
+  const minSize = Math.ceil(threshold * targetSize);
+  const maxSize = Math.floor(targetSize / threshold);
+  return candidateSize >= minSize && candidateSize <= maxSize;
 };
 
 /**

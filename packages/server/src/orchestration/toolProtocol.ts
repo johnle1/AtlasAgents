@@ -36,7 +36,12 @@ export type ParsedToolCall = {
   args: Record<string, unknown>;
 };
 
-const THINK_BLOCK = "redacted_thinking";
+/**
+ * Tag name for subagent thinking blocks, shared with {@link THINKING_TAG_OPEN},
+ * {@link THINKING_TAG_CLOSE}, and the incremental think-tag scanner in
+ * `thinkStream.ts` so both agree on what to look for.
+ */
+export const THINK_BLOCK = "redacted_thinking";
 
 /** Opening tag for thinking blocks in subagent responses */
 export const THINKING_TAG_OPEN = `<${THINK_BLOCK}>`;

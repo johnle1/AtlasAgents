@@ -11,7 +11,11 @@ import { useApp, useInput } from "ink";
 import { Box, Static, Text } from "ink";
 
 import { AppProvider, useAppContext } from "../state/DataContext.js";
-import { HistoryView, renderHistoryItem } from "./components/HistoryView.js";
+import {
+  HistoryView,
+  LiveThinkView,
+  renderHistoryItem,
+} from "./components/HistoryView.js";
 import { StatusSpinner } from "./components/Spinner.js";
 import { ConnectionStatusLine } from "./components/ConnectionStatusLine.js";
 import { InputBox } from "./components/InputBox.js";
@@ -100,6 +104,7 @@ const AppContent: React.FC = () => {
     setHandleSubmit,
     setHistory,
     setStreamingText,
+    setLiveThinks,
     setSpinner,
     setBusy,
     setTaskActive,
@@ -134,6 +139,7 @@ const AppContent: React.FC = () => {
     setBusy,
     setSpinner,
     setStreamingText,
+    setLiveThinks,
     setSubagentStatuses,
     setSubagentBoards,
   });
@@ -162,6 +168,7 @@ const AppContent: React.FC = () => {
   useBridgeSetup({
     setHistory,
     setStreamingText,
+    setLiveThinks,
     setSpinner,
     setBusy,
     setTaskActive,
@@ -316,6 +323,11 @@ const AppContent: React.FC = () => {
           )
         }
       </Static>
+
+      {/* Live "thinking" streams: reasoning still in progress, one block per
+          agent/subagent. Rendered above answer text — committed items in
+          Static can't grow, so in-progress blocks have to live here. */}
+      <LiveThinkView />
 
       {/* Streaming history: appears below static region, updates in real-time */}
       <HistoryView />

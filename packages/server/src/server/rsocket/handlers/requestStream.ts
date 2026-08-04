@@ -90,7 +90,10 @@ export const createRequestStreamHandler =
     const abortController = new AbortController();
     record.abortControllers.add(abortController);
 
-    const session = { userId, requesterId };
+    const session = {
+      userId,
+      requesterId,
+    };
     // `false` = non-terminal frame: emit as many as needed, then signal the end
     // separately via onComplete/onError once the handler settles.
     const emit = (frame: TaskFrame): void => {

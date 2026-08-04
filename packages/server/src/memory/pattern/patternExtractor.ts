@@ -266,6 +266,10 @@ export class PatternExtractor implements IPatternExtractor {
       { role: "user", content: agentPrompt },
     ];
 
+    // Declared outside the try block below since it must still be visible
+    // (and empty, on failure) when building the final batched addMany() call.
+    const agentRules: NewPreferenceRule[] = [];
+
     try {
       // Step 5: Query the agent and attempt to parse its JSON array output
       // This is the core operation where we send the prompt to the AI model
@@ -274,6 +278,7 @@ export class PatternExtractor implements IPatternExtractor {
       // We await this call because we need the response before we can proceed with parsing.
       const rawAgentResponse = await this.deps.ollama.chat(model, messages, {
         temperature,
+        keepAlive: await this.deps.config.getKeepAlive(),
       });
 
       // Attempt to parse the JSON array from the agent's response
@@ -297,10 +302,15 @@ export class PatternExtractor implements IPatternExtractor {
         parsedRules = null;
       }
 
-      // Step 6: If the agent returned a JSON array, validate and store
+      // Step 6: If the agent returned a JSON array, validate and collect
       // We validate each rule to ensure it meets our minimum requirements
       // This prevents malformed or empty rules from being stored
       // Validation is crucial because the agent output is untrusted and could be malformed
+      // Collected into agentRules (declared above the try block) and
+      // persisted in one addMany() call below, rather than one prefs.add()
+      // per rule — a task that yields N rules across all three sources
+      // otherwise costs N full read-modify-write cycles against the
+      // preference store instead of one.
       if (Array.isArray(parsedRules)) {
         for (const ruleItem of parsedRules) {
           // Validate shape — require a non-empty `text` string
@@ -333,7 +343,7 @@ export class PatternExtractor implements IPatternExtractor {
               ? ruleObject.scope
               : "all"; // Default to "all" if scope is missing or empty
 
-          // Build a NewPreferenceRule and persist it
+          // Build a NewPreferenceRule and collect it for the batched write below
           // The parseConfidence helper normalizes confidence values to our enum
           // This ensures we only store valid confidence values (high, medium, low)
           const rule: NewPreferenceRule = {
@@ -343,9 +353,7 @@ export class PatternExtractor implements IPatternExtractor {
             confidence: parseConfidence(ruleObject.confidence),
             source: "outcome", // Marks this as a general rule learned from the task outcome
           };
-          // Store the rule in the preference store for future use
-          // This is an async operation, but we await it to ensure storage completes
-          await this.deps.prefs.add(rule);
+          agentRules.push(rule);
         }
       }
     } catch (error) {
@@ -366,6 +374,7 @@ export class PatternExtractor implements IPatternExtractor {
     // explicit guidance that was needed to resolve the issue.
     // These are particularly valuable because they represent human intervention points
     // where the agent's normal approach failed and required correction.
+    const fixRules: NewPreferenceRule[] = [];
     for (const escalation of record.escalations) {
       const fixRule: NewPreferenceRule = {
         // Create a rule that maps the failure reason to the fix guidance
@@ -385,9 +394,7 @@ export class PatternExtractor implements IPatternExtractor {
         // This distinguishes it from style rules (source: "style") and general rules (source: "outcome")
         source: "fix",
       };
-      // Store the fix rule in the preference store
-      // We await this to ensure the rule is persisted before continuing
-      await this.deps.prefs.add(fixRule);
+      fixRules.push(fixRule);
     }
 
     // Step 7b: Convert user edits into style-preference rules with a short diff hint
@@ -395,6 +402,7 @@ export class PatternExtractor implements IPatternExtractor {
     // These often reveal style preferences, formatting choices, or specific patterns
     // the user prefers. We convert these into "style" rules with high confidence.
     // These rules are language-specific because style preferences vary by language.
+    const styleRules: NewPreferenceRule[] = [];
     for (const userEdit of record.userEdits) {
       // Determine the language/scope from the file path (e.g., "typescript", "python")
       // This ensures style rules only apply to the appropriate language context
@@ -429,9 +437,14 @@ export class PatternExtractor implements IPatternExtractor {
         // This distinguishes it from fix rules (source: "fix") and general rules (source: "outcome")
         source: "style",
       };
-      // Store the style rule in the preference store
-      // We await this to ensure the rule is persisted before continuing
-      await this.deps.prefs.add(styleRule);
+      styleRules.push(styleRule);
     }
+
+    // Step 8: Persist every rule from all three sources in one batched write.
+    // Previously each source looped its own `prefs.add()` calls, so a task
+    // yielding e.g. 3 agent rules + 2 fixes + 5 style rules cost 10 separate
+    // read-modify-write cycles against the preference store. addMany()
+    // applies the same merge-or-insert logic per rule but persists once.
+    await this.deps.prefs.addMany([...agentRules, ...fixRules, ...styleRules]);
   };
 }

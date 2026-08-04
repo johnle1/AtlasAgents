@@ -36,6 +36,7 @@ import {
 } from "../agent/agentHelpers.js";
 import { exploreCodebase } from "../exploreCodebase.js";
 import { deriveSubagentPlans } from "../planHelpers.js";
+import { createThinkFrameEmitter } from "../thinkStream.js";
 import { AbortError, OrchestrationError } from "../../errors/index.js";
 import {
   available,
@@ -98,7 +99,15 @@ export const preparePlanningContext = async (
   const { contextBuilder, skillManager, sessionManager, config } = deps;
   const { taskText, agentModel, modelOverrides, perConn, emit, signal } = params;
 
-  let contextHeader = await contextBuilder.build(taskText, agentModel);
+  // The provider decides how the budget's context window is sized — `num_ctx`
+  // is Ollama-only, so a non-Ollama role must not be budgeted against it.
+  const agentProvider =
+    modelOverrides?.agentProvider ?? (await config.getAgentProvider());
+  let contextHeader = await contextBuilder.build(
+    taskText,
+    agentModel,
+    agentProvider,
+  );
   // Order matches the original inline code: context build happens before
   // this config read, not the other way around.
   const agentSupportsTools =
@@ -124,7 +133,15 @@ export const preparePlanningContext = async (
     contextHeader = `${contextHeader.trim()}\n\n[Stack hint]\n${stackHint}\n`;
   }
 
-  const selected = await skillManager.selectForTask(taskText);
+  // Reuses ContextBuilder's own language-hint detection rather than a
+  // second parsing path — see IContextBuilder.detectStack. Without this,
+  // detectedStack was never populated by any production caller, so
+  // stack-specific skill selection (SkillMeta.stacks/priority) was dead code.
+  const detectedStack = await contextBuilder.detectStack(taskText);
+  const selected = await skillManager.selectForTask(
+    taskText,
+    detectedStack ? { detectedStack } : undefined,
+  );
   const skillBody = selected
     .map((s, i) => {
       const label = i === 0 ? "Stack skill" : "Domain skill";
@@ -177,6 +194,13 @@ export const runPlanningWithRevisions = async (
   // Bounds revision rounds defensively; each round still requires the user
   // to type feedback, so this guards against pathological loops, not cost.
   const MAX_PLAN_REVISION_ROUNDS = 10;
+  // One emitter reused across revision rounds — `finish()` resets its
+  // internal id/streamed state after every iteration, so each planning
+  // iteration (including across a revision round) gets its own think stream.
+  const agentThinkFrames = createThinkFrameEmitter({
+    emit,
+    agent: true,
+  });
   for (let revisionRound = 0; ; revisionRound += 1) {
     try {
       const plan = await agent.plan(
@@ -185,9 +209,9 @@ export const runPlanningWithRevisions = async (
         skillBody,
         modelOverrides,
         {
-          onThink: (text: string) => {
-            emit({ kind: "think", text, agent: true });
-          },
+          onThinkDelta: (text: string) => agentThinkFrames.delta(text),
+          onThinkEnd: (finalText: string | null) =>
+            agentThinkFrames.finish(finalText),
           reviewPlan: (agentPlan: SubagentPlan) =>
             perConn.planBroker.request({
               task: taskText,
@@ -212,6 +236,7 @@ export const runPlanningWithRevisions = async (
           },
         },
         maxSubagents,
+        signal,
       );
       return { skipped: false, plan };
     } catch (err) {
@@ -230,6 +255,16 @@ export const runPlanningWithRevisions = async (
         continue;
       }
       throw err;
+    } finally {
+      // Safety net for the paths that never reach `plan()`'s own
+      // `onThinkEnd` — an abort mid-stream, an OrchestrationError from an
+      // auxiliary tool call, a provider error. Without it the emitter keeps
+      // this round's `id`/`streamed` state, and the next round's deltas
+      // stream under a stale id the client has already torn down, so the
+      // retried round's reasoning never renders. `finish()` is idempotent
+      // after a streamed close, so this is a no-op on the success path.
+      // `Subagent.runIteration` wraps its own emitter the same way.
+      agentThinkFrames.finish(null);
     }
   }
 };

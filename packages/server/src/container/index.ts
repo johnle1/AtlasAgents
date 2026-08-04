@@ -32,7 +32,7 @@ import { AgentOrchestrator } from "../orchestration/orchestrator/orchestrator.js
 import type { PreferenceRule } from "../orchestration/interfaces.js";
 
 // ===== CONFIGURATION IMPORTS =====
-import { ConfigManager } from "../config/configManager/index.js";
+import { ConfigManager } from "../config/index.js";
 
 // ===== MEMORY AND LEARNING IMPORTS =====
 import { ContextBuilder } from "../memory/context/contextBuilder.js";
@@ -43,6 +43,7 @@ import { SessionManager } from "../memory/session/sessionManager.js";
 
 // ===== OLLAMA CLIENT IMPORTS =====
 import { OllamaClient } from "../ollama/client.js";
+import type { IModelPlacementReporter } from "../ollama/modelPlacement.js";
 
 // ===== PROVIDER REGISTRY IMPORTS =====
 import type { ProviderRegistry } from "../providers/providerRegistry.js";
@@ -242,6 +243,17 @@ export type AppContainer = {
   orchestrator: AgentOrchestrator;
 
   /**
+   * Reports models that spilled out of GPU memory, deduped per connection.
+   *
+   * @remarks
+   * Exposed on the container so connection teardown can call
+   * {@link IModelPlacementReporter.forgetScope}. The reporter is a
+   * process-lifetime singleton keyed by per-connection ids, so without that
+   * call its dedup state grows for the life of the server.
+   */
+  modelPlacementReporter: IModelPlacementReporter;
+
+  /**
    * Map of requester IDs to per-connection resources.
    *
    * @remarks
@@ -386,6 +398,7 @@ export const createContainer = (
     contextBuilder,
     agent,
     orchestrator,
+    modelPlacementReporter,
   } = createServices({
     dataRoot: options.dataRoot,
     ollamaBaseUrl: options.ollamaBaseUrl,
@@ -476,6 +489,7 @@ export const createContainer = (
     // Orchestration
     agent,
     orchestrator,
+    modelPlacementReporter,
 
     // Connection management
     brokerByRequester,

@@ -54,10 +54,13 @@ import {
   parseAllToolCalls,
   recoverFinishFromThink,
   stripMarkdownFencesFromText,
+  THINK_BLOCK,
   TOOL_END,
   TOOL_START,
   type ParsedToolCall,
 } from "../toolProtocol.js";
+import { createThinkFrameEmitter, createThinkTagScanner } from "../thinkStream.js";
+import type { ThinkTagScanner } from "../thinkStream.js";
 import type { TaskFrame } from "../../transport/frames.js";
 import type { TerminalExecutor } from "../../workspace/execution/terminalExecutor.js";
 import type { WorkspaceManager } from "../../workspace/manager/workspaceManager.js";
@@ -275,6 +278,17 @@ export class Subagent {
       config: IConfigManager;
       agent: Agent;
       extraTools?: ToolSchema[];
+      /**
+       * Resolved Ollama runtime context window for this task's subagent
+       * model (see {@link ContextWindowResolver}). Omitted (or the role
+       * isn't on the "ollama" provider) means don't send `num_ctx` at all —
+       * the caller (`orchestratorPipeline.ts`) resolves this once per task,
+       * not per call, since the model tag is fixed for this instance's
+       * lifetime.
+       */
+      numCtx?: number;
+      /** Ollama `keep_alive` duration for this role (see {@link ChatOptions.keepAlive}). */
+      keepAlive?: string | number;
     },
   ) {
     this.toolRegistry = createToolRegistry(
@@ -328,6 +342,7 @@ export class Subagent {
         | "searching"
         | "running"
         | "escalating"
+        | "thinking"
         | "done",
       icon: "◌" | "✓" | "⚠",
       statusMessage: string,
@@ -458,194 +473,224 @@ export class Subagent {
   ): Promise<IterationOutcome> => {
     const { messages, trackers, debug } = context;
 
-    // Fetch one turn from the model (either native tool mode or text-based streaming).
-    const chatResult = await this.fetchModelTurn({
-      model: context.subagentModel,
-      messages,
-      toolSchemas: context.toolSchemas,
-      supportsTools: context.configuredSupportsTools,
-      temperature: context.subagentTemperature,
-      signal: context.signal,
+    // Let the UI show "thinking" while the model call below is in flight —
+    // otherwise the task board goes silent for the whole round trip.
+    context.emitSubagentStatus("thinking", "◌", "Thinking…");
+
+    // Streams this iteration's think block to the UI as it arrives. The
+    // `finally` below guarantees a stream opened by a partial response
+    // before an abort/error still gets a matching close signal — `finish()`
+    // is idempotent, so calling it again after the normal close below is a
+    // no-op.
+    const thinkFrames = createThinkFrameEmitter({
+      emit: context.emit,
+      agent: false,
+      source: context.agentSource,
     });
 
-    // Extract thinking early so we can show it to the user immediately,
-    // before we parse/validate tool calls.
-    const thinkText = extractThinking(chatResult.content);
-    if (thinkText) {
-      const displayThinkText = stripMarkdownFencesFromText(thinkText);
-      context.emit({ kind: "think", text: displayThinkText, agent: false });
-      trackers.lastThinkText = thinkText;
+    try {
+      // Fetch one turn from the model (either native tool mode or text-based streaming).
+      const chatResult = await this.fetchModelTurn({
+        model: context.subagentModel,
+        messages,
+        toolSchemas: context.toolSchemas,
+        supportsTools: context.configuredSupportsTools,
+        temperature: context.subagentTemperature,
+        signal: context.signal,
+        onThinkDelta: (text) => thinkFrames.delta(text),
+      });
 
-      // Enforce command plan structure on the FIRST think block.
-      // The agent must lay out setup, verify, and off-limits commands before
-      // jumping into tool calls. This prevents agents from skipping planning.
-      // Retry at most once; if the agent ignores the hint, proceed anyway.
-      // (The agent *can* ignore hints, but we want to catch missed planning early.)
-      if (!trackers.firstThinkSeen) {
-        trackers.firstThinkSeen = true;
-        if (
-          !hasCommandPlanSection(thinkText) &&
-          !trackers.commandPlanRetryUsed
-        ) {
-          trackers.commandPlanRetryUsed = true;
-          messages.push({
-            role: "assistant",
-            content: chatResult.content,
-          });
-          messages.push({
-            role: "user",
-            content:
-              "Your first think block must include setup commands, verify commands, and off-limits (run-project) sections before any tool call. List commands as plain lines — never wrap them in markdown code fences.",
-          });
-          return { done: false, escalationCount, thinkRetryCount };
+      // Extract thinking early so we can show it to the user immediately,
+      // before we parse/validate tool calls. A model on the native
+      // tool-calling path can put its whole <redacted_thinking> block in the
+      // separate `thinking` field instead of `content` — try content first
+      // (the common case, and what text mode always uses), then fall back to
+      // the reasoning channel so that placement doesn't make a real think
+      // block look absent and trip the "missing thinking" retry below.
+      const thinkText =
+        extractThinking(chatResult.content) ??
+        extractThinking(chatResult.thinking);
+      thinkFrames.finish(
+        thinkText ? stripMarkdownFencesFromText(thinkText) : null,
+      );
+      if (thinkText) {
+        trackers.lastThinkText = thinkText;
+
+        // Enforce command plan structure on the FIRST think block.
+        // The agent must lay out setup, verify, and off-limits commands before
+        // jumping into tool calls. This prevents agents from skipping planning.
+        // Retry at most once; if the agent ignores the hint, proceed anyway.
+        // (The agent *can* ignore hints, but we want to catch missed planning early.)
+        if (!trackers.firstThinkSeen) {
+          trackers.firstThinkSeen = true;
+          if (
+            !hasCommandPlanSection(thinkText) &&
+            !trackers.commandPlanRetryUsed
+          ) {
+            trackers.commandPlanRetryUsed = true;
+            messages.push({
+              role: "assistant",
+              content: chatResult.content,
+            });
+            messages.push({
+              role: "user",
+              content:
+                "Your first think block must include setup commands, verify commands, and off-limits (run-project) sections before any tool call. List commands as plain lines — never wrap them in markdown code fences.",
+            });
+            return { done: false, escalationCount, thinkRetryCount };
+          }
         }
       }
-    }
 
-    let toolCalls = chatResult.toolCalls;
-    let hadMalformedToolBlock = chatResult.hadMalformedToolBlock;
+      let toolCalls = chatResult.toolCalls;
+      let hadMalformedToolBlock = chatResult.hadMalformedToolBlock;
 
-    // RECOVERY: If the model wrote no tool calls but left a summary in the think block,
-    // try to extract a "finish" action from it. Some models naturally write completion
-    // summaries in their reasoning instead of JSON. This recovers that output without
-    // forcing a retry — users see the summary immediately.
-    if (toolCalls.length === 0 && thinkText) {
-      const recoveredFinish = recoverFinishFromThink(thinkText);
-      if (recoveredFinish) {
-        toolCalls = [recoveredFinish];
-        hadMalformedToolBlock = false;
-        agentDebugLog(debug, "recovered finish from think action", {
-          summary: recoveredFinish.args.summary,
-        });
+      // RECOVERY: If the model wrote no tool calls but left a summary in the think block,
+      // try to extract a "finish" action from it. Some models naturally write completion
+      // summaries in their reasoning instead of JSON. This recovers that output without
+      // forcing a retry — users see the summary immediately.
+      if (toolCalls.length === 0 && thinkText) {
+        const recoveredFinish = recoverFinishFromThink(thinkText);
+        if (recoveredFinish) {
+          toolCalls = [recoveredFinish];
+          hadMalformedToolBlock = false;
+          agentDebugLog(debug, "recovered finish from think action", {
+            summary: recoveredFinish.args.summary,
+          });
+        }
       }
-    }
 
-    agentDebugLog(debug, "turn", {
-      iteration,
-      think: Boolean(thinkText),
-      tools: toolCalls.length,
-      native: context.configuredSupportsTools,
-    });
+      agentDebugLog(debug, "turn", {
+        iteration,
+        think: Boolean(thinkText),
+        tools: toolCalls.length,
+        native: context.configuredSupportsTools,
+      });
 
-    // DECISION POINT: Evaluate this turn for retry, escalation, or execution.
-    // The retry handler checks for malformed JSON, missing thinking, no tool calls,
-    // and whether the retry budget is exhausted (if so, escalate).
-    const retryResult = handleAgentRetry(
-      chatResult.content,
-      thinkText,
-      toolCalls.length,
-      hadMalformedToolBlock,
-      thinkRetryCount,
-      context.maxEscalations,
-    );
+      // DECISION POINT: Evaluate this turn for retry, escalation, or execution.
+      // The retry handler checks for malformed JSON, missing thinking, no tool calls,
+      // and whether the retry budget is exhausted (if so, escalate).
+      const retryResult = handleAgentRetry(
+        chatResult.content,
+        thinkText,
+        toolCalls.length,
+        hadMalformedToolBlock,
+        thinkRetryCount,
+        context.maxEscalations,
+      );
 
-    // RETRY/ESCALATION PATH: Agent output was invalid or incomplete.
-    if (retryResult.shouldRetry) {
-      if (retryResult.shouldEscalate) {
-        // Budget exhausted — ask the lead agent for help.
-        // Escalation is synchronous and blocking: the lead agent evaluates the situation,
-        // provides guidance (e.g., "try a different approach", "skip this step"),
-        // and the worker incorporates that feedback and retries.
-        const escalationResult = await this.executeTool(
-          {
-            name: "escalate",
-            args: {
-              reason: retryResult.escalationReason ?? "Unknown reason",
+      // RETRY/ESCALATION PATH: Agent output was invalid or incomplete.
+      if (retryResult.shouldRetry) {
+        if (retryResult.shouldEscalate) {
+          // Budget exhausted — ask the lead agent for help.
+          // Escalation is synchronous and blocking: the lead agent evaluates the situation,
+          // provides guidance (e.g., "try a different approach", "skip this step"),
+          // and the worker incorporates that feedback and retries.
+          const escalationResult = await this.executeTool(
+            {
+              name: "escalate",
+              args: {
+                reason: retryResult.escalationReason ?? "Unknown reason",
+              },
             },
-          },
-          this.buildToolContext(context, escalationCount, thinkText),
-        );
+            this.buildToolContext(context, escalationCount, thinkText),
+          );
 
-        // If the lead agent ran out of escalations too, the task is truly stuck.
-        // Return the failure summary.
-        if (escalationResult.done) {
+          // If the lead agent ran out of escalations too, the task is truly stuck.
+          // Return the failure summary.
+          if (escalationResult.done) {
+            return {
+              done: true,
+              result: {
+                summary: escalationResult.summary,
+                keyFindings: [],
+                filesTouched: [...trackers.filesWrittenThisTask],
+                ok: escalationResult.ok === true,
+              },
+            };
+          }
+
+          // Lead agent provided guidance — append it to history and retry the loop.
+          messages.push({ role: "user", content: escalationResult.feedback });
           return {
-            done: true,
-            result: {
-              summary: escalationResult.summary,
-              keyFindings: [],
-              filesTouched: [...trackers.filesWrittenThisTask],
-              ok: escalationResult.ok === true,
-            },
+            done: false,
+            escalationCount: escalationResult.escalationCount,
+            thinkRetryCount: 0,
           };
         }
 
-        // Lead agent provided guidance — append it to history and retry the loop.
-        messages.push({ role: "user", content: escalationResult.feedback });
+        // Simple retry: append corrective feedback (e.g., "invalid JSON", "missing thinking").
+        // The agent sees the feedback and tries again with the correction in mind.
+        messages.push(...retryResult.updatedMessages);
         return {
           done: false,
-          escalationCount: escalationResult.escalationCount,
-          thinkRetryCount: 0,
+          escalationCount,
+          thinkRetryCount: retryResult.updatedThinkRetryCount,
         };
       }
 
-      // Simple retry: append corrective feedback (e.g., "invalid JSON", "missing thinking").
-      // The agent sees the feedback and tries again with the correction in mind.
-      messages.push(...retryResult.updatedMessages);
+      // EXECUTION PATH: Agent output is valid. Prepare to execute the tool call.
+
+      // GUARD: Only one tool per turn. Models sometimes emit multiple calls by accident;
+      // we reject that. The agent must call one tool, get feedback, and call the next.
+      if (toolCalls.length > 1) {
+        messages.push({ role: "assistant", content: chatResult.content });
+        messages.push({
+          role: "user",
+          content:
+            "You called more than one tool. Call exactly one tool per turn.",
+        });
+        return { done: false, escalationCount, thinkRetryCount };
+      }
+
+      const toolCall = toolCalls[0];
+      if (!toolCall) {
+        return { done: false, escalationCount, thinkRetryCount };
+      }
+
+      // Execute the tool (file read/write, terminal command, MCP call, finish, etc.).
+      // The tool handler returns feedback to append to history and flags (done, escalationCount).
+      const toolResult = await this.executeTool(
+        toolCall,
+        this.buildToolContext(context, escalationCount, thinkText),
+      );
+
+      // Check if execution is complete (finish tool called, or escalation limit reached).
+      // If so, report the final result so run() can return it.
+      if (toolResult.done) {
+        return {
+          done: true,
+          result: {
+            summary: toolResult.summary,
+            keyFindings: toolResult.keyFindings ?? [],
+            filesTouched: [...trackers.filesWrittenThisTask],
+            ok: toolResult.ok !== false,
+          },
+        };
+      }
+
+      // Tool executed successfully. Append the tool call and result to the conversation
+      // history so the model sees what it did and can adjust for the next turn.
+      this.appendToolTurnToHistory(
+        messages,
+        chatResult.content,
+        toolCall,
+        toolResult.feedback,
+        context.configuredSupportsTools,
+      );
+
+      // Reset the retry counter after a successful tool turn.
+      // The counter only tracks thinking/parsing retries; successful execution resets it.
       return {
         done: false,
-        escalationCount,
-        thinkRetryCount: retryResult.updatedThinkRetryCount,
+        escalationCount: toolResult.escalationCount,
+        thinkRetryCount: 0,
       };
+    } finally {
+      // Safety net for abort/error paths that never reached the explicit
+      // finish() above — idempotent, so it's a no-op after a normal close.
+      thinkFrames.finish(null);
     }
-
-    // EXECUTION PATH: Agent output is valid. Prepare to execute the tool call.
-
-    // GUARD: Only one tool per turn. Models sometimes emit multiple calls by accident;
-    // we reject that. The agent must call one tool, get feedback, and call the next.
-    if (toolCalls.length > 1) {
-      messages.push({ role: "assistant", content: chatResult.content });
-      messages.push({
-        role: "user",
-        content:
-          "You called more than one tool. Call exactly one tool per turn.",
-      });
-      return { done: false, escalationCount, thinkRetryCount };
-    }
-
-    const toolCall = toolCalls[0];
-    if (!toolCall) {
-      return { done: false, escalationCount, thinkRetryCount };
-    }
-
-    // Execute the tool (file read/write, terminal command, MCP call, finish, etc.).
-    // The tool handler returns feedback to append to history and flags (done, escalationCount).
-    const toolResult = await this.executeTool(
-      toolCall,
-      this.buildToolContext(context, escalationCount, thinkText),
-    );
-
-    // Check if execution is complete (finish tool called, or escalation limit reached).
-    // If so, report the final result so run() can return it.
-    if (toolResult.done) {
-      return {
-        done: true,
-        result: {
-          summary: toolResult.summary,
-          keyFindings: toolResult.keyFindings ?? [],
-          filesTouched: [...trackers.filesWrittenThisTask],
-          ok: toolResult.ok !== false,
-        },
-      };
-    }
-
-    // Tool executed successfully. Append the tool call and result to the conversation
-    // history so the model sees what it did and can adjust for the next turn.
-    this.appendToolTurnToHistory(
-      messages,
-      chatResult.content,
-      toolCall,
-      toolResult.feedback,
-      context.configuredSupportsTools,
-    );
-
-    // Reset the retry counter after a successful tool turn.
-    // The counter only tracks thinking/parsing retries; successful execution resets it.
-    return {
-      done: false,
-      escalationCount: toolResult.escalationCount,
-      thinkRetryCount: 0,
-    };
   };
 
   /**
@@ -705,6 +750,14 @@ export class Subagent {
    *   text-based fallback.
    * @param options.temperature - Sampling temperature (0 = deterministic, 1+ = creative).
    * @param options.signal - Cancellation signal.
+   * @param options.onThinkDelta - Optional callback invoked with each
+   *   newly-available slice of `<redacted_thinking>` inner text as the model
+   *   streams its response. Fed from whichever channel actually carries
+   *   thinking on each path — the native path's separate reasoning channel
+   *   as well as its content channel (a model may put the tagged block in
+   *   either), and the text-mode path's single content stream — through one
+   *   scanner, so the tag is recognized wherever it appears without ever
+   *   being scanned twice.
    * @returns The model's full text response, extracted tool calls, and malformation flag.
    * @throws {@link AbortError} if the orchestrator cancels the stream.
    */
@@ -715,9 +768,50 @@ export class Subagent {
     supportsTools: boolean;
     temperature: number;
     signal: AbortSignal;
+    onThinkDelta?: (text: string) => void;
   }): Promise<ChatResult> => {
-    const { model, messages, toolSchemas, supportsTools, temperature, signal } =
-      options;
+    const {
+      model,
+      messages,
+      toolSchemas,
+      supportsTools,
+      temperature,
+      signal,
+      onThinkDelta,
+    } = options;
+
+    // Only scan for incremental think text when someone is listening — skips
+    // the scan entirely for callers that only want the final block.
+    //
+    // One scanner per provider channel, never one shared between them —
+    // `chatWithTools` drives the content channel (`onToken`) and the native
+    // reasoning channel (`onThinkToken`) independently and interleaved, so a
+    // single shared scanner could have a tag split across channels (dropping
+    // the block) or emit raw untagged reasoning verbatim. See the same
+    // treatment in `Agent.plan`.
+    const makeScanner = (): ThinkTagScanner | null =>
+      onThinkDelta ? createThinkTagScanner([THINK_BLOCK]) : null;
+    const contentThinkScanner = makeScanner();
+    const reasoningThinkScanner = makeScanner();
+    const pushThinkFrom =
+      (scanner: ThinkTagScanner | null) =>
+      (piece: string): void => {
+        const delta = scanner?.push(piece) ?? "";
+        if (delta.length > 0) {
+          onThinkDelta?.(delta);
+        }
+      };
+    const pushThink = pushThinkFrom(contentThinkScanner);
+    // Flushes both channels' scanners; at most one ever holds an
+    // unterminated block.
+    const flushThinkScanners = (): void => {
+      for (const scanner of [contentThinkScanner, reasoningThinkScanner]) {
+        const flushed = scanner?.flush() ?? "";
+        if (flushed.length > 0) {
+          onThinkDelta?.(flushed);
+        }
+      }
+    };
 
     if (supportsTools) {
       // Native tool calling: Ollama returns structured tool calls + content.
@@ -730,10 +824,19 @@ export class Subagent {
         model,
         messages,
         toolSchemas,
-        { temperature, signal },
+        {
+          temperature,
+          signal,
+          numCtx: this.dependencies.numCtx,
+          keepAlive: this.dependencies.keepAlive,
+          onThinkToken: pushThinkFrom(reasoningThinkScanner),
+        },
+        pushThink,
       );
+      flushThinkScanners();
       return {
         content: result.content,
+        thinking: result.thinking,
         toolCalls: result.toolCalls.map((call) => ({
           name: call.name,
           args: call.args,
@@ -746,22 +849,41 @@ export class Subagent {
     // Tool calls are embedded in the text as <<TOOL>>{JSON}<<END>> blocks.
     // The model may emit malformed JSON, missing markers, etc.; parseAllToolCalls
     // detects these issues so retry logic can handle them.
+    // `includeThinking` is deliberately left unset here — setting it would
+    // change Ollama's `think` request field and could alter the model's
+    // output shape. Thinking already arrives inline in this content stream
+    // when the model uses the `redacted_thinking` tag, so the scanner reads
+    // it directly from `token` instead.
     let assistantResponseText = "";
     for await (const token of this.dependencies.ollama.chatStream(
       model,
       messages,
-      { temperature, signal },
+      {
+        temperature,
+        signal,
+        numCtx: this.dependencies.numCtx,
+        keepAlive: this.dependencies.keepAlive,
+      },
     )) {
       if (signal.aborted) {
         throw new AbortError("Agent stream aborted");
       }
       assistantResponseText += token;
+      pushThink(token);
     }
+    flushThinkScanners();
 
     // Parse all tool calls from the accumulated text and flag any malformation.
     const { calls: toolCalls, hadMalformedBlock: hadMalformedToolBlock } =
       parseAllToolCalls(assistantResponseText, this.toolRegistry);
-    return { content: assistantResponseText, toolCalls, hadMalformedToolBlock };
+    // No separate reasoning channel in text mode — thinking already arrived
+    // inline in assistantResponseText (see the includeThinking comment above).
+    return {
+      content: assistantResponseText,
+      thinking: "",
+      toolCalls,
+      hadMalformedToolBlock,
+    };
   };
 
   /**

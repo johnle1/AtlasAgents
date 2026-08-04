@@ -98,68 +98,87 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
     onComplete(config);
   };
 
+  const stepOrder: Step[] = ["server", "port", "password"];
+  const currentIndex = stepOrder.indexOf(step);
+  const resolvedServerAddress = serverAddress.trim() || "localhost";
+  const resolvedPort = portInput.trim() || "7000";
+
   return (
     <Box flexDirection="column" paddingY={1}>
       <Text bold>Welcome to LoopyCode</Text>
       <Text dimColor>First-time setup — connect to your LoopyCode server.</Text>
       <Box marginTop={1} flexDirection="column">
-        {step === "server" && (
-          <>
-            <Text>Enter server address (default localhost):</Text>
+        <Box>
+          <Text>Server address: </Text>
+          {step === "server" ? (
             <TextInput
               value={serverAddress}
               onChange={setServerAddress}
+              placeholder="localhost"
               onSubmit={() => setStep("port")}
             />
-          </>
+          ) : (
+            <Text>{resolvedServerAddress}</Text>
+          )}
+        </Box>
+
+        {currentIndex >= 1 && (
+          <Box flexDirection="column">
+            <Box>
+              <Text>Port: </Text>
+              {step === "port" ? (
+                <TextInput
+                  value={portInput}
+                  onChange={(inputValue) => {
+                    setPortInput(inputValue);
+                    setPortError(null);
+                  }}
+                  placeholder="7000"
+                  onSubmit={(inputValue) => {
+                    const trimmedInput = inputValue.trim();
+
+                    // Empty input accepts the default port and advances
+                    if (trimmedInput.length === 0) {
+                      setStep("password");
+                      return;
+                    }
+
+                    const parsedPort = parseInt(trimmedInput, 10);
+
+                    if (
+                      Number.isNaN(parsedPort) ||
+                      parsedPort < 1 ||
+                      parsedPort > 65_535
+                    ) {
+                      setPortError(
+                        "Port must be an integer between 1 and 65535.",
+                      );
+                      return;
+                    }
+
+                    setStep("password");
+                  }}
+                />
+              ) : (
+                <Text>{resolvedPort}</Text>
+              )}
+            </Box>
+            {step === "port" && portError && (
+              <Text color="red">{portError}</Text>
+            )}
+          </Box>
         )}
 
-        {step === "port" && (
-          <>
-            <Text>Enter port (default 7000):</Text>
-            {portError && <Text color="red">{portError}</Text>}
-            <TextInput
-              value={portInput}
-              onChange={(inputValue) => {
-                setPortInput(inputValue);
-                setPortError(null);
-              }}
-              onSubmit={(inputValue) => {
-                const trimmedInput = inputValue.trim();
-
-                // Empty input accepts the default port and advances
-                if (trimmedInput.length === 0) {
-                  setStep("password");
-                  return;
-                }
-
-                const parsedPort = parseInt(trimmedInput, 10);
-
-                if (
-                  Number.isNaN(parsedPort) ||
-                  parsedPort < 1 ||
-                  parsedPort > 65_535
-                ) {
-                  setPortError("Port must be an integer between 1 and 65535.");
-                  return;
-                }
-
-                setStep("password");
-              }}
-            />
-          </>
-        )}
-
-        {step === "password" && (
-          <>
-            <Text>Enter password:</Text>
+        {currentIndex >= 2 && (
+          <Box>
+            <Text>Password: </Text>
             <TextInput
               value={password}
               onChange={setPassword}
               mask="*"
               onSubmit={(passwordValue) => finish(passwordValue)}
             />
-          </>
+          </Box>
         )}
       </Box>
     </Box>

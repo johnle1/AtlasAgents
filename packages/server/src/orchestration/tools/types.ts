@@ -70,6 +70,7 @@ export type ToolHandlerContext = {
       | "searching"
       | "running"
       | "escalating"
+      | "thinking"
       | "done",
     icon: "◌" | "✓" | "⚠",
     message: string,

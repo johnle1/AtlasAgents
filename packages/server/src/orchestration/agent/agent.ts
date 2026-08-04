@@ -19,8 +19,13 @@
  */
 
 import { TaskSkippedError, PlanRevisionRequestedError } from "./agentErrors.js";
-import { ValidationError, OrchestrationError } from "../../errors/index.js";
 import {
+  AbortError,
+  ValidationError,
+  OrchestrationError,
+} from "../../errors/index.js";
+import {
+  AGENT_THINK_TAG,
   buildAgentThinkInstruction,
   buildPlanFromLines,
   extractAgentThink,
@@ -31,6 +36,8 @@ import {
   parseRisks,
   parseVerifyGaps,
 } from "./agentThink.js";
+import { createThinkTagScanner } from "../thinkStream.js";
+import type { ThinkTagScanner } from "../thinkStream.js";
 import type { MaxSubagentsParam } from "../maxSubagents.js";
 import {
   applyMaxAgentsConstraint,
@@ -780,8 +787,35 @@ export class Agent {
       ollama: IOllamaClient;
       /** Config manager providing model names and temperatures. */
       config: IConfigManager;
+      /**
+       * Resolved Ollama runtime context window for this task's agent model
+       * (see {@link ContextWindowResolver}). Omitted (or the role isn't on
+       * the "ollama" provider) means don't send `num_ctx` at all — the
+       * caller (`orchestratorPipeline.ts`) resolves this once per task, not
+       * per call, since the model tag is fixed for this instance's lifetime.
+       */
+      numCtx?: number;
+      /** Ollama `keep_alive` duration for this role (see {@link ChatOptions.keepAlive}). */
+      keepAlive?: string | number;
     },
   ) {}
+
+  /**
+   * Runtime-tuning fields (`num_ctx`, `keep_alive`) shared by every model
+   * call this instance makes.
+   *
+   * @remarks
+   * Spread into each `ChatOptions` object alongside `temperature`. Both
+   * fields are optional on `ChatOptions` and ignored by non-Ollama
+   * providers, so this is safe to spread unconditionally even when unset.
+   */
+  private runtimeChatOptions = (): {
+    numCtx?: number;
+    keepAlive?: string | number;
+  } => ({
+    numCtx: this.dependencies.numCtx,
+    keepAlive: this.dependencies.keepAlive,
+  });
 
   /**
    * Produces a validated Directed Acyclic Graph (DAG) of subtasks from an Ollama planning call.
@@ -830,6 +864,7 @@ export class Agent {
     overrides?: TaskModelOverrides,
     hooks?: SubagentPlanHooks,
     maxSubagents: MaxSubagentsParam = 3,
+    signal?: AbortSignal,
   ): Promise<SubagentPlan> => {
     // Step 1: Read agent model and temperature from IConfigManager
     const { agentModel, agentTemperature, configuredSupportsTools } =
@@ -864,6 +899,9 @@ export class Agent {
       iteration < MAX_AGENT_TOTAL_ITERATIONS;
       iteration += 1
     ) {
+      if (signal?.aborted) {
+        throw new AbortError("Agent planning aborted");
+      }
       const planningTools = buildPlanningTools(
         configuredSupportsTools,
         hooks,
@@ -876,12 +914,45 @@ export class Agent {
       let searchCall: ParsedToolCall | undefined;
       let planCall: ParsedToolCall | undefined;
 
+      // Only scan for incremental think text when someone is listening —
+      // skips the scan entirely for callers that only want the final block.
+      //
+      // One scanner per provider channel, never one shared between them.
+      // `chatWithTools` drives the content channel (`onToken`) and the native
+      // reasoning channel (`onThinkToken`) independently, interleaved per
+      // chunk — feeding both into a single scanner would let a reasoning
+      // token land inside a half-received `<agent-think>` tag (dropping the
+      // whole block), and would emit raw untagged chain-of-thought verbatim
+      // once the scanner was inside a block. Two scanners keep the
+      // reasoning-channel fallback working for models that tag their output
+      // there, while untagged reasoning correctly produces nothing.
+      const makeScanner = (): ThinkTagScanner | null =>
+        hooks?.onThinkDelta ? createThinkTagScanner([AGENT_THINK_TAG]) : null;
+      const contentThinkScanner = makeScanner();
+      const reasoningThinkScanner = makeScanner();
+      const pushThinkFrom =
+        (scanner: ThinkTagScanner | null) =>
+        (piece: string): void => {
+          const delta = scanner?.push(piece) ?? "";
+          if (delta.length > 0) {
+            hooks?.onThinkDelta?.(delta);
+          }
+        };
+      const pushThink = pushThinkFrom(contentThinkScanner);
+
       if (configuredSupportsTools) {
         const agentResult = await this.dependencies.ollama.chatWithTools(
           agentModel,
           messages,
           planningTools,
-          { temperature: agentTemperature, includeThinking: true },
+          {
+            temperature: agentTemperature,
+            includeThinking: true,
+            signal,
+            onThinkToken: pushThinkFrom(reasoningThinkScanner),
+            ...this.runtimeChatOptions(),
+          },
+          pushThink,
         );
         rawResponse = agentResult.content || agentResult.thinking;
         planCall = agentResult.toolCalls.find(
@@ -894,14 +965,39 @@ export class Agent {
           isAgentSearchToolName(toolCall.name),
         );
       } else {
+        // Text-mode already carries thinking in-band in the yielded stream
+        // (via includeThinking), so it's scanned here directly rather than
+        // also wiring onThinkToken — that would double-feed the scanner.
         for await (const token of this.dependencies.ollama.chatStream(
           agentModel,
           messages,
-          { temperature: agentTemperature, includeThinking: true },
+          {
+            temperature: agentTemperature,
+            includeThinking: true,
+            signal,
+            ...this.runtimeChatOptions(),
+          },
         )) {
+          if (signal?.aborted) {
+            throw new AbortError("Agent planning stream aborted");
+          }
           rawResponse += token;
+          pushThink(token);
         }
       }
+
+      // Close out the think stream for this turn before any code path below
+      // can `continue` to the next iteration — otherwise a live block could
+      // be left open with no matching end signal. Both channels' scanners are
+      // flushed; at most one of them ever holds an unterminated block.
+      for (const scanner of [contentThinkScanner, reasoningThinkScanner]) {
+        const flushedThink = scanner?.flush() ?? "";
+        if (flushedThink.length > 0) {
+          hooks?.onThinkDelta?.(flushedThink);
+        }
+      }
+      const thinkText = extractAgentThink(rawResponse);
+      hooks?.onThinkEnd?.(thinkText);
 
       const auxOutcome = await handleAuxiliaryToolCall(
         messages,
@@ -920,7 +1016,6 @@ export class Agent {
       }
 
       // Step 5: Parse think block from the response
-      const thinkText = extractAgentThink(rawResponse);
       const thinkTextForPlan = extractThinkTextForPlan(rawResponse);
       if (thinkText) {
         lastRiskList = parseRisks(thinkText);
@@ -1051,6 +1146,7 @@ export class Agent {
     // Blocking: the agent waits on this before appending guidance and retrying chatStream
     return this.dependencies.ollama.chat(agentModel, agentMessages, {
       temperature: agentTemperature,
+      ...this.runtimeChatOptions(),
     });
   };
 
@@ -1105,6 +1201,7 @@ export class Agent {
       agentMessages,
       {
         temperature: agentTemperature,
+        ...this.runtimeChatOptions(),
       },
     )) {
       yield token;

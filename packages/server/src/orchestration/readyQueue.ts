@@ -30,8 +30,19 @@ import type {
  * The queue enables parallel execution while respecting dependency ordering.
  */
 export interface ReadyQueue {
-  // Tasks waiting for dependencies to be satisfied; workers pull from this
-  pending: Map<number, PlannedSubtask>;
+  // Tasks waiting for dependencies to be satisfied, tracked by ID only.
+  // Object lookups go through `allById`, not this set.
+  pending: Set<number>;
+
+  // Canonical id -> subtask lookup, built once at creation. Every id in
+  // `pending`/`ready` is guaranteed present here.
+  allById: Map<number, PlannedSubtask>;
+
+  // Subset of `pending` whose dependencies are all satisfied, i.e. what
+  // available() would return. Maintained incrementally by take() (removes)
+  // and complete() (adds newly-unblocked dependents) so available() never
+  // has to rescan all of `pending` — only this typically-small ready subset.
+  ready: Map<number, PlannedSubtask>;
 
   // Tasks currently executing; prevents duplicate assignment to multiple workers
   running: Set<number>;
@@ -151,11 +162,12 @@ const computeCriticalPathLengths = (
  *
  * @remarks
  * Initializes the queue with all subtasks in the pending state, and empty running
- * and completed sets. Also builds the reverse dependency index and precomputes
- * critical path lengths once up front, so `available()` and `complete()` stay
- * fast (avoiding O(n) / O(n^2) work per call) even for large plans. The queue
- * is ready for execution with all tasks waiting for their dependencies to be
- * satisfied.
+ * and completed sets. Also builds the reverse dependency index, precomputes
+ * critical path lengths, and seeds the incremental `ready` subset (every
+ * subtask with no dependencies) once up front, so `available()`, `take()`,
+ * and `complete()` stay fast (avoiding O(n) / O(n^2) work per call) even for
+ * large plans. The queue is ready for execution with all tasks waiting for
+ * their dependencies to be satisfied.
  *
  * @param subtasks - List of planned subtasks to queue
  *
@@ -163,9 +175,19 @@ const computeCriticalPathLengths = (
  */
 export const createReadyQueue = (subtasks: PlannedSubtask[]): ReadyQueue => {
   const dependents = buildDependentsIndex(subtasks);
+  const allById = new Map(subtasks.map((subtask) => [subtask.id, subtask]));
+
+  const ready = new Map<number, PlannedSubtask>();
+  for (const subtask of subtasks) {
+    if (subtask.dependsOn.length === 0) {
+      ready.set(subtask.id, subtask);
+    }
+  }
 
   return {
-    pending: new Map(subtasks.map((subtask) => [subtask.id, subtask])),
+    pending: new Set(subtasks.map((subtask) => subtask.id)),
+    allById,
+    ready,
     running: new Set(),
     completed: new Map(),
     failed: new Map(),
@@ -178,48 +200,37 @@ export const createReadyQueue = (subtasks: PlannedSubtask[]): ReadyQueue => {
  * Returns list of subtasks that are ready to execute (all dependencies met).
  *
  * @remarks
- * Iterates through all pending subtasks and collects those whose dependencies are
- * all completed. Sorts by critical path length (longest first) to prioritize tasks
- * that would block the most downstream work, then by ID for consistent ordering.
- * Critical path lengths are read from the queue's precomputed cache (built once
- * in {@link createReadyQueue}) rather than recalculated here, so this stays
- * O(k log k) in the ready-set size k even for plans with thousands of tasks.
+ * Reads directly from the queue's incrementally-maintained `ready` subset
+ * (kept in sync by {@link take} and {@link complete}) rather than rescanning
+ * every pending task, so this is O(r log r) in the ready-set size r —
+ * typically bounded by DAG width — instead of O(p) in the (often much
+ * larger, only-shrinking-slowly) pending count p. Sorts by critical path
+ * length (longest first) to prioritize tasks that would block the most
+ * downstream work, then by ID for consistent ordering. Critical path lengths
+ * are read from the queue's precomputed cache (built once in
+ * {@link createReadyQueue}) rather than recalculated here.
  *
  * @param queue - The current queue state
  *
  * @returns Array of ready subtasks sorted by priority
  */
-export const available = (queue: ReadyQueue): PlannedSubtask[] => {
-  const readySubtasks: PlannedSubtask[] = [];
-
-  // Collect all pending tasks whose dependencies are all complete
-  for (const pendingSubtask of queue.pending.values()) {
-    const allDependenciesDone = pendingSubtask.dependsOn.every((dependencyId) =>
-      queue.completed.has(dependencyId),
-    );
-    if (allDependenciesDone) {
-      readySubtasks.push(pendingSubtask);
-    }
-  }
-
-  // Sort by critical path (longest first) to prioritize bottleneck tasks
-  // This scheduling strategy minimizes makespan by unblocking dependent work early
-  return readySubtasks.sort((taskA, taskB) => {
+export const available = (queue: ReadyQueue): PlannedSubtask[] =>
+  [...queue.ready.values()].sort((taskA, taskB) => {
     const pathDifference =
       (queue.criticalPathLengths.get(taskB.id) ?? 1) -
       (queue.criticalPathLengths.get(taskA.id) ?? 1);
     // Tiebreaker: sort by ID for stable ordering
     return pathDifference !== 0 ? pathDifference : taskA.id - taskB.id;
   });
-};
 
 /**
  * Moves a subtask from pending to running state.
  *
  * @remarks
- * Atomically claims a subtask for execution by removing it from pending and adding
- * it to running. Returns false if the subtask is not in pending (may have been taken
- * by another worker). Used by worker threads to claim available work.
+ * Atomically claims a subtask for execution by removing it from pending
+ * (and the `ready` subset) and adding it to running. Returns false if the
+ * subtask is not in pending (may have been taken by another worker). Used
+ * by worker threads to claim available work.
  *
  * @param queue - The current queue state
  * @param subtaskId - The ID of the subtask to take
@@ -232,6 +243,7 @@ export const take = (queue: ReadyQueue, subtaskId: number): boolean => {
   }
 
   queue.pending.delete(subtaskId);
+  queue.ready.delete(subtaskId);
   queue.running.add(subtaskId);
 
   return true;
@@ -246,8 +258,14 @@ export const take = (queue: ReadyQueue, subtaskId: number): boolean => {
  * dependency index, {@link buildDependentsIndex}) for any that now have all
  * dependencies satisfied. This is O(k) in the number of direct dependents k,
  * instead of scanning every pending task, O(n) — the difference matters once
- * a plan has hundreds to thousands of subtasks. Returns the list of newly
- * ready tasks for workers to claim.
+ * a plan has hundreds to thousands of subtasks. Newly-ready dependents are
+ * also added to the queue's `ready` subset (so {@link available} can read
+ * them without a rescan) and returned for workers to claim.
+ *
+ * Assumes {@link take} was already called for `subtaskId` (true of all
+ * production usage in the worker pool) — this is what keeps `subtaskId`
+ * out of `ready` on completion; calling `complete()` without a prior `take()`
+ * leaves the completed id lingering in `pending`/`ready` and is unsupported.
  *
  * @param queue - The current queue state
  * @param subtaskId - The ID of the subtask that completed
@@ -288,6 +306,7 @@ export const complete = (
     );
     if (allDependenciesDone) {
       newlyReadySubtasks.push(dependent);
+      queue.ready.set(dependent.id, dependent);
     }
   }
 
@@ -340,7 +359,11 @@ export type QueueSnapshotItem = {
  * @returns Array of snapshot items for pending tasks
  */
 export const buildQueueSnapshot = (queue: ReadyQueue): QueueSnapshotItem[] =>
-  [...queue.pending.values()]
+  [...queue.pending]
+    // `pending` tracks ids only; every id it holds was seeded from `allById`
+    // in createReadyQueue and is never removed from allById, so this lookup
+    // cannot miss.
+    .map((subtaskId) => queue.allById.get(subtaskId)!)
     .sort((taskA, taskB) => taskA.id - taskB.id)
     .map((subtask) => ({
       id: subtask.id,
@@ -462,9 +485,15 @@ export class WorkSignal {
  * Calculates the maximum width of the execution DAG (maximum parallel tasks at any point).
  *
  * @remarks
- * Simulates topological wave execution to determine the maximum number of tasks
- * that can run in parallel at any point in the execution. This is used to determine
- * the optimal worker count for a given plan.
+ * Simulates topological wave execution via Kahn's algorithm (indegree counters)
+ * to determine the maximum number of tasks that can run in parallel at any
+ * point in the execution. This is used to determine the optimal worker count
+ * for a given plan.
+ *
+ * Runs in O(n + e) (n = subtasks, e = total dependsOn edges) by decrementing
+ * indegree counts as each wave completes, rather than rescanning every
+ * remaining subtask on every wave — the naive approach is O(n^2) on a linear
+ * dependency chain (n waves, each rescanning up to n remaining subtasks).
  *
  * @param subtasks - All planned subtasks in the plan
  *
@@ -475,41 +504,34 @@ export const maxDagWidth = (subtasks: PlannedSubtask[]): number => {
     return 0;
   }
 
-  const pendingSubtasks = new Map(
-    subtasks.map((subtask) => [subtask.id, subtask]),
+  const dependents = buildDependentsIndex(subtasks);
+  const indegree = new Map<number, number>(
+    subtasks.map((subtask) => [subtask.id, subtask.dependsOn.length]),
   );
-  const completedSubtaskIds = new Set<number>();
+
+  // Wave 0: every subtask with no unmet dependencies
+  let currentWave = subtasks.filter(
+    (subtask) => (indegree.get(subtask.id) ?? 0) === 0,
+  );
   let maxWidth = 0;
 
-  // Simulate topological wave execution to find the widest parallel layer
-  // Wave N contains all tasks whose dependencies were satisfied in wave N-1
-  while (pendingSubtasks.size > 0) {
-    const currentWave: PlannedSubtask[] = [];
-
-    // Find all tasks ready to execute in this wave
-    for (const subtask of pendingSubtasks.values()) {
-      if (
-        subtask.dependsOn.every((dependencyId) =>
-          completedSubtaskIds.has(dependencyId),
-        )
-      ) {
-        currentWave.push(subtask);
-      }
-    }
-
-    // If no tasks ready, we have a cycle or isolated disconnected component
-    if (currentWave.length === 0) {
-      break;
-    }
-
-    // Track the maximum parallel width seen
+  // Simulate topological wave execution to find the widest parallel layer.
+  // Each subtask is visited exactly once as a wave member, and each edge is
+  // relaxed exactly once when its source subtask's wave is processed.
+  while (currentWave.length > 0) {
     maxWidth = Math.max(maxWidth, currentWave.length);
 
-    // Mark wave tasks as "completed" and move to next wave
+    const nextWave: PlannedSubtask[] = [];
     for (const subtask of currentWave) {
-      completedSubtaskIds.add(subtask.id);
-      pendingSubtasks.delete(subtask.id);
+      for (const dependent of dependents.get(subtask.id) ?? []) {
+        const remaining = (indegree.get(dependent.id) ?? 0) - 1;
+        indegree.set(dependent.id, remaining);
+        if (remaining === 0) {
+          nextWave.push(dependent);
+        }
+      }
     }
+    currentWave = nextWave;
   }
 
   return maxWidth;

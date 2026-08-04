@@ -151,6 +151,8 @@ deploy.sh
 .deploy-staging/
 .DS_Store
 Deploy/
+# TokenSave (gitignore matching is case-sensitive on every platform)
+.tokensave/
 # AI Assistant
 .claude/
 .cursor/

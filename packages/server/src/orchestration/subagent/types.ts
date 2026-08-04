@@ -104,6 +104,20 @@ export type ChatResult = {
   /** Full text content from the model (includes thinking, narrative, tool calls). */
   content: string;
 
+  /**
+   * Reasoning from the model's native thinking channel (Ollama
+   * `message.thinking`), separate from `content`. Empty for the text-mode
+   * path, where thinking already arrives inline in `content` instead.
+   *
+   * @remarks
+   * A model on the native tool-calling path can put its whole
+   * `<redacted_thinking>` block here rather than in `content` — callers
+   * that only extract thinking from `content` will find nothing even though
+   * the model reasoned. `runIteration` falls back to this field for exactly
+   * that case.
+   */
+  thinking: string;
+
   /** Extracted tool calls from the response (may be empty). */
   toolCalls: any[]; // ParsedToolCall[] — imported at usage to avoid circular deps
 

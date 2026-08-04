@@ -11,12 +11,18 @@
     "test:system": "vitest run system",
     "test:e2e": "npm run build --prefix ../packages/client && vitest run system",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "report:untested": "node scripts/findUntestedExports.mjs"
   },
   "devDependencies": {
-    "vitest": "^2.0.0",
     "@vitest/coverage-v8": "^2.0.0",
     "execa": "^9.0.0",
-    "strip-ansi": "^7.1.1"
+    "ink": "^5.1.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "ink-testing-library": "^4.0.0",
+    "react": "^18.3.1",
+    "strip-ansi": "^7.1.1",
+    "vitest": "^2.0.0"
   }
 }

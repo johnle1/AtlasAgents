@@ -81,9 +81,11 @@ export const runOrchestratorPipeline = async (
     agent: _unused,
     providerRegistry,
     config,
+    modelPlacementReporter,
   } = deps;
 
   const {
+    session,
     taskText,
     emit,
     signal,
@@ -106,24 +108,6 @@ export const runOrchestratorPipeline = async (
     error: "not started",
   };
 
-  const agent = new Agent({
-    ollama: providerRegistry.getRoleClient(
-      "agent",
-      modelOverrides?.agentProvider,
-    ),
-    config,
-  });
-
-  const subagent = new Subagent({
-    ollama: providerRegistry.getRoleClient(
-      "subagent",
-      modelOverrides?.subagentProvider,
-    ),
-    config,
-    agent: agent,
-    extraTools: perConn?.tokenSaveTools,
-  });
-
   const emitToken = (text: string): void => {
     if (text.length > 0) {
       emit({ kind: "token", text });
@@ -139,6 +123,11 @@ export const runOrchestratorPipeline = async (
   let phase = "init";
   let agentModel = "";
   let subagentModel = "";
+  // Joined in the `finally` block below so any warning the fire-and-forget
+  // placement check wants to emit is guaranteed to happen before this
+  // function returns and the caller closes the stream — see where it's
+  // assigned for why a plain fire-and-forget wasn't safe.
+  let modelPlacementPromise: Promise<void> = Promise.resolve();
   let primaryError: unknown;
 
   try {
@@ -154,6 +143,49 @@ export const runOrchestratorPipeline = async (
     const serverSubagent = await config.getSubagentModel();
     agentModel = modelOverrides?.agentModel?.trim() || serverAgent;
     subagentModel = modelOverrides?.subagentModel?.trim() || serverSubagent;
+
+    // Resolve num_ctx/keep_alive once per task, up front — Agent/Subagent are
+    // constructed fresh per task with a fixed model tag for their lifetime,
+    // so this doesn't need to happen per model call. Only queries Ollama
+    // (via contextBuilder.resolveNumCtx, cached per tag) when the role is
+    // actually on the "ollama" provider — an OpenAI-compatible role has no
+    // num_ctx concept and skipping the check avoids a pointless local
+    // /api/show round-trip.
+    const agentProviderName =
+      modelOverrides?.agentProvider ?? (await config.getAgentProvider());
+    const subagentProviderName =
+      modelOverrides?.subagentProvider ?? (await config.getSubagentProvider());
+    const agentNumCtx =
+      agentProviderName === "ollama"
+        ? await contextBuilder.resolveNumCtx(agentModel)
+        : undefined;
+    const subagentNumCtx =
+      subagentProviderName === "ollama"
+        ? await contextBuilder.resolveNumCtx(subagentModel)
+        : undefined;
+    const keepAlive = await config.getKeepAlive();
+
+    const agent = new Agent({
+      ollama: providerRegistry.getRoleClient(
+        "agent",
+        modelOverrides?.agentProvider,
+      ),
+      config,
+      numCtx: agentNumCtx,
+      keepAlive,
+    });
+
+    const subagent = new Subagent({
+      ollama: providerRegistry.getRoleClient(
+        "subagent",
+        modelOverrides?.subagentProvider,
+      ),
+      config,
+      agent: agent,
+      extraTools: perConn?.tokenSaveTools,
+      numCtx: subagentNumCtx,
+      keepAlive,
+    });
 
     await experienceRecorder.start(taskId, taskText);
 
@@ -212,6 +244,38 @@ export const runOrchestratorPipeline = async (
       icon: "✓",
       message: `Plan ready · ${plan.agentCount} group${plan.agentCount === 1 ? "" : "s"} · ${plan.execution}`,
     });
+
+    // Backgrounded GPU/CPU placement check — started here rather than
+    // awaited so it never adds latency to the pool phase below, but joined
+    // in the `finally` block rather than left fully fire-and-forget. The
+    // agent model has provably finished inference by this point (models
+    // load lazily, so checking any earlier would find /api/ps empty), and
+    // the pool phase runs for seconds afterward, so in the common case this
+    // ~5ms call has already settled by the time the join happens and adds
+    // no wait at all. But "the pool phase takes seconds" is a timing
+    // assumption, not a guarantee — a single-subtask plan against a fast
+    // local model, or a slow /api/ps round-trip, could still have this
+    // resolve after the pool phase finishes. Without the join, that
+    // `.then()` could fire its `emit({kind:"warning"})` after this
+    // function had already returned and the caller closed the stream —
+    // calling `onNext` after `onComplete` on the underlying RSocket
+    // responder, which the protocol doesn't allow.
+    if (modelPlacementReporter) {
+      const placementTargets = [
+        ...(agentProviderName === "ollama" ? [agentModel] : []),
+        ...(subagentProviderName === "ollama" ? [subagentModel] : []),
+      ];
+      if (placementTargets.length > 0) {
+        modelPlacementPromise = modelPlacementReporter
+          .reportPlacement(placementTargets, session.requesterId)
+          .then((messages) => {
+            if (!signal.aborted) {
+              messages.forEach((message) => emit({ kind: "warning", message }));
+            }
+          })
+          .catch(() => {});
+      }
+    }
 
     phase = "agent.pool";
     const ordered = await runAgentPool(subagent, {
@@ -285,6 +349,12 @@ export const runOrchestratorPipeline = async (
         "experienceRecorder.finish failed",
       );
     }
+    // Join the backgrounded placement check (see where it's assigned) so
+    // any warning it emits happens before this function returns and the
+    // caller closes the stream, not after. Already-settled in the common
+    // case, so this adds no wait; its own .catch(() => {}) means it never
+    // rejects.
+    await modelPlacementPromise;
   }
 
   // Rethrow after experience recording is complete — ensures audit trail is preserved

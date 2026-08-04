@@ -8,6 +8,8 @@
      * vite-powered resolver.
      */
     "moduleResolution": "bundler",
+    /** Tests import client .tsx modules (components, BootstrapApp, runApp). */
+    "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
     "esModuleInterop": true,

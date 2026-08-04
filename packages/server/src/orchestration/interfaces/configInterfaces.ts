@@ -173,6 +173,32 @@ export interface IConfigManager {
   getMaxContextBudget(): Promise<number>;
 
   /**
+   * Returns the configured Ollama runtime context window (`num_ctx`), if set.
+   *
+   * @remarks
+   * `undefined` means "not configured" — callers fall back to Ollama's own
+   * default (4096) rather than guessing. Ollama-only; ignored for other
+   * providers. Set via `loopy-detect-hardware --write` or `/set numCtx`.
+   *
+   * @returns Configured `num_ctx` in tokens, or `undefined` if unset.
+   */
+  getNumCtx(): Promise<number | undefined>;
+
+  /**
+   * Returns the configured Ollama `keep_alive` duration.
+   *
+   * @remarks
+   * Controls how long Ollama keeps a model resident in VRAM after use.
+   * Ollama-only; ignored for other providers.
+   *
+   * @returns A duration string with a unit (e.g. `"30m"`, `"1h"`), or the
+   *   number `-1` to never unload. Never the string `"-1"`: Ollama parses a
+   *   string `keep_alive` with Go's `time.ParseDuration`, which rejects a
+   *   unitless value, so never-unload must go on the wire as a number.
+   */
+  getKeepAlive(): Promise<string | number>;
+
+  /**
    * Returns the complete merged configuration object.
    *
    * @remarks

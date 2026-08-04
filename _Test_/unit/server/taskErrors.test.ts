@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { ValidationError } from "../../../packages/server/src/errors/validationError.js";
+import { OllamaError } from "../../../packages/server/src/ollama/types.js";
 import {
+  enrichOllamaFetchError,
   extractNetworkCause,
   formatOrchestratorFailure,
   isOrchestratorErrorReported,
@@ -55,5 +57,48 @@ describe("orchestrator error reporting marker", () => {
     expect(isOrchestratorErrorReported(error)).toBe(false);
     markOrchestratorErrorReported(error);
     expect(isOrchestratorErrorReported(error)).toBe(true);
+  });
+});
+
+describe("enrichOllamaFetchError", () => {
+  it("passes through OllamaError unchanged", () => {
+    const original = new OllamaError(404, "missing");
+    expect(
+      enrichOllamaFetchError("http://localhost:11434", "chat", "m", original),
+    ).toBe(original);
+  });
+
+  it("enriches connection refused errors", () => {
+    const err = new Error("connect ECONNREFUSED");
+    (err as Error & { code: string }).code = "ECONNREFUSED";
+    const enriched = enrichOllamaFetchError(
+      "http://localhost:11434",
+      "chat stream",
+      "llama3",
+      err,
+    );
+    expect(enriched.message).toMatch(/Ollama|connect|11434/i);
+  });
+
+  it("enriches timeout errors", () => {
+    const err = new Error("UND_ERR_HEADERS_TIMEOUT");
+    err.name = "TimeoutError";
+    const enriched = enrichOllamaFetchError(
+      "http://localhost:11434",
+      "chat",
+      "m",
+      err,
+    );
+    expect(enriched.message).toMatch(/timed out/i);
+  });
+});
+
+describe("OllamaError", () => {
+  it("includes status and truncated body in the message", () => {
+    const err = new OllamaError(500, "boom");
+    expect(err).toBeInstanceOf(Error);
+    expect(err.status).toBe(500);
+    expect(err.message).toContain("500");
+    expect(err.message).toContain("boom");
   });
 });
