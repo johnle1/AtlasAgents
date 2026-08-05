@@ -20,6 +20,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildTaskBoardLines,
+  buildTaskBoardProgress,
   TASK_BOARD_MIN_BORDER_WIDTH,
   TASK_BOARD_MIN_INNER_WIDTH,
   taskBoardBorderWidth,
@@ -163,6 +164,30 @@ describe("buildTaskBoardLines — normal cases", () => {
     expect(lines.some((l) => l.isActivity)).toBe(true);
     expect(lines.some((l) => l.text.includes("Running:"))).toBe(true);
   });
+
+  it("wraps a long activity message across multiple lines instead of leaving it unbounded (normal — activity wrap)", () => {
+    const tasks = [{ id: 1, text: "Run tests", state: "running" }];
+    const longActivity =
+      "Running: cd very/deeply/nested/project/directory && npm install --save-dev some-long-package-name";
+    const lines = buildTaskBoardLines(tasks, longActivity, 44);
+    const activityLines = lines.filter((l) => l.isActivity);
+
+    expect(activityLines.length).toBeGreaterThanOrEqual(2);
+    for (const line of activityLines) {
+      expect(line.text.length).toBeLessThanOrEqual(44);
+    }
+
+    // No character from the original message was dropped by wrapping — only
+    // whitespace at the wrap seams is normalized (trimEnd/trimStart), and an
+    // unbroken long token (like the path here) may hard-break mid-word rather
+    // than lose content, same as wrapTaskLine already does for task text.
+    const rejoinedNoSpaces = activityLines
+      .map((l) => l.text)
+      .join("")
+      .replace(/\s+/g, "");
+    const originalNoSpaces = longActivity.replace(/\s+/g, "");
+    expect(rejoinedNoSpaces).toBe(originalNoSpaces);
+  });
 });
 
 describe("buildTaskBoardLines — boundary cases", () => {
@@ -234,6 +259,60 @@ describe("buildTaskBoardLines — boundary cases", () => {
     const lines = buildTaskBoardLines(tasks, "Escalating to agent...", 60);
     expect(lines.some((l) => l.isActivity)).toBe(true);
     expect(lines.map((l) => l.text).join(" ")).toContain("Escalating");
+  });
+
+  it("only leaves the first activity line's glyphPrefix empty — continuation lines get the indent (boundary — activity continuation indent)", () => {
+    const tasks = [{ id: 1, text: "Run tests", state: "running" }];
+    const longActivity =
+      "Running: cd very/deeply/nested/project/directory && npm install --save-dev some-long-package-name";
+    const lines = buildTaskBoardLines(tasks, longActivity, 44);
+    const activityLines = lines.filter((l) => l.isActivity);
+
+    expect(activityLines.length).toBeGreaterThanOrEqual(2);
+    expect(activityLines[0]!.glyphPrefix).toBe("");
+    for (const line of activityLines.slice(1)) {
+      expect(line.glyphPrefix.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildTaskBoardProgress
+// ---------------------------------------------------------------------------
+
+describe("buildTaskBoardProgress — normal cases", () => {
+  it("formats a partial-completion progress line (normal)", () => {
+    const line = buildTaskBoardProgress(2, 4);
+    expect(line).toContain("2/4");
+    expect(line).toContain("50.0%");
+  });
+
+  it("formats a fully-complete progress line (normal)", () => {
+    const line = buildTaskBoardProgress(4, 4);
+    expect(line).toContain("4/4");
+    expect(line).toContain("100.0%");
+  });
+
+  it("formats a zero-progress line (normal)", () => {
+    const line = buildTaskBoardProgress(0, 4);
+    expect(line).toContain("0/4");
+    expect(line).toContain("0.0%");
+  });
+
+  it("uses filled/empty block characters matching the model-pull progress bar style (normal)", () => {
+    const line = buildTaskBoardProgress(1, 2);
+    expect(line).toMatch(/█+░*/);
+  });
+});
+
+describe("buildTaskBoardProgress — boundary cases", () => {
+  it("returns null when there are no tasks yet (boundary — empty board)", () => {
+    expect(buildTaskBoardProgress(0, 0)).toBeNull();
+  });
+
+  it("clamps to 100% rather than throwing if completed somehow exceeds total (boundary — defensive clamp)", () => {
+    expect(() => buildTaskBoardProgress(5, 4)).not.toThrow();
+    expect(buildTaskBoardProgress(5, 4)).toContain("100.0%");
   });
 });
 

@@ -88,6 +88,92 @@ describe("Ink component smoke", () => {
     tree.unmount();
   });
 
+  it("SubagentTaskBoard renders a bordered card with a progress header and no dropped words", () => {
+    const originalColumns = process.stdout.columns;
+    // ink-testing-library's fake stdout hardcodes its OWN columns getter to
+    // 100 (see its Stdout class) independent of this stub — Ink's internal
+    // layout always measures against that fixed 100, while our app code
+    // reads this real (stubbed) process.stdout.columns directly. Keep this
+    // value comfortably below 100 so the two stay consistent in this test;
+    // in the real CLI both read the same real terminal width. See
+    // taskBoardInnerWidth's reservedColumns param for the width budget this
+    // guards.
+    Object.defineProperty(process.stdout, "columns", {
+      configurable: true,
+      value: 50,
+    });
+
+    const longTaskText =
+      "Configure the continuous integration pipeline to run linting and unit tests on every pull request";
+
+    const tree = render(
+      React.createElement(SubagentTaskBoard, {
+        board: {
+          id: 3,
+          label: "ci-setup",
+          tasks: [
+            { id: 1, state: "complete", text: "Read existing workflow files" },
+            { id: 2, state: "running", text: longTaskText },
+          ],
+          activity: {
+            stage: "running",
+            message: "Running: npm test -- --watch=false",
+          },
+        },
+      }),
+    );
+
+    const rendered = frame(tree);
+
+    // Round border chrome from Ink's native borderStyle="round".
+    expect(rendered).toContain("╭");
+    expect(rendered).toContain("╰");
+
+    // Progress summary header ("1/2 [bar] NN.N%").
+    expect(rendered).toContain("1/2");
+    expect(rendered).toMatch(/%/);
+
+    // Every word of the long task description survives wrapping inside the
+    // border, even on a narrow terminal — this is the exact regression a
+    // bordered card without a properly reserved wrap width would produce.
+    const flattened = rendered.replace(/\n/g, " ");
+    for (const word of longTaskText.split(" ")) {
+      expect(flattened).toContain(word);
+    }
+
+    tree.unmount();
+    Object.defineProperty(process.stdout, "columns", {
+      configurable: true,
+      value: originalColumns,
+    });
+  });
+
+  it("SubagentTaskBoard hugs its content width instead of stretching to fill the terminal", () => {
+    // Ink's implicit root container is flexDirection="column" with the
+    // flexbox default alignItems="stretch", which would otherwise stretch
+    // this bordered Box to the full parent width regardless of content —
+    // alignSelf="flex-start" on the board's outer Box opts out of that.
+    // A near-empty board is the clearest way to catch a regression here:
+    // a stretched box would render a border spanning the whole (fake,
+    // 100-column) test terminal instead of hugging the short title text.
+    const tree = render(
+      React.createElement(SubagentTaskBoard, {
+        board: { id: 9, label: "idle", tasks: [] },
+      }),
+    );
+
+    const borderLines = frame(tree)
+      .split("\n")
+      .filter((line) => line.includes("─"));
+
+    expect(borderLines.length).toBeGreaterThan(0);
+    for (const line of borderLines) {
+      expect(line.length).toBeLessThan(40);
+    }
+
+    tree.unmount();
+  });
+
   it("renderHistoryItem maps text history", () => {
     const node = renderHistoryItem(
       { kind: "text", text: "hello world", variant: "success" },

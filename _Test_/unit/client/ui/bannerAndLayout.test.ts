@@ -29,6 +29,7 @@ import { buildBannerLines } from "../../../../packages/client/src/renderer/banne
 import { bannerCenterPad } from "../../../../packages/client/src/ui/banner/logoArt.js";
 import {
   taskBoardInnerWidth,
+  TASK_BOARD_BORDER_RESERVED_COLUMNS,
   TASK_BOARD_MIN_INNER_WIDTH,
 } from "../../../../packages/client/src/ui/taskBoardLayout.js";
 
@@ -62,6 +63,36 @@ describe("taskBoardInnerWidth", () => {
       value: 40,
     });
     expect(taskBoardInnerWidth()).toBe(TASK_BOARD_MIN_INNER_WIDTH);
+    Object.defineProperty(process.stdout, "columns", {
+      configurable: true,
+      value: original,
+    });
+  });
+
+  it("reserves extra columns for bordered-card chrome when requested", () => {
+    const original = process.stdout.columns;
+    Object.defineProperty(process.stdout, "columns", {
+      configurable: true,
+      value: 80,
+    });
+    const unbordered = taskBoardInnerWidth();
+    const bordered = taskBoardInnerWidth(TASK_BOARD_BORDER_RESERVED_COLUMNS);
+    expect(bordered).toBe(unbordered - TASK_BOARD_BORDER_RESERVED_COLUMNS);
+    Object.defineProperty(process.stdout, "columns", {
+      configurable: true,
+      value: original,
+    });
+  });
+
+  it("still respects the minimum floor when border columns are reserved on a narrow terminal", () => {
+    const original = process.stdout.columns;
+    Object.defineProperty(process.stdout, "columns", {
+      configurable: true,
+      value: 40,
+    });
+    expect(taskBoardInnerWidth(TASK_BOARD_BORDER_RESERVED_COLUMNS)).toBe(
+      TASK_BOARD_MIN_INNER_WIDTH,
+    );
     Object.defineProperty(process.stdout, "columns", {
       configurable: true,
       value: original,

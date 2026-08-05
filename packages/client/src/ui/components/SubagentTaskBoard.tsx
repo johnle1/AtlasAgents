@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text } from "ink";
 import {
   buildTaskBoardLines,
+  buildTaskBoardProgress,
+  TASK_BOARD_BORDER_RESERVED_COLUMNS,
   taskBoardInnerWidth,
 } from "../taskBoardLayout.js";
 import {
@@ -87,7 +89,9 @@ export const SubagentTaskBoard: React.FC<Props> = ({ board }) => {
       ? `Agent ${board.id} — ${board.label}`
       : `Agent ${board.id}`;
 
-  const innerWidth = taskBoardInnerWidth();
+  // Reserve columns for the card's round border + horizontal padding so
+  // wrapped lines never grow wide enough to get clipped against the border.
+  const innerWidth = taskBoardInnerWidth(TASK_BOARD_BORDER_RESERVED_COLUMNS);
 
   // Current subagent activity (e.g. "Thinking…", "Running: npm test"),
   // appended as a trailing board line — see buildTaskBoardLines.
@@ -99,12 +103,39 @@ export const SubagentTaskBoard: React.FC<Props> = ({ board }) => {
     [visibleTasks, activityMessage, innerWidth],
   );
 
+  // Whole-board completion summary (uses all tasks, not just the visible
+  // slice, so the percentage stays accurate once tasks scroll past
+  // MAX_VISIBLE_TASKS).
+  const completedCount = board.tasks.filter(
+    (task) => task.state === "complete",
+  ).length;
+  const progressLine = buildTaskBoardProgress(
+    completedCount,
+    board.tasks.length,
+  );
+
   return (
-    <Box flexDirection="column" marginLeft={2} marginBottom={0}>
+    <Box
+      flexDirection="column"
+      alignSelf="flex-start"
+      marginLeft={2}
+      marginBottom={1}
+      borderStyle="round"
+      borderColor="cyan"
+      paddingX={1}
+    >
       {/* Group Title: acts as the header for the task list hierarchy */}
       <Text bold color="cyan">
         • {title}
       </Text>
+
+      {/* Progress summary: "N/M [bar] NN.N%" — same block-character style as
+          the model-pull download progress bar in renderer/modelOutput.ts */}
+      {progressLine && (
+        <Text color={completedCount === board.tasks.length ? "green" : "cyan"}>
+          {progressLine}
+        </Text>
+      )}
 
       {/* Render each subtask line by applying state-specific colors and symbols */}
       {contentLines.map((line) => {
@@ -113,7 +144,8 @@ export const SubagentTaskBoard: React.FC<Props> = ({ board }) => {
         if (line.isActivity) {
           return (
             <Text key={line.key} dimColor>
-              {"  "}↳ {line.text}
+              {line.glyphPrefix.length === 0 ? "  ↳ " : "    "}
+              {line.text}
             </Text>
           );
         }
