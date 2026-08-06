@@ -62,11 +62,14 @@ describe("taskBoardInnerWidth", () => {
       configurable: true,
       value: 40,
     });
-    expect(taskBoardInnerWidth()).toBe(TASK_BOARD_MIN_INNER_WIDTH);
-    Object.defineProperty(process.stdout, "columns", {
-      configurable: true,
-      value: original,
-    });
+    try {
+      expect(taskBoardInnerWidth()).toBe(TASK_BOARD_MIN_INNER_WIDTH);
+    } finally {
+      Object.defineProperty(process.stdout, "columns", {
+        configurable: true,
+        value: original,
+      });
+    }
   });
 
   it("reserves extra columns for bordered-card chrome when requested", () => {
@@ -75,27 +78,51 @@ describe("taskBoardInnerWidth", () => {
       configurable: true,
       value: 80,
     });
-    const unbordered = taskBoardInnerWidth();
-    const bordered = taskBoardInnerWidth(TASK_BOARD_BORDER_RESERVED_COLUMNS);
-    expect(bordered).toBe(unbordered - TASK_BOARD_BORDER_RESERVED_COLUMNS);
-    Object.defineProperty(process.stdout, "columns", {
-      configurable: true,
-      value: original,
-    });
+    try {
+      const unbordered = taskBoardInnerWidth();
+      const bordered = taskBoardInnerWidth(TASK_BOARD_BORDER_RESERVED_COLUMNS);
+      expect(bordered).toBe(unbordered - TASK_BOARD_BORDER_RESERVED_COLUMNS);
+    } finally {
+      Object.defineProperty(process.stdout, "columns", {
+        configurable: true,
+        value: original,
+      });
+    }
   });
 
-  it("still respects the minimum floor when border columns are reserved on a narrow terminal", () => {
+  it("still subtracts reserved border columns even on a narrow terminal, instead of letting the unbordered floor swallow the reservation", () => {
     const original = process.stdout.columns;
     Object.defineProperty(process.stdout, "columns", {
       configurable: true,
       value: 40,
     });
-    expect(taskBoardInnerWidth(TASK_BOARD_BORDER_RESERVED_COLUMNS)).toBe(
-      TASK_BOARD_MIN_INNER_WIDTH,
-    );
+    try {
+      expect(taskBoardInnerWidth(TASK_BOARD_BORDER_RESERVED_COLUMNS)).toBe(
+        TASK_BOARD_MIN_INNER_WIDTH - TASK_BOARD_BORDER_RESERVED_COLUMNS,
+      );
+    } finally {
+      Object.defineProperty(process.stdout, "columns", {
+        configurable: true,
+        value: original,
+      });
+    }
+  });
+
+  it("keeps subtracting reserved columns after the 100-column readability cap saturates", () => {
+    const original = process.stdout.columns;
     Object.defineProperty(process.stdout, "columns", {
       configurable: true,
-      value: original,
+      value: 200,
     });
+    try {
+      expect(taskBoardInnerWidth(TASK_BOARD_BORDER_RESERVED_COLUMNS)).toBe(
+        100 - TASK_BOARD_BORDER_RESERVED_COLUMNS,
+      );
+    } finally {
+      Object.defineProperty(process.stdout, "columns", {
+        configurable: true,
+        value: original,
+      });
+    }
   });
 });

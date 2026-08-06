@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildTaskBoardLines,
   buildTaskBoardProgress,
+  resolveTaskBoardProgressColor,
   TASK_BOARD_MIN_BORDER_WIDTH,
   TASK_BOARD_MIN_INNER_WIDTH,
   taskBoardBorderWidth,
@@ -261,6 +262,12 @@ describe("buildTaskBoardLines — boundary cases", () => {
     expect(lines.map((l) => l.text).join(" ")).toContain("Escalating");
   });
 
+  it("does NOT produce an activity line when activityMessage is whitespace-only (boundary — blank activity)", () => {
+    const tasks = [{ id: 1, text: "Compile", state: "running" }];
+    const lines = buildTaskBoardLines(tasks, "   ", 60);
+    expect(lines.some((l) => l.isActivity)).toBe(false);
+  });
+
   it("only leaves the first activity line's glyphPrefix empty — continuation lines get the indent (boundary — activity continuation indent)", () => {
     const tasks = [{ id: 1, text: "Run tests", state: "running" }];
     const longActivity =
@@ -313,6 +320,32 @@ describe("buildTaskBoardProgress — boundary cases", () => {
   it("clamps to 100% rather than throwing if completed somehow exceeds total (boundary — defensive clamp)", () => {
     expect(() => buildTaskBoardProgress(5, 4)).not.toThrow();
     expect(buildTaskBoardProgress(5, 4)).toContain("100.0%");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveTaskBoardProgressColor
+// ---------------------------------------------------------------------------
+
+describe("resolveTaskBoardProgressColor", () => {
+  it("stays cyan while tasks are still in progress, even with a failure among them (normal)", () => {
+    expect(resolveTaskBoardProgressColor(3, 1, 4)).toBe("cyan");
+  });
+
+  it("stays cyan when nothing has finished yet (normal)", () => {
+    expect(resolveTaskBoardProgressColor(0, 0, 4)).toBe("cyan");
+  });
+
+  it("turns green once every task is complete with no failures (normal)", () => {
+    expect(resolveTaskBoardProgressColor(4, 0, 4)).toBe("green");
+  });
+
+  it("turns red once every task is finished and at least one failed (normal)", () => {
+    expect(resolveTaskBoardProgressColor(4, 1, 4)).toBe("red");
+  });
+
+  it("treats an empty board as cyan (boundary)", () => {
+    expect(resolveTaskBoardProgressColor(0, 0, 0)).toBe("cyan");
   });
 });
 

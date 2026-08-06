@@ -10,6 +10,7 @@
 
 import { getTheme } from "../theme/themeManager.js";
 import { setStreamingText } from "../ui/uiBridge.js";
+import { renderProgressBar } from "../utils/progressBar.js";
 import { appendBlock, appendText } from "./sink.js";
 
 /**
@@ -245,14 +246,10 @@ const formatPullProgressLine = (
     progress.completed !== undefined &&
     progress.total > 0
   ) {
-    const percentage = ((progress.completed / progress.total) * 100).toFixed(1);
+    const ratio = Math.min(1, Math.max(0, progress.completed / progress.total));
+    const percentage = (ratio * 100).toFixed(1);
     const progressBarWidth = 30;
-    const filledBarWidth = Math.floor(
-      (progress.completed / progress.total) * progressBarWidth,
-    );
-    const progressBar =
-      "█".repeat(filledBarWidth) +
-      "░".repeat(progressBarWidth - filledBarWidth);
+    const progressBar = renderProgressBar(ratio, progressBarWidth);
     const totalSizeGB = (progress.total / 1024 / 1024 / 1024).toFixed(2);
     const completedSizeGB = (progress.completed / 1024 / 1024 / 1024).toFixed(
       2,

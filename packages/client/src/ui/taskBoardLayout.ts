@@ -6,6 +6,8 @@
  * and tracks indentation for continued lines.
  */
 
+import { renderProgressBar } from "../utils/progressBar.js";
+
 /** Minimum inner width for agent task board content. */
 export const TASK_BOARD_MIN_INNER_WIDTH = 44;
 
@@ -68,13 +70,22 @@ export const wrapTaskLine = (text: string, maxWidth: number): string[] => {
  *   when the caller wraps the board in a bordered card. Defaults to 0 so
  *   existing callers are unaffected.
  * @returns The optimal text block rendering width.
+ *
+ * @remarks
+ * `reservedColumns` is always subtracted from the readability-floored base
+ * width, even if that pushes the result below {@link TASK_BOARD_MIN_INNER_WIDTH}.
+ * Applying the floor before the subtraction would silently discard the
+ * caller's reservation on narrow terminals, letting bordered content overflow
+ * the terminal and trigger Ink's own fallback re-wrap — the exact failure
+ * {@link TASK_BOARD_BORDER_RESERVED_COLUMNS} exists to prevent.
  */
 export const taskBoardInnerWidth = (reservedColumns = 0): number => {
   const columns = process.stdout.columns ?? 80;
-  return Math.max(
+  const baseWidth = Math.max(
     TASK_BOARD_MIN_INNER_WIDTH,
-    Math.min(columns - 6 - reservedColumns, 100),
+    Math.min(columns - 6, 100),
   );
+  return baseWidth - reservedColumns;
 };
 
 /** A renderable line in the task board component. */
@@ -121,7 +132,7 @@ export const buildTaskBoardLines = (
   }
 
   const trimmedActivity = activityMessage?.trim();
-  if (trimmedActivity && trimmedActivity.length > 0) {
+  if (trimmedActivity) {
     const wrappedActivity = wrapTaskLine(trimmedActivity, innerWidth);
     wrappedActivity.forEach((segment, segmentIndex) => {
       lines.push({
@@ -167,12 +178,15 @@ const PROGRESS_BAR_WIDTH = 12;
  * Builds a "N/M [bar] NN.N%" progress summary line for a task board header.
  *
  * @remarks
- * Mirrors the block-character style used for model-pull download progress
- * (`formatPullProgressLine` in `renderer/modelOutput.ts`) — filled `█` /
- * empty `░` blocks with a one-decimal percentage — so the CLI's two
- * progress indicators read consistently.
+ * Shares its block-character bar rendering ({@link renderProgressBar}) with
+ * the model-pull download progress line (`renderer/modelOutput.ts`) so the
+ * CLI's progress indicators read consistently.
  *
- * @param completed - Number of tasks currently in the `complete` state.
+ * @param completed - Number of tasks to count as "done" for the ratio.
+ *   Callers may pass a strict `complete` count, or `complete + failed`
+ *   combined (paired with {@link resolveTaskBoardProgressColor} for the
+ *   header color) so the bar reaches 100% once every task has stopped
+ *   running, regardless of outcome.
  * @param total - Total number of tasks on the board.
  * @returns The formatted progress line, or `null` when the board has no tasks yet.
  */
@@ -185,11 +199,31 @@ export const buildTaskBoardProgress = (
   }
 
   const ratio = Math.min(1, Math.max(0, completed / total));
-  const filledWidth = Math.floor(ratio * PROGRESS_BAR_WIDTH);
-  const bar =
-    "█".repeat(filledWidth) + "░".repeat(PROGRESS_BAR_WIDTH - filledWidth);
+  const bar = renderProgressBar(ratio, PROGRESS_BAR_WIDTH);
   const percentage = (ratio * 100).toFixed(1);
 
   return `${completed}/${total} ${bar} ${percentage}%`;
+};
+
+/**
+ * Resolves the color for a task board's aggregate progress line.
+ *
+ * @param finishedCount - Tasks that have reached a terminal state
+ *   (`complete` or `failed`).
+ * @param failedCount - Of the finished tasks, how many ended in `failed`.
+ * @param total - Total number of tasks on the board.
+ * @returns `"cyan"` while any task hasn't yet reached a terminal state;
+ *   `"red"` once every task is terminal and at least one `failed`;
+ *   `"green"` once every task is terminal with zero failures.
+ */
+export const resolveTaskBoardProgressColor = (
+  finishedCount: number,
+  failedCount: number,
+  total: number,
+): "cyan" | "green" | "red" => {
+  if (total <= 0 || finishedCount < total) {
+    return "cyan";
+  }
+  return failedCount > 0 ? "red" : "green";
 };
 

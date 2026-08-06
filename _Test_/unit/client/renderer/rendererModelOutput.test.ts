@@ -70,4 +70,13 @@ describe("modelOutput printers", () => {
     finishPullProgress("gemma");
     expect(setStreamingText).toHaveBeenCalledWith(null);
   });
+
+  it("printProgress does not throw and clamps to 100% when completed exceeds total (boundary — regression for RangeError)", () => {
+    expect(() =>
+      printProgress({ status: "pulling", completed: 15, total: 10 }, "gemma"),
+    ).not.toThrow();
+    expect(setStreamingText).toHaveBeenCalledWith(
+      expect.stringContaining("100.0%"),
+    );
+  });
 });

@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import {
   buildTaskBoardLines,
   buildTaskBoardProgress,
+  resolveTaskBoardProgressColor,
   TASK_BOARD_BORDER_RESERVED_COLUMNS,
   taskBoardInnerWidth,
 } from "../taskBoardLayout.js";
@@ -31,7 +32,7 @@ const GLYPH = 2;
  * @remarks
  * Displays the current workflow status of an agent using clean terminal lines.
  * It animates active tasks using an internal interval tick (`pulseIndex`), maps task status
- * (e.g. `running`, `completed`, `failed`) to visual indicators, and gracefully truncates
+ * (e.g. `running`, `complete`, `failed`) to visual indicators, and gracefully truncates
  * the rendering if the tasks exceed layout height constraints.
  *
  * @example
@@ -44,8 +45,8 @@ const GLYPH = 2;
  *   id: 3,
  *   label: "tester",
  *   tasks: [
- *     { id: "t1", state: "completed", label: "Lint codebase" },
- *     { id: "t2", state: "running", label: "Run unit tests" }
+ *     { id: 1, state: "complete", text: "Lint codebase" },
+ *     { id: 2, state: "running", text: "Run unit tests" }
  *   ]
  * };
  *
@@ -105,12 +106,23 @@ export const SubagentTaskBoard: React.FC<Props> = ({ board }) => {
 
   // Whole-board completion summary (uses all tasks, not just the visible
   // slice, so the percentage stays accurate once tasks scroll past
-  // MAX_VISIBLE_TASKS).
-  const completedCount = board.tasks.filter(
-    (task) => task.state === "complete",
+  // MAX_VISIBLE_TASKS). "Finished" includes both complete and failed tasks
+  // so the bar/color reach 100%/settle once every task has stopped
+  // executing, regardless of outcome — a board that finishes with a
+  // failure should still visibly stop, just in red instead of green.
+  const finishedCount = board.tasks.filter(
+    (task) => task.state === "complete" || task.state === "failed",
+  ).length;
+  const failedCount = board.tasks.filter(
+    (task) => task.state === "failed",
   ).length;
   const progressLine = buildTaskBoardProgress(
-    completedCount,
+    finishedCount,
+    board.tasks.length,
+  );
+  const progressColor = resolveTaskBoardProgressColor(
+    finishedCount,
+    failedCount,
     board.tasks.length,
   );
 
@@ -131,11 +143,7 @@ export const SubagentTaskBoard: React.FC<Props> = ({ board }) => {
 
       {/* Progress summary: "N/M [bar] NN.N%" — same block-character style as
           the model-pull download progress bar in renderer/modelOutput.ts */}
-      {progressLine && (
-        <Text color={completedCount === board.tasks.length ? "green" : "cyan"}>
-          {progressLine}
-        </Text>
-      )}
+      {progressLine && <Text color={progressColor}>{progressLine}</Text>}
 
       {/* Render each subtask line by applying state-specific colors and symbols */}
       {contentLines.map((line) => {

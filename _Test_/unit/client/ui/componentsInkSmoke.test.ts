@@ -103,49 +103,81 @@ describe("Ink component smoke", () => {
       value: 50,
     });
 
-    const longTaskText =
-      "Configure the continuous integration pipeline to run linting and unit tests on every pull request";
+    try {
+      const longTaskText =
+        "Configure the continuous integration pipeline to run linting and unit tests on every pull request";
 
+      const tree = render(
+        React.createElement(SubagentTaskBoard, {
+          board: {
+            id: 3,
+            label: "ci-setup",
+            tasks: [
+              {
+                id: 1,
+                state: "complete",
+                text: "Read existing workflow files",
+              },
+              { id: 2, state: "running", text: longTaskText },
+            ],
+            activity: {
+              stage: "running",
+              message: "Running: npm test -- --watch=false",
+            },
+          },
+        }),
+      );
+
+      try {
+        const rendered = frame(tree);
+
+        // Round border chrome from Ink's native borderStyle="round".
+        expect(rendered).toContain("╭");
+        expect(rendered).toContain("╰");
+
+        // Progress summary header ("1/2 [bar] NN.N%").
+        expect(rendered).toContain("1/2");
+        expect(rendered).toMatch(/%/);
+
+        // Every word of the long task description survives wrapping inside
+        // the border, even on a narrow terminal — this is the exact
+        // regression a bordered card without a properly reserved wrap width
+        // would produce.
+        const flattened = rendered.replace(/\n/g, " ");
+        for (const word of longTaskText.split(" ")) {
+          expect(flattened).toContain(word);
+        }
+      } finally {
+        tree.unmount();
+      }
+    } finally {
+      Object.defineProperty(process.stdout, "columns", {
+        configurable: true,
+        value: originalColumns,
+      });
+    }
+  });
+
+  it("SubagentTaskBoard progress reaches 100% once every task is complete or failed", () => {
     const tree = render(
       React.createElement(SubagentTaskBoard, {
         board: {
-          id: 3,
-          label: "ci-setup",
+          id: 5,
+          label: "runner",
           tasks: [
-            { id: 1, state: "complete", text: "Read existing workflow files" },
-            { id: 2, state: "running", text: longTaskText },
+            { id: 1, state: "complete", text: "Build" },
+            { id: 2, state: "failed", text: "Deploy" },
           ],
-          activity: {
-            stage: "running",
-            message: "Running: npm test -- --watch=false",
-          },
         },
       }),
     );
-
-    const rendered = frame(tree);
-
-    // Round border chrome from Ink's native borderStyle="round".
-    expect(rendered).toContain("╭");
-    expect(rendered).toContain("╰");
-
-    // Progress summary header ("1/2 [bar] NN.N%").
-    expect(rendered).toContain("1/2");
-    expect(rendered).toMatch(/%/);
-
-    // Every word of the long task description survives wrapping inside the
-    // border, even on a narrow terminal — this is the exact regression a
-    // bordered card without a properly reserved wrap width would produce.
-    const flattened = rendered.replace(/\n/g, " ");
-    for (const word of longTaskText.split(" ")) {
-      expect(flattened).toContain(word);
+    try {
+      const rendered = frame(tree);
+      expect(rendered).toContain("2/2");
+      expect(rendered).toContain("100.0%");
+    } finally {
+      tree.unmount();
     }
-
-    tree.unmount();
-    Object.defineProperty(process.stdout, "columns", {
-      configurable: true,
-      value: originalColumns,
-    });
   });
 
   it("SubagentTaskBoard hugs its content width instead of stretching to fill the terminal", () => {
