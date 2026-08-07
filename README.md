@@ -59,10 +59,13 @@ node /path/to/LoopyCode/packages/client/dist/index.js
 
 The first time you run `loopy-server`, it interactively prompts for:
 
-1. **A password** — required, used by clients to authenticate. Can't be empty.
-2. **A TCP port** — defaults to `7000` if left blank.
+1. **A passphrase** — encrypts the password, port, and any provider API keys at rest. Entered once per launch from then on.
+2. **A password** — required, used by clients to authenticate. Can't be empty.
+3. **A TCP port** — defaults to `7000` if left blank.
 
-It then generates a self-signed TLS certificate under `./tls/` and writes its config to `./user-data/config.json`, both relative to the directory you launched it from. Reuse the same directory on later starts so the password, cert, and learned memory persist. If a role is configured to use `ollama`, the server checks `http://localhost:11434` and auto-runs `ollama serve` if it isn't already up — but you must install Ollama and `ollama pull` at least one model yourself first.
+The password and port are then saved (encrypted) to `./user-data/startup.json`, so on later starts you only re-enter the passphrase — the server reads the rest back automatically. To change the saved password or port later without starting the server, see `loopy-server --password`/`--port`/`--reset` below.
+
+It also generates a self-signed TLS certificate under `./tls/` and writes model/provider config to `./user-data/config.json`, both relative to the directory you launched it from. Reuse the same directory on later starts so the password, cert, and learned memory persist. If a role is configured to use `ollama`, the server checks `http://localhost:11434` and auto-runs `ollama serve` if it isn't already up — but you must install Ollama and `ollama pull` at least one model yourself first.
 
 The first time you run `loopycode`, it walks you through a setup wizard (server address → port → password) and saves the result to `~/.agent-cli/config.json`.
 
@@ -78,14 +81,17 @@ The first time you run `loopycode`, it walks you through a setup wizard (server 
 
 ### Config encryption at rest
 
-Both `config.json` files encrypt their sensitive fields (AES-256-GCM, scrypt-derived key) rather than storing them in plaintext — each behind its own passphrase, prompted once per launch:
+Every config file encrypts its sensitive fields (AES-256-GCM, scrypt-derived key) rather than storing them in plaintext — each side behind its own passphrase, prompted once per launch:
 
-| Config file                       | Encrypted fields                                                                | Passphrase prompted            |
-| --------------------------------- | ------------------------------------------------------------------------------- | ------------------------------ |
-| Client `~/.agent-cli/config.json` | `password` (server auth password) and `server` (host)                           | Once per `loopycode` launch    |
-| Server `./user-data/config.json`  | `providers` map (`baseUrl`/`apiKey` for third-party OpenAI-compatible backends) | Once per `loopy-server` launch |
+| Config file                              | Encrypted fields                                                                | Passphrase prompted            |
+| ----------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------ |
+| Client `~/.agent-cli/config.json`         | `password` (server auth password) and `server` (host)                           | Once per `loopycode` launch    |
+| Server `./user-data/startup.json`         | `password` (client-auth password) and `port` (TCP listen port)                  | Once per `loopy-server` launch |
+| Server `./user-data/config.json`          | `providers` map (`baseUrl`/`apiKey` for third-party OpenAI-compatible backends) | Once per `loopy-server` launch |
 
-Everything else in each file (port, model names, timeouts, workspace path, pinned TLS fingerprints, etc.) stays plaintext — only the fields above are sensitive enough to encrypt. The client and server passphrases are independent of each other and of the server's auth password; neither passphrase is itself written to disk. Forgetting a passphrase isn't a dead end: after 3 wrong attempts you're offered a reset (backs up the existing encrypted file, then discards and re-prompts for a fresh passphrase). An older plaintext `config.json` is migrated to the encrypted format automatically the next time it's loaded.
+The server's `startup.json` and `config.json` share one passphrase and one derived key — you're only prompted once at server startup either way. Everything else in each file (model names, timeouts, workspace path, pinned TLS fingerprints, etc.) stays plaintext — only the fields above are sensitive enough to encrypt. The client and server passphrases are independent of each other; neither passphrase is itself written to disk. Forgetting a passphrase isn't a dead end: after 3 wrong attempts on `loopycode`/`loopy-server start` you're offered a reset (backs up the existing encrypted file(s), then discards and re-prompts for a fresh passphrase).
+
+`loopy-server --password`/`--port`/`--reset` (config-repair mode, like the client's) also require the correct passphrase — but unlike `start`, a wrong entry there just fails with an error rather than offering the reset menu, so it can't be used to bypass the auth password without knowing the passphrase.
 
 ## Providers (Ollama, vLLM)
 
@@ -132,6 +138,29 @@ Examples:
 ```
 
 `--host`/`--server`/`--port` alone only override the connection for that one run. `--reset`, `--password`, `--address`, and `--trust-fingerprint` switch into config-repair mode instead: they persist to `config.json` and exit without contacting the server.
+
+### CLI flags (`loopy-server`)
+
+```
+Usage:
+  loopy-server [start]      Interactive startup, then listen for RSocket clients
+  loopy-server --regen-cert Rotate the TLS certificate (asks for confirmation)
+
+Config repair (saves to user-data/startup.json and exits — no listening,
+asks for your server config passphrase first):
+  --port [port]  Save a new TCP port (omit the value to be prompted)
+  --password     Prompt for and save a new server auth password
+  --reset        Prompt for a new password and port, replacing the old ones;
+                 leaves the passphrase and provider keys alone
+
+Examples:
+  loopy-server
+  loopy-server start
+  loopy-server --port 8001
+  loopy-server --password
+  loopy-server --reset --port 8001
+  loopy-server --regen-cert
+```
 
 Rotate the server's TLS certificate (e.g. after it expires):
 

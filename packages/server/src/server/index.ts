@@ -5,7 +5,11 @@
  *
  * @remarks
  * This is the main entry point for the LoopyCode server. It handles:
- * - Interactive startup prompts (password and port)
+ * - CLI parsing: interactive `start`, `--regen-cert`, and config-repair
+ *   (`--password`/`--port`/`--reset`) modes
+ * - Interactive startup prompts — on a normal restart, just the server
+ *   config passphrase; password and port are read from the encrypted
+ *   `user-data/startup.json` and only prompted for when not yet saved
  * - Ollama connectivity verification
  * - Application container initialization
  * - RSocket server startup and client connection management
@@ -13,13 +17,20 @@
  * Run with: `node dist/index.js` or `loopy-server`
  */
 
-import * as readline from "node:readline";
 import type { RSocket } from "@rsocket/core";
 import { AuthMiddleware } from "../auth/middleware.js";
+import { parseServerArgs, printServerHelp } from "../cli/serverArgs.js";
+import { runServerConfigRepair } from "../cli/serverConfigRepair.js";
 import { ConfigError, ConfigManager } from "../config/index.js";
+import {
+  loadStartupSecrets,
+  saveStartupSecrets,
+  unlockOrSetupStartupCipher,
+} from "../config/startupSecrets.js";
 import { createContainer } from "../container/index.js";
 import { installUserDataDefaults } from "../setup/installUserDataDefaults.js";
 import { RSocketServer } from "./rsocket/rsocketServer.js";
+import { promptListenPort, readPasswordAtStartup } from "./startupPrompts.js";
 import {
   certificateExpiry,
   loadOrCreateServerCert,
@@ -48,247 +59,96 @@ const OLLAMA_TAGS_URL = "http://localhost:11434/api/tags";
 const clientPeers = new Map<string, RSocket>();
 
 /**
- * Prompts for a password/passphrase with masked echo when stdin is a TTY.
- *
- * @remarks
- * In TTY environments, enables raw mode for character-by-character input
- * and displays bullet points (•) instead of actual characters for security.
- * In non-TTY environments (e.g., piped input), falls back to plain readline.
- *
- * Handles Enter to submit and Backspace to delete. Returns the password
- * as a plain string (may be empty).
- *
- * Reused for two independent prompts — the RSocket client-auth password and
- * the config-encryption passphrase — hence the configurable `label`; see the
- * module doc for why those two secrets are deliberately not derived from
- * each other.
- *
- * @param label - Prompt text printed before input; defaults to the
- *   client-auth password prompt.
- * @returns Password/passphrase string entered by the user
- */
-const readPasswordAtStartup = (
-  label = "Enter server password: ",
-): Promise<string> => {
-  const stdout = process.stdout;
-  const stdin = process.stdin;
-
-  stdout.write(label);
-
-  // Non-TTY environment (e.g., piped input) - use plain readline
-  if (!stdin.isTTY) {
-    return new Promise((resolve, reject) => {
-      const readlineInterface = readline.createInterface({
-        input: stdin,
-        output: stdout,
-      });
-      readlineInterface.question("", (inputLine) => {
-        try {
-          readlineInterface.close();
-          resolve(inputLine.trimEnd());
-        } catch (error) {
-          readlineInterface.close();
-          reject(error);
-        }
-      });
-    });
-  }
-
-  // TTY environment - use raw mode for character-by-character input with masking
-  return new Promise((resolve, reject) => {
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding("utf8");
-
-    let password = "";
-
-    // Restore TTY state on completion or error
-    const cleanup = () => {
-      try {
-        stdin.removeListener("data", onData);
-        stdin.setRawMode(false);
-        stdin.pause();
-      } catch (error) {
-        // Log cleanup errors to stderr for debugging
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        process.stderr.write(`Error restoring TTY state: ${errorMessage}\n`);
-      }
-    };
-
-    const onData = (chunk: string | Buffer) => {
-      try {
-        const chunkString =
-          typeof chunk === "string" ? chunk : chunk.toString("utf8");
-
-        for (const character of chunkString) {
-          const characterCode = character.charCodeAt(0);
-
-          // Enter key or Ctrl-D submits the password
-          if (character === "\n" || character === "\r" || characterCode === 4) {
-            cleanup();
-            stdout.write("\n");
-            resolve(password);
-            return;
-          }
-
-          // Backspace or delete removes the last character
-          if (characterCode === 127 || character === "\b") {
-            if (password.length > 0) {
-              password = password.slice(0, -1);
-              stdout.write("\b \b"); // Move back, overwrite with space, move back again
-            }
-            continue;
-          }
-
-          // Regular character - add to password and display bullet point
-          password += character;
-          stdout.write("•");
-        }
-      } catch (error) {
-        cleanup();
-        reject(error);
-      }
-    };
-
-    try {
-      stdin.on("data", onData);
-    } catch (error) {
-      cleanup();
-      reject(error);
-    }
-  });
-};
-
-/**
- * Prompts for TCP listen port with default 7000 when input is empty or invalid.
- *
- * @remarks
- * Validates that the port is within the valid TCP port range (1-65535).
- * If the input is empty, not a number, or out of range, returns the default
- * port 7000. This provides a safe fallback for invalid user input.
- *
- * @param readlineInterface - Readline interface for prompting the user
- * @returns Valid port number in range 1-65535
- */
-const promptListenPort = (
-  readlineInterface: readline.Interface,
-): Promise<number> => {
-  return new Promise((resolve) => {
-    readlineInterface.question("Enter port (default 7000): ", (answer) => {
-      const trimmedAnswer = answer.trim();
-
-      // Empty input uses default port
-      if (trimmedAnswer.length === 0) {
-        resolve(7000);
-        return;
-      }
-
-      const parsedPort = parseInt(trimmedAnswer, 10);
-
-      // Validate port is within valid TCP range (1-65535)
-      if (Number.isNaN(parsedPort) || parsedPort < 1 || parsedPort > 65_535) {
-        resolve(7000); // Invalid input falls back to default
-        return;
-      }
-
-      resolve(parsedPort);
-    });
-  });
-};
-
-/**
- * Runs interactive startup prompts for password and port.
- *
- * @remarks
- * Prompts the user for server password (with masked input) and TCP listen port.
- * Returns both values as a configuration object for server initialization.
- * Ensures the readline interface is properly closed in a finally block.
- *
- * @returns Object containing password and port for server startup
- */
-const runServerStartupPrompts = async (): Promise<{
-  password: string;
-  port: number;
-}> => {
-  const password = await readPasswordAtStartup();
-
-  const readlineInterface = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  try {
-    const port = await promptListenPort(readlineInterface);
-    return { password, port };
-  } finally {
-    readlineInterface.close();
-  }
-};
-
-/**
  * Main entry point for the LoopyCode server.
  *
  * @remarks
  * Orchestrates the complete server startup sequence:
- * 1. Parses command line arguments (help flag)
- * 2. Runs interactive prompts for password and port
+ * 1. Parses command line arguments (help / --regen-cert / repair / start)
+ * 2. In repair mode (`--password`/`--port`/`--reset`), verifies the server
+ *    config passphrase, applies the requested changes, and exits — nothing
+ *    below this point runs
  * 3. Installs default user data and configuration
- * 4. Verifies Ollama service is running and accessible
- * 5. Initializes authentication middleware with password
- * 6. Creates application container with all services
- * 7. Cleans up old workspace snapshots
- * 8. Schedules periodic memory consolidation
- * 9. Verifies Ollama has models installed
- * 10. Checks agent and subagent model configuration
- * 11. Builds request router with all handlers
- * 12. Creates and starts RSocket server
- * 13. Logs successful startup and waits for connections
+ * 4. Unlocks (or sets up) the server config cipher — the only passphrase
+ *    prompt on a normal restart — then loads the saved password/port,
+ *    prompting for and persisting whichever one isn't saved yet
+ * 5. Verifies Ollama service is running and accessible
+ * 6. Initializes authentication middleware with password
+ * 7. Creates application container with all services
+ * 8. Cleans up old workspace snapshots
+ * 9. Schedules periodic memory consolidation
+ * 10. Verifies Ollama has models installed
+ * 11. Checks agent and subagent model configuration
+ * 12. Builds request router with all handlers
+ * 13. Creates and starts RSocket server
+ * 14. Logs successful startup and waits for connections
  *
  * The server runs until SIGINT or process exit. Any error during startup
  * is caught and logged before exiting with a failure code.
  */
 const main = async (): Promise<void> => {
-  // Command line argument parsing
-  const commandLineArgs = process.argv.slice(2);
+  const parsedArgs = parseServerArgs(process.argv);
 
-  // Handle help flag
-  if (
-    commandLineArgs[0] === "help" ||
-    commandLineArgs[0] === "--help" ||
-    commandLineArgs[0] === "-h"
-  ) {
-    logger.info(`Usage:
-  loopy-server [start]     Interactive startup, then listen for RSocket clients
-  loopy-server --regen-cert Rotate the TLS certificate (asks for confirmation)`);
+  if (parsedArgs.help) {
+    logger.info(printServerHelp());
     return;
   }
 
   // --regen-cert rotates the TLS certificate and exits — no server password
-  // prompt, no Ollama check, no listening. Checked by inclusion rather than
-  // position so `loopy-server start --regen-cert` also works.
-  if (commandLineArgs.includes("--regen-cert")) {
+  // prompt, no Ollama check, no listening.
+  if (parsedArgs.regenCert) {
     await runCertRegen(process.cwd());
     return;
   }
 
-  // Validate command argument
+  // Reject anything other than the implicit/explicit "start" command. Read
+  // from the parsed positional rather than raw argv[0], since a flag
+  // appearing first (e.g. `loopy-server --port 8001`) is not itself a
+  // command.
   if (
-    commandLineArgs[0] !== undefined &&
-    commandLineArgs[0] !== "" &&
-    commandLineArgs[0] !== "start"
+    parsedArgs.command !== undefined &&
+    parsedArgs.command !== "" &&
+    parsedArgs.command !== "start"
   ) {
     logger.error(
-      `Unknown command: ${commandLineArgs[0]}. Try: loopy-server help`,
+      `Unknown command: ${parsedArgs.command}. Try: loopy-server help`,
     );
     process.exit(1);
   }
 
-  // Interactive startup prompts
-  const { password, port } = await runServerStartupPrompts();
+  // Install default user data and configuration files
+  await installUserDataDefaults(process.cwd());
+
+  // --password / --port / --reset: change the saved auth password and/or
+  // port and exit, without starting the server. Gated on the server config
+  // passphrase inside runServerConfigRepair — a wrong entry throws before
+  // anything is written, and never offers the forgot-passphrase reset menu
+  // that `start` does (see cli/serverConfigRepair.ts for why).
+  if (parsedArgs.repair) {
+    await runServerConfigRepair(
+      process.cwd(),
+      parsedArgs.repair,
+      readPasswordAtStartup,
+    );
+    return;
+  }
+
+  // Unlock (or set up) the cipher protecting the auth password, port, and
+  // provider API keys at rest. Must happen before any of those are read —
+  // this is the ONLY passphrase prompt on a normal restart.
+  await unlockOrSetupStartupCipher(process.cwd(), readPasswordAtStartup);
+
+  const savedSecrets = await loadStartupSecrets(process.cwd());
+  let password = savedSecrets.password;
+  let port = savedSecrets.port;
+
+  if (password === undefined) {
+    password = await readPasswordAtStartup();
+  }
 
   // An empty password would let every client authenticate automatically.
-  // Every server start requires a real password — no unauthenticated mode.
+  // Checked before persisting anything and before prompting for the port,
+  // so a mistyped empty entry is neither saved nor followed by a pointless
+  // second prompt.
   if (password.trim().length === 0) {
     logger.error(
       "No password set. The server would accept every client without " +
@@ -298,17 +158,23 @@ const main = async (): Promise<void> => {
     process.exit(1);
   }
 
-  // Install default user data and configuration files
-  await installUserDataDefaults(process.cwd());
+  if (port === undefined) {
+    port = await promptListenPort();
+  }
+
+  if (savedSecrets.password !== password || savedSecrets.port !== port) {
+    await saveStartupSecrets(process.cwd(), { password, port });
+  }
 
   // Only bootstrap local Ollama when at least one role is actually configured
   // to use the "ollama" provider — a pure vLLM/Trainium/TPU deployment has no
   // local Ollama to start or connect to.
   const configPreview = new ConfigManager({ rootDir: process.cwd() });
 
-  // Unlock (or set up) the cipher protecting provider API keys at rest.
-  // Must happen before ANY ConfigManager read/write — getAgentProvider()
-  // right below is the very first such call.
+  // Unlocks the cipher protecting provider API keys at rest. The cipher is
+  // already unlocked (by unlockOrSetupStartupCipher above, sharing the same
+  // process-global key/salt) — this finds that and skips its own prompt,
+  // running only the legacy-plaintext-providers migration if one is needed.
   await configPreview.unlockOrSetupProvidersCipher(readPasswordAtStartup);
 
   const usesOllamaProvider =

@@ -22,9 +22,20 @@ export const CONFIG_REL_PATH = "user-data/config.json";
  */
 export const MAX_PASSPHRASE_ATTEMPTS = 3;
 
-/** Prompt label reused for both the first-time and post-reset passphrase entry. */
+/**
+ * Prompt label reused for both the first-time and post-reset passphrase entry.
+ *
+ * @remarks
+ * One passphrase now protects three things — the server auth password, the
+ * TCP port, and provider API keys — encrypted under a shared key/salt across
+ * `user-data/startup.json` and `user-data/config.json`. See
+ * `startupSecrets.ts` for how the two files share that state.
+ */
 export const NEW_PASSPHRASE_LABEL =
-  "Set a passphrase to encrypt provider API keys (entered once per server start): ";
+  "Set a passphrase to encrypt your server password, port, and provider API keys (entered once per server start): ";
+
+/** Prompt label reused everywhere an already-set passphrase is entered. */
+export const EXISTING_PASSPHRASE_LABEL = "Enter your server config passphrase: ";
 
 /**
  * Built-in fallback defaults applied when config keys are missing from disk.

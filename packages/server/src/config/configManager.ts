@@ -15,6 +15,7 @@ import {
 import { Mutex } from "./mutex.js";
 import {
   CONFIG_REL_PATH,
+  EXISTING_PASSPHRASE_LABEL,
   MAX_PASSPHRASE_ATTEMPTS,
   NEW_PASSPHRASE_LABEL,
   ConfigError,
@@ -184,16 +185,16 @@ export class ConfigManager implements IConfigManager {
       // $providersSecrets. Decrypt them back into storedConfig.providers
       // before mergeConfig()'s existing asProviders() validation runs, so
       // that logic doesn't need to know about the envelope at all. A file
-      // with no $providersSecrets (never-encrypted or legacy plaintext) is
-      // left as-is — the next _saveRaw() call encrypts and migrates it.
-      // Decryption errors (locked cipher, wrong passphrase, tampered data)
-      // deliberately propagate below rather than being treated like a
-      // missing file — see the ENOENT-only check in the catch block. The
-      // message is annotated with where it came from first: this getter may
-      // be reached from any config read (e.g. getAgentModel()), and without
-      // that context a bare "Config cipher is locked" error gives an
-      // operator no hint that provider secrets — not the field they asked
-      // for — are what's actually blocked.
+      // with no $providersSecrets (e.g. defaults-only, no providers yet) is
+      // left as-is — the next _saveRaw() call writes the envelope when
+      // providers are first saved. Decryption errors (locked cipher, wrong
+      // passphrase, tampered data) deliberately propagate below rather than
+      // being treated like a missing file — see the ENOENT-only check in
+      // the catch block. The message is annotated with where it came from
+      // first: this getter may be reached from any config read (e.g.
+      // getAgentModel()), and without that context a bare "Config cipher is
+      // locked" error gives an operator no hint that provider secrets —
+      // not the field they asked for — are what's actually blocked.
       if (storedConfig.$providersSecrets) {
         try {
           storedConfig.providers = decryptSecrets(
@@ -362,8 +363,7 @@ export class ConfigManager implements IConfigManager {
   };
 
   /**
-   * Prompts for a passphrase and unlocks the provider-secrets cipher,
-   * migrating a legacy plaintext config file in place if one is found.
+   * Prompts for a passphrase and unlocks the provider-secrets cipher.
    *
    * @remarks
    * Must be called once, before any other method on this instance, at
@@ -371,20 +371,25 @@ export class ConfigManager implements IConfigManager {
    * already being unlocked. Three cases, mirroring the client's
    * `unlockOrSetupConfigCipher` in `packages/client/src/config.ts`:
    *
-   * 1. **No config file yet** (first run): prompts to set a new passphrase
-   *    and initializes the cipher. The first {@link _saveRaw} call creates
-   *    the encrypted file.
+   * 0. **Cipher already unlocked**: the server entry point unlocks the
+   *    shared cipher once, up front, via `startupSecrets.ts`'s
+   *    `unlockOrSetupStartupCipher` — which protects the auth password and
+   *    port under the very same key/salt as this method protects
+   *    `providers` under. Prompting a second time for the same passphrase
+   *    would be redundant, so this returns immediately. Standalone callers
+   *    that never unlock anything else first (`loopy-detect-hardware
+   *    --write`, most unit tests) are unaffected — `isUnlocked()` is false
+   *    for them, so they fall through to the normal prompting flow below.
+   * 1. **No config file yet** (first run), or a file with no
+   *    `$providersSecrets` yet: prompts to set a new passphrase and
+   *    initializes the cipher. The first {@link _saveRaw} call creates the
+   *    encrypted envelope when providers are saved.
    * 2. **config file has `$providersSecrets`**: prompts for the existing
    *    passphrase and unlocks against it, re-prompting on a wrong entry.
    *    After {@link MAX_PASSPHRASE_ATTEMPTS} consecutive wrong entries,
    *    offers a reset menu (see {@link offerProvidersPassphraseReset})
    *    rather than looping forever with no way out for an operator who's
    *    forgotten it.
-   * 3. **config file exists but `providers` is still plaintext** (legacy):
-   *    prompts to set a passphrase, backs up the old file, then immediately
-   *    re-saves the full config so the on-disk `providers` map is encrypted
-   *    going forward. Skipped when there are no providers configured yet —
-   *    nothing sensitive to protect, so no backup/rewrite is needed.
    *
    * @param promptPassphrase - Injected prompt function (e.g. the server's
    *   existing masked-input startup prompt), for testability and so this
@@ -393,6 +398,10 @@ export class ConfigManager implements IConfigManager {
   unlockOrSetupProvidersCipher = async (
     promptPassphrase: (label: string) => Promise<string>,
   ): Promise<void> => {
+    if (isUnlocked()) {
+      return;
+    }
+
     const promptNewPassphrase = () => promptPassphrase(NEW_PASSPHRASE_LABEL);
 
     let rawContent: string;
@@ -412,9 +421,7 @@ export class ConfigManager implements IConfigManager {
       const envelope = stored.$providersSecrets as SecretsEnvelope;
       let wrongAttempts = 0;
       for (;;) {
-        const passphrase = await promptPassphrase(
-          "Enter your provider-secrets passphrase: ",
-        );
+        const passphrase = await promptPassphrase(EXISTING_PASSPHRASE_LABEL);
         try {
           unlockCipher(passphrase, envelope);
           return;
@@ -440,23 +447,8 @@ export class ConfigManager implements IConfigManager {
       }
     }
 
-    // Legacy plaintext config (or a file that never had providers at all).
+    // Config exists but has no $providersSecrets yet (defaults-only file).
     initializeCipher(await promptNewPassphrase());
-    if (
-      !stored.providers ||
-      Object.keys(stored.providers as object).length === 0
-    ) {
-      // Nothing sensitive on disk yet — no migration write needed; the next
-      // natural _saveRaw() call (from any config change) will encrypt it.
-      return;
-    }
-    const backupPath = `${this.configPath}.bak-${Date.now()}`;
-    await fs.copyFile(this.configPath, backupPath);
-    await fs.chmod(backupPath, 0o600);
-    await this._saveRaw(await this._loadRaw());
-    process.stderr.write(
-      `Migrated provider secrets to encrypted storage. Previous plaintext config backed up to ${backupPath}.\n`,
-    );
   };
 
   /**
