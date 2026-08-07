@@ -16,7 +16,7 @@ LoopyCode is a self-hosted, client/server AI coding agent. You run **`loopy-serv
 
 ## Requirements
 
-- Node.js 22
+- Node.js 24
 - An LLM backend: [Ollama](https://ollama.com) installed locally
 - Optional: Rust/`cargo`, if you want the [TokenSave](#optional-tokensave) integration
 

@@ -11,8 +11,7 @@
     "test:system": "vitest run system",
     "test:e2e": "npm run build --prefix ../packages/client && vitest run system",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "report:untested": "node scripts/findUntestedExports.mjs"
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^2.0.0",
