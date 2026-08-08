@@ -7,6 +7,7 @@ import {
   appendHistory,
   cancelPendingApprovals,
   cancelPendingPrompts,
+  clearLiveThinks as clearBridgeLiveThinks,
   clearSubagentBoards,
   clearSubagentStatuses,
   setBusy as setBridgeBusy,
@@ -37,6 +38,7 @@ const resetTaskUiState = (
   setBridgeBusy(false);
   setBridgeSpinner(null);
   setBridgeStreamingText(null);
+  clearBridgeLiveThinks();
   clearSubagentStatuses();
   clearSubagentBoards();
 
@@ -45,6 +47,7 @@ const resetTaskUiState = (
   setters.setBusy(false);
   setters.setSpinner(null);
   setters.setStreamingText(null);
+  setters.setLiveThinks([]);
   setters.setSubagentStatuses(() => new Map());
   setters.setSubagentBoards([]);
 };

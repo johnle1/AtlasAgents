@@ -24,6 +24,7 @@ import type {
 
 // ===== CONSTANTS IMPORTS =====
 import {
+  CONFIDENCE_DENSITY_WEIGHT,
   DEFAULT_CONTEXT_WINDOW,
   HIGHLIGHT_WORDS,
   TASK_TYPE_WORDS,
@@ -53,6 +54,55 @@ export const approxTokens = (textContent: string): number => {
   }
   // 1 token per 4 chars; round up for conservative budget
   return Math.ceil(textContent.length / 4);
+};
+
+/**
+ * Truncates a pattern body to fit a token budget alongside a fixed header.
+ *
+ * @param body - The pattern text to truncate
+ * @param header - Fixed text that will be prepended to `body` and counted
+ *   against the same budget (e.g. a `"- filename.md\n"` heading)
+ * @param tokenBudget - Total tokens available for `header + body` combined
+ * @returns The largest prefix of `body`, cut at the last newline at or
+ *   before the character budget, that fits `header + body` within
+ *   `tokenBudget`; `""` if nothing fits or `body` fits entirely, `body`
+ *   unchanged if it already fits
+ *
+ * @remarks
+ * Computes the cutoff directly from {@link approxTokens}'s inverse rather
+ * than trimming a few characters at a time in a loop — `approxTokens` is
+ * `Math.ceil(length / 4)`, and for an integer `tokenBudget`,
+ * `header.length + s.length <= tokenBudget * 4` is exactly equivalent to
+ * `approxTokens(header + s) <= tokenBudget`. This is O(1) instead of
+ * O(originalLength) for the previous trim-16-chars-at-a-time loop.
+ *
+ * Always backs off to the last newline within the character budget rather
+ * than cutting mid-line, so truncation never splits a word or a markdown
+ * construct (e.g. a code fence) — which means a single very long line with
+ * no newline inside the budget truncates to `""` (the caller skips the
+ * pattern entirely) rather than returning a partial, potentially-corrupted
+ * line.
+ *
+ * @example
+ * ```ts
+ * truncateToTokenBudget("line one\nline two\nline three", "- doc.md\n", 5)
+ * //  "line one" (cut at the newline before the char budget)
+ * ```
+ */
+export const truncateToTokenBudget = (
+  body: string,
+  header: string,
+  tokenBudget: number,
+): string => {
+  const maxBodyChars = Math.max(0, tokenBudget * 4 - header.length);
+
+  if (body.length <= maxBodyChars) {
+    return body;
+  }
+
+  const candidate = body.slice(0, maxBodyChars);
+  const lastNewline = candidate.lastIndexOf("\n");
+  return lastNewline === -1 ? "" : candidate.slice(0, lastNewline);
 };
 
 /**
@@ -170,37 +220,68 @@ export const resolveContextLength = (ollamaModelInfo: ModelInfo): number => {
 };
 
 /**
- * Sorts preference rules by usage frequency (descending), then creation time (ascending).
+ * Sorts preference rules by value density (descending), then creation time (ascending).
  *
  * @param rules - Unsorted preference rules to prioritize
  * @returns New sorted array; original unmodified
  *
  * @remarks
  * **Sort order:**
- * 1. Primary: highest usage (timesApplied) first — proven rules come first
- * 2. Tiebreaker: oldest first (ISO timestamp) — FIFO for same usage level
+ * 1. Primary: highest value density first — a blend of `confidence` and
+ *    proven usage (`Math.log1p(timesApplied)`) per token the rule costs to
+ *    render (`score / approxTokens("- " + text + "\n")`), not raw usage
+ *    count. A frequently-used rule that costs many tokens can still rank
+ *    below a less-used but much cheaper rule, since the goal is maximizing
+ *    useful coverage within a fixed token budget, not raw usage.
+ *    `log1p` is used instead of the raw count so an occasionally-applied
+ *    rule isn't drowned out by one applied hundreds of times — usage
+ *    matters, but with diminishing returns, and confidence stays a
+ *    meaningful signal even before a rule has accumulated any usage at all
+ *    (previously `timesApplied` alone decided ranking, and in practice was
+ *    almost always 0 in production, so ranking degenerated to insertion order).
+ * 2. Tiebreaker: oldest first (ISO timestamp) — FIFO for equal density
  *
- * Does not mutate the input array. Most-used rules are prioritized in the context
- * header to maximize coverage within token budget.
+ * The token cost is computed against the exact same rendered line
+ * (`"- " + text + "\n"`) that {@link ContextBuilder.build} later charges
+ * against the budget, so the ranking matches actual cost exactly rather
+ * than approximating from `text` alone.
+ *
+ * **Performance:** each rule's density is computed exactly once up front
+ * (decorate-sort-undecorate) rather than recomputed inside the comparator on
+ * every comparison — the previous approach paid the O(rule text length)
+ * cost of `density()` roughly `2 · R log R` times for `R` rules; this pays
+ * it `R` times, leaving only cheap numeric comparisons in the sort itself.
+ *
+ * Does not mutate the input array.
  *
  * @example
  * ```ts
  * const unsorted = [
- *   { id: "a", timesApplied: 2, timestamp: "2025-01-05", ... },
- *   { id: "b", timesApplied: 5, timestamp: "2025-01-01", ... },
- *   { id: "c", timesApplied: 2, timestamp: "2025-01-01", ... },
+ *   { id: "a", timesApplied: 2, text: "short rule", timestamp: "2025-01-05", ... },
+ *   { id: "b", timesApplied: 5, text: "a very long, expensive rule ...", timestamp: "2025-01-01", ... },
+ *   { id: "c", timesApplied: 2, text: "short rule", timestamp: "2025-01-01", ... },
  * ];
  * const sorted = sortRules(unsorted);
- *  [b (5x), c (2x, older), a (2x, newer)]
+ *  [c, a] cheap-and-used rules can outrank b's raw usage count if b is expensive enough
  * ```
  */
 export const sortRules = (rules: PreferenceRule[]): PreferenceRule[] => {
-  return [...rules].sort((firstRule, secondRule) => {
-    // Sort by usage frequency descending (higher count wins)
-    if (secondRule.timesApplied !== firstRule.timesApplied) {
-      return secondRule.timesApplied - firstRule.timesApplied;
+  const density = (rule: PreferenceRule): number => {
+    const score = CONFIDENCE_DENSITY_WEIGHT[rule.confidence] + Math.log1p(rule.timesApplied);
+    return score / Math.max(1, approxTokens(`- ${rule.text}\n`));
+  };
+
+  const decorated = rules.map((rule) => ({ rule, density: density(rule) }));
+
+  decorated.sort((first, second) => {
+    // Sort by value density descending (higher confidence/usage-per-token wins)
+    const densityDifference = second.density - first.density;
+    if (densityDifference !== 0) {
+      return densityDifference;
     }
     // Tiebreaker: sort by timestamp ascending (older first for predictable FIFO)
-    return firstRule.timestamp.localeCompare(secondRule.timestamp);
+    return first.rule.timestamp.localeCompare(second.rule.timestamp);
   });
+
+  return decorated.map((entry) => entry.rule);
 };

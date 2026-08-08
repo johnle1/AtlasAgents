@@ -10,7 +10,7 @@
 
 import * as path from "node:path";
 import * as os from "node:os";
-import type { SecretsEnvelope } from "../crypto/configCipher.js";
+import type { SecretsEnvelope } from "@loopycode/shared";
 
 /** The `Config` fields sensitive enough to encrypt at rest. */
 export type SecretConfigFields = Pick<Config, "password" | "server">;

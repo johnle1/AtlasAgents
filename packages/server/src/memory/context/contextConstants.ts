@@ -158,3 +158,26 @@ export const TASK_TYPE_WORDS = new Set([
   "document",
   "explain",
 ]);
+
+/**
+ * Weight contributed by a rule's `confidence` to its value-density ranking score.
+ *
+ * @remarks
+ * Used by `contextHelpers.sortRules()`. Before this, `confidence` was
+ * persisted and merge-compared but never actually influenced which rules
+ * got selected into the context header — ranking was driven by
+ * `timesApplied` alone, which in practice was almost always 0 (nothing
+ * called `markApplied` in production), so rules effectively ranked by
+ * insertion order. Folding `confidence` into density means an explicit,
+ * high-trust rule outranks a low-confidence guess even before either has
+ * accumulated any usage.
+ *
+ * Values are on the same rough scale as `Math.log1p(timesApplied)` (which
+ * ranges ~0–3 for realistic usage counts) so neither term dominates by
+ * construction alone.
+ */
+export const CONFIDENCE_DENSITY_WEIGHT: Record<"high" | "medium" | "low", number> = {
+  high: 3,
+  medium: 2,
+  low: 1,
+};

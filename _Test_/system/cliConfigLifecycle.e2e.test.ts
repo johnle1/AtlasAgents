@@ -1,7 +1,7 @@
 /**
  * System (E2E) tests — CLI config bootstrap and encryption-at-rest.
  *
- * Spawns the compiled `loopy` CLI as a real subprocess, same as
+ * Spawns the compiled `loopycode` CLI as a real subprocess, same as
  * `cli.e2e.test.ts`, but focused specifically on what happens to
  * `~/.agent-cli/config.json` on disk rather than on stdout/exit-code
  * behavior. This is only observable from outside the process — there is no

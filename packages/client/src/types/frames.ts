@@ -21,9 +21,9 @@
  * Structure of an installed model on the server.
  *
  * @remarks
- * This type represents model information returned by the server's `/models`
- * endpoint. It includes basic metadata like name and size, plus optional
- * detailed information about the model's architecture, parameters, and format.
+ * Alias of `@loopycode/shared`'s `ModelSummary` — the same wire shape the
+ * server's `OllamaModelSummary` aliases, since `models.list` round-trips it
+ * as-is with no transformation.
  *
  * Used by:
  * - `Connection.fetchModelsDetailed` — returns objects of this shape
@@ -43,34 +43,7 @@
  * };
  * ```
  */
-export type InstalledModel = {
-  /** Model name e.g., "gemma3:27b" or "llama3:8b". */
-  name: string;
-
-  /** Model size in bytes (optional, may not be available). */
-  size?: number;
-
-  /** Model digest/hash for verification (optional). */
-  digest?: string;
-
-  /** Last modification timestamp (optional ISO format). */
-  modified_at?: string;
-
-  /** Detailed model metadata (optional). */
-  details?: {
-    /** Model family e.g., "Gemma", "Llama". */
-    family?: string;
-
-    /** Parameter size e.g., "27B", "8B". */
-    parameter_size?: string;
-
-    /** Quantization level e.g., "Q4_K_M", "F16". */
-    quantization_level?: string;
-
-    /** Model format e.g., "GGUF", "Safetensors". */
-    format?: string;
-  };
-};
+export type { ModelSummary as InstalledModel } from "@loopycode/shared";
 
 // Re-export shared types from @loopycode/shared for use in the client
 export type {

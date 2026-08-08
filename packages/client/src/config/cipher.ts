@@ -15,7 +15,7 @@ import {
   initializeCipher,
   rotateKey,
   unlockCipher,
-} from "../crypto/configCipher.js";
+} from "@loopycode/shared";
 import type { SecretConfigFields, StoredConfig } from "./types.js";
 import {
   CONFIG_FILE,

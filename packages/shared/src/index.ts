@@ -3,6 +3,17 @@ export type {
   ClientRoute,
   ClientOpResponse,
 } from "./protocol/clientProtocol.js";
+export type {
+  RouteId,
+  StreamKind,
+  TaskStreamPayload,
+} from "./protocol/serverProtocol.js";
+export {
+  ROUTE_IDS,
+  isRouteId,
+  STREAM_KINDS,
+  isStreamKind,
+} from "./protocol/serverProtocol.js";
 export type { DiffDisplayLine } from "./diff/diffEngine.js";
 export {
   computeDiff,
@@ -24,3 +35,16 @@ export type {
   TaskLifecycleState,
 } from "./frames/frames.js";
 export { decodeFrame, encodeFrame } from "./frames/frames.js";
+export type { SecretsEnvelope } from "./crypto/configCipher.js";
+export {
+  ConfigCipherLockedError,
+  ConfigDecryptionError,
+  initializeCipher,
+  unlockCipher,
+  encryptSecrets,
+  decryptSecrets,
+  rotateKey,
+  isUnlocked,
+  lockCipher,
+} from "./crypto/configCipher.js";
+export type { ModelSummary, ModelDetails } from "./models/modelSummary.js";

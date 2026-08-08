@@ -13,6 +13,7 @@ import type {
   ApprovalRequest,
   ApprovalResult,
   HistoryItem,
+  LiveThink,
   PromptRequest,
   PromptResult,
   SpinnerState,
@@ -30,6 +31,10 @@ export type BridgeHooks = {
   onHistoryAppend?: (historyItem: HistoryItem) => void;
   /** Callback invoked when streaming text is set or cleared. */
   onStreamingSet?: (streamingText: string | null) => void;
+  /** Callback invoked to update the live (in-progress) think streams array. */
+  onLiveThink?: (
+    thinkUpdater: (previousLiveThinks: LiveThink[]) => LiveThink[],
+  ) => void;
   /** Callback invoked when spinner state changes. */
   onSpinner?: (spinnerState: SpinnerState | null) => void;
   /** Callback invoked to update agent statuses map. */

@@ -24,4 +24,4 @@ See the [project README](https://github.com/johnle1/LoopyCode#readme) for the fu
 
 ## License
 
-ISC
+Apache-2.0

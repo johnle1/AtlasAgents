@@ -34,6 +34,7 @@ import {
 } from "./handlers/index.js";
 import { createTlsServerTransport } from "../tls/tlsServerTransport.js";
 import type { ServerCertificate } from "../tls/certificateStore.js";
+import { logger } from "../../utils/logger.js";
 
 /**
  * An RSocket/TCP server that authenticates, routes, and cancels LoopyCode CLI
@@ -180,11 +181,9 @@ export class RSocketServer {
    *    the session, and fires the `onConnectionClosed` callback.
    * 4. Returns the `requestResponse` and `requestStream` handlers for this peer.
    *
-   * The SETUP payload is intentionally ignored: authentication happens
-   * per-frame inside the returned handlers, not at connection time.
+   * The SETUP payload is never used for authentication, which happens
+   * per-frame inside the returned handlers rather than at connection time.
    *
-   * @param _setup - The RSocket SETUP payload. Unused — kept only to satisfy
-   *   the acceptor signature.
    * @param remotePeer - The peer socket, used to register the disconnect hook
    *   and to send server→client frames.
    * @returns A partial RSocket exposing `requestResponse` and `requestStream`
@@ -196,6 +195,8 @@ export class RSocketServer {
   ): Promise<Partial<RSocket>> => {
     const requesterId = crypto.randomUUID();
 
+    logger.info(`TLS connection established (requesterId=${requesterId})`);
+
     const record: SessionRecord = {
       abortControllers: new Set(),
       remotePeer,
@@ -206,6 +207,7 @@ export class RSocketServer {
     peers.set(requesterId, remotePeer);
 
     remotePeer.onClose(() => {
+      logger.info(`Connection closed (requesterId=${requesterId})`);
       for (const ac of record.abortControllers) {
         ac.abort();
       }

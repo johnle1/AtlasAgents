@@ -17,34 +17,14 @@
  */
 
 /**
- * Nested model metadata details from Ollama's tags or show endpoints.
+ * Nested model metadata details from Ollama's tags or show endpoints, and
+ * the summary of one installed model from `GET /api/tags`.
  *
  * @remarks
- * Represents the optional `details` object nested inside model responses.
- * Ollama may include this when listing models or showing metadata, but
- * inclusion and field names vary by version.
- */
-export interface OllamaModelDetails {
-  /** Model family (e.g. "llama", "gemma", "mistral"). */
-  family?: string;
-
-  /** Human-readable parameter count (e.g. "7B", "70B"). */
-  parameter_size?: string;
-
-  /** Quantization level (e.g. "Q4_K_M", "Q8_0"). */
-  quantization_level?: string;
-
-  /** Model file format (e.g. "gguf", "ggml"). */
-  format?: string;
-}
-
-/**
- * Summary of one installed model from `GET /api/tags`.
- *
- * @remarks
- * Represents a single row in the list of downloaded/installed models.
- * Includes basic metadata: name, size, digest for integrity checking.
- * The `details` object may carry additional metadata but is often absent.
+ * Re-exported under Ollama-specific names from `@loopycode/shared`'s
+ * `ModelDetails`/`ModelSummary` — this is the same wire shape the client's
+ * `InstalledModel` type aliases, since `models.list` round-trips it as-is
+ * with no transformation.
  *
  * @example
  * ```ts
@@ -55,22 +35,10 @@ export interface OllamaModelDetails {
  * // ]
  * ```
  */
-export interface OllamaModelSummary {
-  /** Model tag name (e.g. "llama3:8b", "gemma3:latest"). The name used in chat/pull requests. */
-  name: string;
-
-  /** Total size in bytes when Ollama reports it. */
-  size?: number;
-
-  /** SHA256 digest for model verification. */
-  digest?: string;
-
-  /** ISO-8601 timestamp when the model was last modified. */
-  modified_at?: string;
-
-  /** Nested metadata (family, quantization level, parameter count, etc.). Often absent. */
-  details?: OllamaModelDetails;
-}
+export type {
+  ModelSummary as OllamaModelSummary,
+  ModelDetails as OllamaModelDetails,
+} from "@loopycode/shared";
 
 /**
  * One progress update streamed from `POST /api/pull` (model download).
@@ -199,8 +167,29 @@ export interface RunningModel {
   /** Technical model identifier with version/digest info. */
   model?: string;
 
-  /** Size in bytes of the loaded model in memory. */
+  /** Size in bytes of the loaded model in memory (VRAM + system RAM combined). */
   size?: number;
+
+  /**
+   * Bytes of this model resident in GPU VRAM.
+   *
+   * @remarks
+   * Compared against {@link RunningModel.size} this is the only signal Ollama
+   * gives for *where* a model actually runs — it's what `ollama ps` uses to
+   * print its `100% GPU` / `52%/48% CPU/GPU` column:
+   * - `size_vram === size` — fully on GPU
+   * - `0 < size_vram < size` — split; the remainder runs on CPU
+   * - `size_vram === 0` — entirely on CPU
+   *
+   * A model that spilled to CPU is typically an order of magnitude slower,
+   * so this is usually the first thing to check when inference feels slow.
+   * See {@link describeModelPlacement} in `ollama/modelPlacement.ts`.
+   *
+   * Absent on older Ollama servers and on OpenAI-compatible providers (whose
+   * admin shim reports `size: 0` with no VRAM data) — treated as "unknown"
+   * rather than "on CPU" so non-Ollama backends never trigger false warnings.
+   */
+  size_vram?: number;
 
   /** SHA256 digest for model integrity verification. */
   digest?: string;

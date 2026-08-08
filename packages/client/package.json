@@ -4,7 +4,7 @@
   "description": "LoopyCode CLI client",
   "main": "dist/index.js",
   "bin": {
-    "loopy": "dist/index.js"
+    "loopycode": "dist/index.js"
   },
   "files": [
     "dist",
@@ -26,7 +26,7 @@
   },
   "type": "module",
   "dependencies": {
-    "@loopycode/shared": "^0.1.0",
+    "@loopycode/shared": "^1.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@rsocket/core": "1.0.0-alpha.3",
     "@rsocket/tcp-client": "1.0.0-alpha.3",

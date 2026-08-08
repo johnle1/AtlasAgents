@@ -9,6 +9,7 @@
  */
 
 import type { Payload, RSocket } from "@rsocket/core";
+import type { RouteId } from "@loopycode/shared";
 import type { InstalledModel } from "../types/frames.js";
 import type {
   MemoryEntry,
@@ -93,7 +94,8 @@ export const requestResponseBuffer = (
  *
  * @typeParam TResponse - Expected shape of `envelope.data` for this route.
  * @param rsocket - Live RSocket connection.
- * @param type - Route string such as `"models.list"` or `"memory.get"`.
+ * @param type - Route id such as `"models.list"` or `"memory.get"`, checked
+ *   against the server's `RouteId` union at compile time.
  * @param payload - Command-specific JSON body (use `{}` when unused).
  * @param metadata - Auth metadata from {@link authMetadata}.
  * @returns `envelope.data` cast to `TResponse`.
@@ -112,7 +114,7 @@ export const requestResponseBuffer = (
  */
 export async function sendCommand<TResponse>(
   rsocket: RSocket,
-  type: string,
+  type: RouteId,
   payload: unknown,
   metadata: Buffer,
 ): Promise<TResponse> {

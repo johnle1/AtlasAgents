@@ -15,7 +15,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/johnle1/LoopyCode.git",
@@ -27,9 +27,9 @@
   ],
   "type": "commonjs",
   "dependencies": {
-    "@loopycode/shared": "^0.1.0",
-    "@rsocket/core": "1.0.0-alpha.3",
-    "@rsocket/tcp-server": "1.0.0-alpha.3",
+    "@loopycode/shared": "^1.0.0",
+    "@rsocket/core": "^1.0.0-alpha.3",
+    "@rsocket/tcp-server": "^1.0.0-alpha.3",
     "diff": "^9.0.0",
     "fast-glob": "^3.3.3",
     "picocolors": "^1.1.1",

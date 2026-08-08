@@ -17,6 +17,7 @@
  * useBridgeSetup({
  *   setHistory,
  *   setStreamingText,
+ *   setLiveThinks,
  *   setSpinner,
  *   setBusy,
  *   setTaskActive,
@@ -69,6 +70,7 @@ import {
 export const useBridgeSetup = ({
   setHistory,
   setStreamingText,
+  setLiveThinks,
   setSpinner,
   setBusy,
   setTaskActive,
@@ -111,6 +113,7 @@ export const useBridgeSetup = ({
       onHistoryAppend: (historyItem) =>
         setHistory((previousHistory) => [...previousHistory, historyItem]),
       onStreamingSet: (streamingText) => setStreamingText(streamingText),
+      onLiveThink: (thinkUpdater) => setLiveThinks(thinkUpdater),
       onSpinner: (spinnerState) => setSpinner(spinnerState),
       onBusy: (isBusy) => setBusy(isBusy),
       onTaskActive: (isTaskActive) => setTaskActive(isTaskActive),
@@ -168,6 +171,7 @@ export const useBridgeSetup = ({
   }, [
     setHistory,
     setStreamingText,
+    setLiveThinks,
     setSpinner,
     setBusy,
     setTaskActive,

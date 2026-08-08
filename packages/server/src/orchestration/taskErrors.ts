@@ -7,7 +7,7 @@
  * orchestrator failure messages with context and troubleshooting steps.
  */
 
-import { ConfigError } from "../config/configManager/index.js";
+import { ConfigError } from "../config/index.js";
 import { AppError } from "../errors/appError.js";
 import { OllamaError } from "../ollama/types.js";
 

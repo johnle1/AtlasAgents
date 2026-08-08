@@ -116,8 +116,43 @@ export const STOP_WORDS = new Set([
   "task",
 ]);
 
-/** Minimum keyword score to include a second (domain) skill alongside the stack skill. */
-export const DOMAIN_MIN_SCORE = 3;
+/**
+ * Minimum score for the best domain-flagged skill, relative to the overall
+ * best score, to include it as a second result alongside the stack skill.
+ *
+ * @remarks
+ * Replaces a prior absolute threshold (`score >= 3`) that only made sense
+ * against fixed integer weights. Once scoring is IDF-weighted (see
+ * {@link scoreSkillForTask}), scores are floats on no fixed scale, so a
+ * relative bar — "at least 30% as relevant as the best match" — is the one
+ * that stays meaningful as the skill corpus and its vocabulary change.
+ *
+ * @defaultValue 0.3
+ */
+export const DOMAIN_RELATIVE_THRESHOLD = 0.3;
+
+/** Score weight for a task word found in a skill's declared `keywords`. */
+export const KEYWORD_FIELD_WEIGHT = 3;
+
+/** Score weight for a task word found in the skill's name. */
+export const NAME_FIELD_WEIGHT = 2;
+
+/** Score weight for a task word found anywhere in the skill's body. */
+export const BODY_FIELD_WEIGHT = 1;
+
+/**
+ * Floor applied to every token's IDF weight.
+ *
+ * @remarks
+ * Plain IDF pushes near 0 as a token's document frequency approaches the
+ * total skill count, which would nearly zero out a field match on a term
+ * that's merely common (e.g. present in 2 of 8 skills) rather than useless.
+ * Flooring keeps every matched field contributing a non-trivial amount
+ * regardless of corpus size.
+ *
+ * @defaultValue 0.3
+ */
+export const MIN_IDF = 0.3;
 
 /** Invalid filesystem characters regex for sanitizing skill filenames. */
 export const INVALID_FS_CHARS = /[<>:"|?*\x00-\x1f]/g;

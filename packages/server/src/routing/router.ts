@@ -8,28 +8,24 @@
 import type { TaskFrame } from "../transport/frames.js";
 import type {
   Session,
-  TaskRequest,
   RouteId,
   ROUTE_IDS,
   StreamKind,
   STREAM_KINDS,
   CommandHandler,
   StreamHandler,
-  TaskHandler,
   RouterDeps,
 } from "./types.js";
 import { isRouteId, isStreamKind } from "./types.js";
 
 export {
   Session,
-  TaskRequest,
   RouteId,
   ROUTE_IDS,
   StreamKind,
   STREAM_KINDS,
   CommandHandler,
   StreamHandler,
-  TaskHandler,
   RouterDeps,
   isRouteId,
   isStreamKind,
@@ -205,70 +201,5 @@ export class Router {
 
     // Delegate to the handler with streaming callbacks
     return handler(session, payload, emit, signal);
-  };
-
-  /**
-   * Delegates a parsed task request to the configured TaskHandler.
-   *
-   * @remarks
-   * This method is a specialized entry point for task execution streams.
-   * Unlike `routeStream`, which handles general streaming operations, this
-   * method is specifically designed for the task execution workflow.
-   *
-   * The method validates that a task handler is configured and then delegates
-   * to it. The task handler is responsible for coordinating with the
-   * AgentOrchestrator to plan and execute the task, streaming results back
-   * through the `emit` callback.
-   *
-   * This method exists because task execution has special requirements:
-   - It uses a specific payload format (`TaskRequest`)
-   - It emits raw text tokens rather than structured frames
-   - It requires tight integration with the orchestrator
-   *
-   * @param session - Authenticated session containing user ID and connection ID.
-   * @param req - Parsed task request containing text, models, and temperature settings.
-   * @param emit - Callback for sending individual text tokens to the client.
-   * @param signal - AbortSignal that becomes signaled when the client disconnects.
-   * @returns A promise that resolves when task execution completes.
-   * @throws {@link Error} When no task handler is configured in the dependencies.
-   *
-   * @example
-   * ```ts
-   * const taskRequest: TaskRequest = {
-   *   text: "Add authentication to the API",
-   *   subagentModel: "gemma3:27b",
-   *   subsubagentModel: "gemma3:9b",
-   *   agentTemp: 0.7,
-   *   subagentTemp: 0.5
-   * };
-   *
-   * try {
-   *   await router.routeTask(
-   *     session,
-   *     taskRequest,
-   *     (token) => process.stdout.write(token),
-   *     abortSignal
-   *   );
-   * } catch (err) {
-   *   if (err.message.includes("not configured")) {
-   *     // Task execution not available in this configuration
-   *   }
-   * }
-   * ```
-   */
-  routeTask = async (
-    session: Session,
-    req: TaskRequest,
-    emit: (token: string) => void,
-    signal: AbortSignal,
-  ): Promise<void> => {
-    // Check if a task handler is configured
-    const task = this.deps.task;
-    if (!task) {
-      throw new Error("Task handler not configured");
-    }
-
-    // Delegate to the task handler for execution
-    await task(session, req, emit, signal);
   };
 }

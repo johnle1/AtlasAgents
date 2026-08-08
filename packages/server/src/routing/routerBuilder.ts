@@ -44,7 +44,7 @@ import type { OllamaClient } from "../ollama/client.js";
 import type { IConfigManager } from "../orchestration/interfaces/configInterfaces.js";
 import type { ProviderRegistry } from "../providers/providerRegistry.js";
 import type { PreferenceRule } from "../orchestration/interfaces.js";
-import type { ServerConfig } from "../config/configManager/index.js";
+import type { ServerConfig } from "../config/index.js";
 
 export { IOrchestrator, PreferenceRulesTransformer, RouterBuilderDeps };
 
@@ -58,11 +58,7 @@ function parseStringField(
   field: string,
   defaultValue: string = "",
 ): string {
-  if (
-    typeof payload === "object" &&
-    payload !== null &&
-    field in payload
-  ) {
+  if (typeof payload === "object" && payload !== null && field in payload) {
     const body = payload as Record<string, unknown>;
     return String(body[field] ?? defaultValue);
   }
@@ -73,11 +69,7 @@ function parseStringField(
  * Safely gets a nested object from payload or returns empty object.
  */
 function parseObjectField<T>(payload: unknown, field: string): T {
-  if (
-    typeof payload === "object" &&
-    payload !== null &&
-    field in payload
-  ) {
+  if (typeof payload === "object" && payload !== null && field in payload) {
     const body = payload as Record<string, unknown>;
     const value = body[field];
     if (typeof value === "object" && value !== null) {
@@ -263,7 +255,10 @@ function createListProvidersHandler(config: IConfigManager): CommandHandler {
     const agentProvider = await config.getAgentProvider();
     const subagentProvider = await config.getSubagentProvider();
     return {
-      providers: { [OLLAMA_PROVIDER_NAME]: {}, ...stripProviderSecrets(providers) },
+      providers: {
+        [OLLAMA_PROVIDER_NAME]: {},
+        ...stripProviderSecrets(providers),
+      },
       agentProvider,
       subagentProvider,
     };
@@ -427,7 +422,10 @@ function createMcpToolsSyncHandler(
     let perConnection = brokerByRequester.get(session.requesterId);
 
     if (!perConnection) {
-      const newPerConnection = createPerConnection(session.requesterId, () => {});
+      const newPerConnection = createPerConnection(
+        session.requesterId,
+        () => {},
+      );
       brokerByRequester.set(session.requesterId, newPerConnection);
       perConnection = newPerConnection;
     }
@@ -617,7 +615,10 @@ function createExploreStreamHandler(
   return async (connection, _payload, emit, signal) => {
     let perConnection = brokerByRequester.get(connection.requesterId);
     if (!perConnection) {
-      const newPerConnection = createPerConnection(connection.requesterId, emit);
+      const newPerConnection = createPerConnection(
+        connection.requesterId,
+        emit,
+      );
       brokerByRequester.set(connection.requesterId, newPerConnection);
       perConnection = newPerConnection;
     }

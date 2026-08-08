@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text } from "ink";
 import {
   buildTaskBoardLines,
+  buildTaskBoardProgress,
+  resolveTaskBoardProgressColor,
+  TASK_BOARD_BORDER_RESERVED_COLUMNS,
   taskBoardInnerWidth,
 } from "../taskBoardLayout.js";
 import {
@@ -29,7 +32,7 @@ const GLYPH = 2;
  * @remarks
  * Displays the current workflow status of an agent using clean terminal lines.
  * It animates active tasks using an internal interval tick (`pulseIndex`), maps task status
- * (e.g. `running`, `completed`, `failed`) to visual indicators, and gracefully truncates
+ * (e.g. `running`, `complete`, `failed`) to visual indicators, and gracefully truncates
  * the rendering if the tasks exceed layout height constraints.
  *
  * @example
@@ -42,8 +45,8 @@ const GLYPH = 2;
  *   id: 3,
  *   label: "tester",
  *   tasks: [
- *     { id: "t1", state: "completed", label: "Lint codebase" },
- *     { id: "t2", state: "running", label: "Run unit tests" }
+ *     { id: 1, state: "complete", text: "Lint codebase" },
+ *     { id: 2, state: "running", text: "Run unit tests" }
  *   ]
  * };
  *
@@ -87,28 +90,79 @@ export const SubagentTaskBoard: React.FC<Props> = ({ board }) => {
       ? `Agent ${board.id} — ${board.label}`
       : `Agent ${board.id}`;
 
-  const innerWidth = taskBoardInnerWidth();
+  // Reserve columns for the card's round border + horizontal padding so
+  // wrapped lines never grow wide enough to get clipped against the border.
+  const innerWidth = taskBoardInnerWidth(TASK_BOARD_BORDER_RESERVED_COLUMNS);
+
+  // Current subagent activity (e.g. "Thinking…", "Running: npm test"),
+  // appended as a trailing board line — see buildTaskBoardLines.
+  const activityMessage = board.activity?.message;
 
   // Computes the formatted output lines, allocating text space dynamically.
   const contentLines = useMemo(
-    () => buildTaskBoardLines(visibleTasks, undefined, innerWidth),
-    [visibleTasks, innerWidth],
+    () => buildTaskBoardLines(visibleTasks, activityMessage, innerWidth),
+    [visibleTasks, activityMessage, innerWidth],
+  );
+
+  // Whole-board completion summary (uses all tasks, not just the visible
+  // slice, so the percentage stays accurate once tasks scroll past
+  // MAX_VISIBLE_TASKS). "Finished" includes both complete and failed tasks
+  // so the bar/color reach 100%/settle once every task has stopped
+  // executing, regardless of outcome — a board that finishes with a
+  // failure should still visibly stop, just in red instead of green.
+  const finishedCount = board.tasks.filter(
+    (task) => task.state === "complete" || task.state === "failed",
+  ).length;
+  const failedCount = board.tasks.filter(
+    (task) => task.state === "failed",
+  ).length;
+  const progressLine = buildTaskBoardProgress(
+    finishedCount,
+    board.tasks.length,
+  );
+  const progressColor = resolveTaskBoardProgressColor(
+    finishedCount,
+    failedCount,
+    board.tasks.length,
   );
 
   return (
-    <Box flexDirection="column" marginLeft={2} marginBottom={0}>
+    <Box
+      flexDirection="column"
+      alignSelf="flex-start"
+      marginLeft={2}
+      marginBottom={1}
+      borderStyle="round"
+      borderColor="cyan"
+      paddingX={1}
+    >
       {/* Group Title: acts as the header for the task list hierarchy */}
       <Text bold color="cyan">
         • {title}
       </Text>
 
+      {/* Progress summary: "N/M [bar] NN.N%" — same block-character style as
+          the model-pull download progress bar in renderer/modelOutput.ts */}
+      {progressLine && <Text color={progressColor}>{progressLine}</Text>}
+
       {/* Render each subtask line by applying state-specific colors and symbols */}
       {contentLines.map((line) => {
+        // The trailing activity line (e.g. "Thinking…") has no source task to
+        // match against — render it as a plain dim status line instead.
+        if (line.isActivity) {
+          return (
+            <Text key={line.key} dimColor>
+              {line.glyphPrefix.length === 0 ? "  ↳ " : "    "}
+              {line.text}
+            </Text>
+          );
+        }
+
         // Match the line back to the source task to resolve its active execution state.
         const task = visibleTasks.find((candidate) =>
           line.key.startsWith(`task-${candidate.id}-`),
         );
-        
+
         // Convert status state to a theme-compliant color palette and text styling.
         const visual = resolveTaskLifecycleVisual(
           task?.state ?? "waiting",

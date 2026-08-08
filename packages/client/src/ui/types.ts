@@ -25,7 +25,8 @@ export type HistoryVariant =
   | "system"
   | "error"
   | "success"
-  | "secondary";
+  | "secondary"
+  | "warning";
 
 /**
  * One renderable item in the terminal scrollback.
@@ -76,6 +77,28 @@ export type HistoryItem =
       /** Multi-line styled block rendered as a unit. */
       lines: string[];
     };
+
+/**
+ * One in-progress "thinking" stream currently rendering live, below the
+ * frozen scrollback and above the input line.
+ *
+ * @remarks
+ * Exists only while a server `think-start` … `think-end` sequence is in
+ * flight; removed once the completed block commits to {@link HistoryItem}
+ * scrollback as a `kind: "think"` entry. `label` is `null` for the lead
+ * agent (rendered as "Agent thinking…") and the subagent's display label
+ * otherwise (rendered as "`<label>` thinking…").
+ */
+export type LiveThink = {
+  /** Wire id from the `think-start` frame; distinguishes concurrent streams. */
+  id: string;
+  /** Accumulated text streamed so far (grows with each `think-delta`). */
+  text: string;
+  /** `true` for the lead agent, `false` for a subagent. */
+  agent: boolean;
+  /** Subagent display label, or `null` for the lead agent. */
+  label: string | null;
+};
 
 /** Spinner animation bucket for the bottom status line. */
 export type SpinnerMode = "thinking" | "working";

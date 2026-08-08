@@ -48,7 +48,10 @@ export interface LanguageHint {
  *
  * @remarks
  * Represents one learnable or explicit user preference that guides agent behavior.
- * Rules are ranked by confidence and times applied, and matched to tasks by topic overlap.
+ * Rules are matched to tasks by topic overlap (further narrowed by `scope`), and
+ * ranked by a value-density score — a blend of `confidence` and `timesApplied`
+ * divided by the rule's rendered token cost — so cheap, trusted, proven rules
+ * outrank expensive or unproven ones within a fixed context-token budget.
  *
  * @example
  * ```ts
@@ -168,6 +171,32 @@ export interface IPreferenceStore {
    * ```
    */
   add(rule: NewPreferenceRule): Promise<PreferenceRule>;
+
+  /**
+   * Adds or merges multiple rules as a single persisted batch.
+   *
+   * @remarks
+   * Behaviorally equivalent to calling {@link add} once per rule (same
+   * similarity-merge semantics, same per-rule return values), but performs
+   * exactly one disk write for the whole batch instead of one per rule.
+   * Intended for callers that learn several rules from the same event (e.g.
+   * {@link IPatternExtractor} distilling one finished task into multiple
+   * rules) — batching avoids write amplification and the redundant
+   * read-modify-write cycles that calling `add` in a loop would incur.
+   *
+   * @param rules - Rules to add or merge, in order.
+   * @returns Persisted rules (added or merged-into), one per input, same order.
+   *
+   * @example
+   * ```ts
+   * const rules = await store.addMany([
+   *   { text: "Use async/await", topics: ["javascript"], scope: "javascript", confidence: "high", source: "fix" },
+   *   { text: "Prefer const", topics: ["javascript"], scope: "javascript", confidence: "medium", source: "style" },
+   * ]);
+   * console.log(`Persisted ${rules.length} rules in one write`);
+   * ```
+   */
+  addMany(rules: NewPreferenceRule[]): Promise<PreferenceRule[]>;
 
   /**
    * Retrieves rules whose topics overlap the given keywords, ranked by frequency.
@@ -296,4 +325,24 @@ export interface IPreferenceStore {
    * ```
    */
   markApplied(id: string): Promise<void>;
+
+  /**
+   * Increments `timesApplied` for multiple rules as a single persisted batch.
+   *
+   * @remarks
+   * Behaviorally equivalent to calling {@link markApplied} once per ID, but
+   * performs at most one disk write for the whole batch. Intended for a
+   * context-builder-style caller that applies several rules from one
+   * `build()` call — batching prevents one call to `build()` from causing
+   * as many writes as rules it selected. IDs that don't match any rule are
+   * silently skipped, same as `markApplied`.
+   *
+   * @param ids - Rule IDs to increment.
+   *
+   * @example
+   * ```ts
+   * await store.markManyApplied(["pref-abc123", "pref-def456"]);
+   * ```
+   */
+  markManyApplied(ids: string[]): Promise<void>;
 }

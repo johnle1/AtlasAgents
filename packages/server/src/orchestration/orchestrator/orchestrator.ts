@@ -10,7 +10,8 @@
  * - Optional result combination
  * - Experience recording
  *
- * Intended as a RouterDeps.task implementation and is transport-agnostic.
+ * Implements IOrchestrator and is transport-agnostic — wired into the
+ * router via RouterBuilderDeps.orchestrator, not a per-route handler.
  * The actual pipeline logic is extracted to runOrchestratorPipeline for
  * better testability and separation of concerns.
  *
@@ -52,6 +53,7 @@ import type { IProviderRegistry } from "../../providers/providerRegistry.js";
 import type { MaxSubagentsParam } from "../maxSubagents.js";
 import type { SessionInfo, TaskModelOverrides } from "../types.js";
 import { runOrchestratorPipeline } from "./orchestratorPipeline.js";
+import type { IModelPlacementReporter } from "../../ollama/modelPlacement.js";
 
 export class AgentOrchestrator {
   /**
@@ -70,6 +72,7 @@ export class AgentOrchestrator {
       agent: Agent;
       providerRegistry: IProviderRegistry;
       config: IConfigManager;
+      modelPlacementReporter?: IModelPlacementReporter;
     },
   ) {}
 
@@ -114,6 +117,7 @@ export class AgentOrchestrator {
         agent: this.deps.agent,
         providerRegistry: this.deps.providerRegistry,
         config: this.deps.config,
+        modelPlacementReporter: this.deps.modelPlacementReporter,
       },
       {
         session,

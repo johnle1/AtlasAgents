@@ -7,5 +7,5 @@
  * (tokens, progress, errors, or completion signals).
  */
 
-export type { TaskFrame } from "@loopycode/shared";
+export type { TaskFrame, SubagentStatusSource } from "@loopycode/shared";
 export { decodeFrame, encodeFrame } from "@loopycode/shared";

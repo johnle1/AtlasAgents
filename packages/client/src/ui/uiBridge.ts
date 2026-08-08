@@ -17,6 +17,10 @@ export {
   setStreamingText,
   appendStreamingToken,
   registerStreamingHandler,
+  startLiveThink,
+  appendLiveThink,
+  endLiveThink,
+  clearLiveThinks,
 } from "./bridge/history.js";
 
 export {

@@ -1,7 +1,7 @@
 /**
  * System (E2E) tests — LoopyCode CLI binary
  *
- * Spawns the compiled `loopy` CLI as a real subprocess and tests it from
+ * Spawns the compiled `loopycode` CLI as a real subprocess and tests it from
  * the outside: real stdin/stdout, real exit codes, real environment variables.
  * No internal modules are imported — this layer is intentionally opaque.
  *
@@ -202,7 +202,7 @@ describe("CLI --help flag (user journey)", () => {
       // At minimum, the binary name or 'Usage' keyword should appear
       const hasHelpContent =
         combined.toLowerCase().includes("usage") ||
-        combined.toLowerCase().includes("loopy") ||
+        combined.toLowerCase().includes("loopycode") ||
         combined.toLowerCase().includes("help") ||
         combined.toLowerCase().includes("option");
       expect(hasHelpContent).toBe(true);

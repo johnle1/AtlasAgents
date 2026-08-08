@@ -11,8 +11,11 @@
  * `../frames.js` and are re-exported here for convenience.
  */
 
+import type { RouteId } from "@loopycode/shared";
+
 export type { PullProgress, TaskFrame } from "../types/frames.js";
 export type { InstalledModel } from "../types/frames.js";
+export type { RouteId, TaskStreamPayload } from "@loopycode/shared";
 
 /**
  * One topic in the server-side user preference (“memory”) store.
@@ -148,58 +151,11 @@ export type CommandResponseEnvelope = {
 };
 
 /**
- * JSON body sent on `requestStream` when executing a user task.
- *
- * @remarks
- * Distinguishes streaming work from one-shot commands via `kind: "task"`.
- * Temperatures follow the usual sampling scale: `0` is deterministic; higher
- * values increase randomness. Model names must match what the server’s Ollama
- * instance has installed.
- *
- * @example
- * ```ts
- * const payload: TaskStreamPayload = {
- *   kind: "task",
- *   text: "Add unit tests for the banner layout helpers",
- *   subagentModel: "gemma3:27b",
- *   subsubagentModel: "gemma3:4b",
- *   agentTemp: 0.2,
- *   subagentTemp: 0.3,
- * };
- * ```
- */
-export type TaskStreamPayload = {
-  /** Discriminator so the server treats this stream as task execution. */
-  kind: "task";
-
-  /** Natural-language task description from the user. */
-  text: string;
-
-  /** Ollama model id for the agent role (planning / orchestration). */
-  subagentModel: string;
-
-  /** Ollama model id for the subagent role (tool use / edits). */
-  subsubagentModel: string;
-
-  /** Provider serving the agent role (e.g. "ollama", "vllm-gpu"). */
-  agentProvider: string;
-
-  /** Provider serving the subagent role (e.g. "ollama", "vllm-gpu"). */
-  subagentProvider: string;
-
-  /** Agent sampling temperature in roughly `0.0`–`1.0`. */
-  agentTemp: number;
-
-  /** Subagent sampling temperature in roughly `0.0`–`1.0`. */
-  subagentTemp: number;
-};
-
-/**
  * JSON body sent on `requestResponse` for non-streaming commands.
  *
  * @remarks
- * Every command shares `kind: "command"` plus a route `type` string
- * (for example `"models.list"`, `"memory.get"`, `"skills.sync"`). `payload` is
+ * Every command shares `kind: "command"` plus a route `type` (for example
+ * `"models.list"`, `"memory.get"`, `"skills.sync"`). `payload` is
  * command-specific JSON; use `{}` when the route needs no body.
  *
  * @example
@@ -219,10 +175,11 @@ export type CommandRequestPayload = {
    * Server route id, e.g. `"models.list"`, `"memory.get"`, `"plan.respond"`.
    *
    * @remarks
-   * Unknown routes should fail with `ok: false` from the server rather than a
-   * silent no-op.
+   * Typed against the same `RouteId` union the server validates with, so an
+   * unknown route is caught at compile time rather than only failing with
+   * `ok: false` at runtime.
    */
-  type: string;
+  type: RouteId;
 
   /** Command-specific JSON; may be an empty object. */
   payload: unknown;

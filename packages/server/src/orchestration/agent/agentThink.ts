@@ -19,6 +19,13 @@ import type { CommandPlan, PlannedSubtask } from "../types.js";
 import { stripMarkdownFencesFromText } from "../toolProtocol.js";
 
 /**
+ * Tag name for the agent's structured reasoning block, shared with
+ * {@link AGENT_THINK_RE} and the incremental think-tag scanner in
+ * `thinkStream.ts` so both agree on what to look for.
+ */
+export const AGENT_THINK_TAG = "agent-think";
+
+/**
  * Regex to extract agent-think block from model output.
  *
  * @remarks
@@ -30,7 +37,10 @@ import { stripMarkdownFencesFromText } from "../toolProtocol.js";
  * const thinkBlock = /<agent-think>([\s\S]*?)<\/agent-think>/i.exec(output)?.[1];
  * ```
  */
-const AGENT_THINK_RE = /<agent-think>([\s\S]*?)<\/agent-think>/i;
+const AGENT_THINK_RE = new RegExp(
+  `<${AGENT_THINK_TAG}>([\\s\\S]*?)<\\/${AGENT_THINK_TAG}>`,
+  "i",
+);
 
 /**
  * JSON schema for the submit_plan tool that the agent calls to finalize planning.

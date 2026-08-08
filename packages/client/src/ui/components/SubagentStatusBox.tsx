@@ -27,7 +27,7 @@ import type { SubagentStatusBoxProps as Props } from "./types.js";
  *     label="file-writer"
  *     icon="spinner"
  *     message="Creating index.css"
- *     stage="working"
+ *     stage="writing"
  *   />
  * );
  * ```

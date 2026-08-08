@@ -47,7 +47,7 @@ const describePassword = (password: string): string =>
  * mid-way failure cannot leave the address updated but the password not.
  *
  * `--reset` is applied first and the explicit flags layer on top, which makes
- * `loopy --reset --address 10.0.0.7 --password` mean "forget everything about
+ * `loopycode --reset --address 10.0.0.7 --password` mean "forget everything about
  * the old server, then point at this one" in a single command.
  *
  * @param request - The parsed repair request.
@@ -114,7 +114,7 @@ const buildRepairPatch = (
  *
  * @example
  * ```ts
- * // loopy --address 10.0.0.7 --port 8001 --password
+ * // loopycode --address 10.0.0.7 --port 8001 --password
  * await runConfigRepair({
  *   reset: false,
  *   password: true,
@@ -170,7 +170,7 @@ export const runConfigRepair = async (
   );
   console.log(
     updated.password.length > 0
-      ? "Run `loopy` to connect."
-      : "Run `loopy` to finish setup.",
+      ? "Run `loopycode` to connect."
+      : "Run `loopycode` to finish setup.",
   );
 };

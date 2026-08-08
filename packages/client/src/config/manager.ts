@@ -11,10 +11,7 @@
  */
 
 import * as fs from "node:fs";
-import {
-  decryptSecrets,
-  encryptSecrets,
-} from "../crypto/configCipher.js";
+import { decryptSecrets, encryptSecrets } from "@loopycode/shared";
 import type { Config, SecretConfigFields, StoredConfig } from "./types.js";
 import {
   CONFIG_DIR,
@@ -49,7 +46,7 @@ export const hasConfigFile = (): boolean => fs.existsSync(CONFIG_FILE);
  *
  * An empty password is the signal, because the server rejects unauthenticated
  * clients outright: a blank password means "never configured" (fresh install)
- * or "deliberately cleared" (`loopy --reset`), and both should land the user in
+ * or "deliberately cleared" (`loopycode --reset`), and both should land the user in
  * the setup wizard rather than in a doomed connection attempt.
  *
  * @param config - A loaded configuration object.
