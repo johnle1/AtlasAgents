@@ -240,6 +240,9 @@ const parsePortAnswer = (answer: string): number => {
   return parsedPort;
 };
 
+/** Prompt text for {@link promptListenPort}. */
+const PORT_PROMPT = "Enter port (default 7000): ";
+
 /**
  * Prompts for TCP listen port with default 7000 when input is empty or invalid.
  *
@@ -256,6 +259,15 @@ const parsePortAnswer = (answer: string): number => {
  * prompts, all fed from one piped chunk). On a TTY, still uses `readline` for
  * its line-editing (backspace, etc.) on a plain, unmasked port number.
  *
+ * On the TTY path {@link PORT_PROMPT} must be passed to `question()` rather
+ * than written to stdout beforehand: a terminal-mode `Interface` refreshes
+ * the line as soon as `question()` runs, emitting `ESC[1G ESC[0J` (cursor to
+ * column 1, erase to end of display) and redrawing only the text it owns. A
+ * prompt written first is therefore wiped off screen before the operator can
+ * read it, leaving `start` looking hung on a blank line with no hint that it
+ * is waiting for a port. The password prompts above are immune because they
+ * drive raw mode directly and never hand the line to `readline`.
+ *
  * @returns Valid port number in range 1-65535
  * @throws {Error} On a non-TTY stdin that has run out of input.
  */
@@ -263,9 +275,10 @@ export const promptListenPort = (): Promise<number> => {
   const stdout = process.stdout;
   const stdin = process.stdin;
 
-  stdout.write("Enter port (default 7000): ");
-
+  // No terminal to redraw the line, so writing the prompt directly is both
+  // safe and the only way it reaches the operator's log.
   if (!stdin.isTTY) {
+    stdout.write(PORT_PROMPT);
     return readLineFromPipedStdin().then(parsePortAnswer);
   }
 
@@ -275,7 +288,7 @@ export const promptListenPort = (): Promise<number> => {
   });
 
   return new Promise((resolve) => {
-    readlineInterface.question("", (answer) => {
+    readlineInterface.question(PORT_PROMPT, (answer) => {
       readlineInterface.close();
       resolve(parsePortAnswer(answer));
     });

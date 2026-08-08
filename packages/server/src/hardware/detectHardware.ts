@@ -29,10 +29,21 @@
  * node dist/hardware/detectHardware.js --write        # also add the suggested provider + numCtx to config
  * node dist/hardware/detectHardware.js --write --port 9000
  * ```
+ *
+ * `--write` may prompt for the server config passphrase when
+ * `user-data/config.json` already has encrypted `$providersSecrets` (after a
+ * normal `loopy-server start`), or when adding a non-ollama provider that must
+ * be stored encrypted.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
 import { ConfigManager } from "../config/index.js";
+import { parseStoredConfig } from "../config/parsing.js";
+import { CONFIG_REL_PATH } from "../config/types.js";
+import { readPasswordAtStartup } from "../server/startupPrompts.js";
 import {
   deriveAppleNumCtxInput,
   probeAmdVram,
@@ -363,6 +374,25 @@ const parseCliArgs = (argv: string[]): { write: boolean; port: number } => {
 };
 
 /**
+ * True when `user-data/config.json` already has a `$providersSecrets`
+ * envelope — reading/writing that file then requires an unlocked cipher.
+ */
+const configHasEncryptedProviders = async (
+  rootDir: string,
+): Promise<boolean> => {
+  try {
+    const raw = await readFile(join(rootDir, CONFIG_REL_PATH), "utf-8");
+    const stored = parseStoredConfig(raw);
+    return Boolean(stored.$providersSecrets);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+};
+
+/**
  * Runs detection, prints the result, and — with `--write` — persists the
  * suggested provider and recommended `numCtx` to config.json.
  *
@@ -372,10 +402,18 @@ const parseCliArgs = (argv: string[]): { write: boolean; port: number } => {
  * re-run. The `numCtx` write happens whenever a recommendation is available —
  * including for `apple-metal` and `cpu`, which have no provider to add but
  * still benefit from a sized context window.
+ *
+ * When the on-disk config already encrypts providers, or when this run will
+ * add a non-ollama provider, unlocks (or sets up) the shared config cipher
+ * first — otherwise `getAll`/`set` fail with ConfigCipherLockedError on a
+ * machine that has already run `loopy-server start`.
  */
 export const runDetectHardwareCli = async (
   argv: string[],
-  deps: { rootDir?: string } = {},
+  deps: {
+    rootDir?: string;
+    promptPassphrase?: (label: string) => Promise<string>;
+  } = {},
 ): Promise<void> => {
   const { write, port } = parseCliArgs(argv);
 
@@ -391,7 +429,17 @@ export const runDetectHardwareCli = async (
     return;
   }
 
-  const config = new ConfigManager({ rootDir: deps.rootDir ?? process.cwd() });
+  const rootDir = deps.rootDir ?? process.cwd();
+  const config = new ConfigManager({ rootDir });
+  const willAddProvider = suggestion.provider !== "ollama";
+  const needsCipher =
+    willAddProvider || (await configHasEncryptedProviders(rootDir));
+
+  if (needsCipher) {
+    await config.unlockOrSetupProvidersCipher(
+      deps.promptPassphrase ?? readPasswordAtStartup,
+    );
+  }
 
   const existingConfig = await config.getAll();
   if (existingConfig.numCtx === undefined) {

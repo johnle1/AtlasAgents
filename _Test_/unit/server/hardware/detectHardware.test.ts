@@ -238,17 +238,16 @@ describe("runDetectHardwareCli --write", () => {
 
   it("writes numCtx in a fresh process that never unlocked the cipher (regression guard)", async () => {
     // The real `loopy-detect-hardware --write` invocation is a standalone,
-    // single-shot process that never calls unlockOrSetupProvidersCipher —
-    // only the main server's own bootstrap does that (server/index.ts). This
-    // suite's beforeAll papers over that with a global initializeCipher()
-    // call, which is correct for the addProvider-touching test above but
-    // hid the fact that a genuinely fresh process — no providers configured,
-    // cipher never touched — always failed with ConfigCipherLockedError:
-    // _saveRaw() used to encrypt (and therefore require the cipher for) the
-    // `providers` field on every write, even when it was empty and nothing
-    // secret was being persisted. Locking here simulates that fresh
-    // process; initializeCipher is restored after so later tests in this
-    // file that DO touch providers keep working regardless of run order.
+    // single-shot process. For a numCtx-only write (no encrypted providers on
+    // disk yet, and no non-ollama provider to add), it must not require
+    // unlockOrSetupProvidersCipher — _saveRaw skips the envelope when
+    // providers are empty and the cipher is locked. Locking here simulates
+    // that fresh process; initializeCipher is restored after so later tests
+    // that DO touch providers keep working regardless of run order.
+    //
+    // When this machine detects a GPU/accelerator, --write will add a
+    // provider and therefore prompt to set up a passphrase — inject a stub
+    // so the test stays non-interactive either way.
     lockCipher();
     try {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-detect-"));
@@ -262,13 +261,64 @@ describe("runDetectHardwareCli --write", () => {
       );
 
       await expect(
-        runDetectHardwareCli(["--write"], { rootDir: root }),
+        runDetectHardwareCli(["--write"], {
+          rootDir: root,
+          promptPassphrase: async () => "fresh-detect-hardware-passphrase",
+        }),
       ).resolves.toBeUndefined();
 
+      // Re-unlock so getAll can read a file that may now have $providersSecrets
+      // (GPU hosts write a provider under the passphrase above).
+      initializeCipher("fresh-detect-hardware-passphrase");
       const manager = new ConfigManager({ rootDir: root });
       expect((await manager.getAll()).numCtx).toBeDefined();
     } finally {
       initializeCipher("test-passphrase-for-detect-hardware-tests");
     }
+  });
+
+  it("unlocks an existing encrypted config before --write (regression for cipher-locked hosts)", async () => {
+    // Mirrors a machine that already ran `loopy-server start`: config.json
+    // has $providersSecrets, and a fresh `loopy-detect-hardware --write`
+    // process starts with the cipher locked. Without unlocking first,
+    // getAll() fails with ConfigCipherLockedError.
+    const passphrase = "existing-server-config-passphrase";
+    initializeCipher(passphrase);
+
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-detect-"));
+    tempRoots.push(root);
+    const seed = new ConfigManager({ rootDir: root });
+    await seed.addProvider("seed-provider", {
+      baseUrl: "http://localhost:7999/v1",
+    });
+
+    lockCipher();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          ({ ok: false, text: async () => "" }) as unknown as Response,
+      ),
+    );
+
+    const prompts: string[] = [];
+    await expect(
+      runDetectHardwareCli(["--write"], {
+        rootDir: root,
+        promptPassphrase: async (label) => {
+          prompts.push(label);
+          return passphrase;
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(prompts.length).toBeGreaterThanOrEqual(1);
+
+    const manager = new ConfigManager({ rootDir: root });
+    const config = await manager.getAll();
+    expect(config.numCtx).toBeDefined();
+    expect(await manager.getProvider("seed-provider")).toEqual({
+      baseUrl: "http://localhost:7999/v1",
+    });
   });
 });
