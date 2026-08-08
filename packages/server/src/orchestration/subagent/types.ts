@@ -95,6 +95,17 @@ export type TaskTrackers = {
 
   /** Latest thinking block text from the agent (for recovery/analysis). */
   lastThinkText: string | null;
+
+  /**
+   * Consecutive turns that ended without a real tool handler doing work.
+   *
+   * @remarks
+   * Incremented once per loop pass in `Subagent.run`, reset only when a
+   * genuine (non-control-flow) tool handler executes. Trips
+   * `MAX_UNPRODUCTIVE_TURNS` — the stagnation breaker for a model that keeps
+   * thinking without ever emitting a usable tool call.
+   */
+  unproductiveTurns: number;
 };
 
 /**

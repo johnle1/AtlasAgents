@@ -671,3 +671,172 @@ export const recoverFinishFromThink = (
 
   return { name: "finish", args };
 };
+
+/**
+ * Tools whose call can be safely synthesized from prose in a think block,
+ * mapped to the single required argument the recovered target fills.
+ *
+ * @remarks
+ * READ-ONLY ONLY, by design. `write_file` (content), `edit_file` (old/new),
+ * and `run_command` (command) carry arguments that can't be reliably
+ * inferred from a one-line `action:` hint or a `risk:` sentence — a wrong
+ * guess corrupts a file or runs an unintended command. A wrong `read_file`
+ * costs one wasted turn at worst. `finish` is deliberately absent: it's
+ * owned by {@link recoverFinishFromThink}.
+ */
+const THINK_RECOVERABLE_TOOLS: ReadonlyMap<string, string> = new Map([
+  ["read_file", "path"],
+]);
+
+/**
+ * Tool names the agent is taught to use (see {@link AGENT_RULES}). A token
+ * that matches one of these is never treated as a recovered path target —
+ * guards against `action: read_file read_file`-shaped noise.
+ */
+const KNOWN_TOOL_NAMES = new Set([
+  "read_file",
+  "write_file",
+  "edit_file",
+  "run_command",
+  "escalate",
+  "finish",
+]);
+
+/** Shape of a bare relative file-path token: no leading slash, plain characters. */
+const PATH_TOKEN_RE = /^[A-Za-z0-9._~@+-][A-Za-z0-9._/~@+-]*$/;
+
+/** A trailing `.ext` of 2-5 alphanumeric characters (`.tsx`, `.json`, `.yml`, ...). */
+const PATH_EXTENSION_RE = /\.[A-Za-z0-9]{2,5}$/;
+
+/**
+ * Strips common prose decoration from a whitespace-split token so an
+ * embedded path — e.g. `` `src/App.tsx` `` or a trailing "src/App.tsx." at
+ * the end of a sentence — matches cleanly.
+ */
+const stripPathDecoration = (raw: string): string => {
+  let token = raw.trim();
+  token = token.replace(/^[`'"([{]+/, "").replace(/[`'")\]}]+$/, "");
+  token = token.replace(/[.,;:!?]+$/, "");
+  token = token.replace(/^[`'"]+/, "").replace(/[`'"]+$/, "");
+  return token.startsWith("./") ? token.slice(2) : token;
+};
+
+/**
+ * Whether a decorated-and-stripped token plausibly names a relative file
+ * path rather than an ordinary prose word.
+ *
+ * @param requireExtension - Strict mode (used when scanning free-form prose
+ *   in {@link findUnambiguousTargetInBlock}) requires a recognizable file
+ *   extension, since prose is full of slash-free and extension-free words.
+ *   Permissive mode (used only for an explicit target on the `action:` line
+ *   itself, where the model was asked for a short target) also accepts any
+ *   token containing a `/`.
+ */
+const isPlausiblePathToken = (
+  token: string,
+  requireExtension: boolean,
+): boolean => {
+  if (token.length === 0 || token.length > 200) {
+    return false;
+  }
+  if (token.startsWith("/") || token.includes("://")) {
+    return false;
+  }
+  if (token.split("/").some((segment) => segment === "..")) {
+    return false;
+  }
+  if (!PATH_TOKEN_RE.test(token)) {
+    return false;
+  }
+  if (KNOWN_TOOL_NAMES.has(token.toLowerCase())) {
+    return false;
+  }
+  const hasExtension = PATH_EXTENSION_RE.test(token);
+  return requireExtension ? hasExtension : hasExtension || token.includes("/");
+};
+
+/**
+ * Looks for an explicit target on the action line itself, e.g.
+ * `action: read_file src/App.tsx` or `` action: read_file `src/App.tsx` ``.
+ * Permissive matching — the model was asked for a short target here, not
+ * prose — so the first plausible token wins.
+ */
+const findExplicitTarget = (actionLineTail: string): string | null => {
+  for (const rawToken of actionLineTail.trim().split(/\s+/)) {
+    const token = stripPathDecoration(rawToken);
+    if (isPlausiblePathToken(token, false)) {
+      return token;
+    }
+  }
+  return null;
+};
+
+/**
+ * Falls back to scanning the whole think block for a single, unambiguous
+ * path-like token — this is what rescues the common failure shape where the
+ * `action:` line is bare (`action: read_file`) and the real target only
+ * appears in a `need:` or `risk:` sentence. Requires exactly one *distinct*
+ * candidate: two or more distinct paths means the intent is ambiguous, and
+ * guessing wrong is worse than returning `null` and letting the caller fall
+ * through to a normal retry.
+ */
+const findUnambiguousTargetInBlock = (thinkText: string): string | null => {
+  const found = new Set<string>();
+  for (const rawToken of thinkText.split(/\s+/)) {
+    const token = stripPathDecoration(rawToken);
+    if (isPlausiblePathToken(token, true)) {
+      found.add(token);
+    }
+  }
+  return found.size === 1 ? [...found][0] : null;
+};
+
+/**
+ * Recovers a read-only tool call when the model named the tool in its think
+ * block's `action:` line but never emitted the actual tool call.
+ *
+ * @remarks
+ * Deliberately narrower than {@link recoverFinishFromThink}: only tools in
+ * {@link THINK_RECOVERABLE_TOOLS} are eligible (currently just `read_file`),
+ * and only their single required argument — a file path — is filled in; see
+ * that map's doc comment for why writes and commands are excluded.
+ *
+ * Tries the explicit target on the action line first (`action: read_file
+ * src/App.tsx`), then falls back to scanning the whole block for one
+ * unambiguous path-like token, which recovers the shape reported in
+ * practice: a bare `action: read_file` line whose target only shows up in a
+ * `need:`/`risk:` sentence.
+ *
+ * @param thinkText - The think block text to recover a tool call from.
+ * @returns A parsed tool call for a read-only tool, or `null` if the action
+ *   names a tool outside the allowlist, or no unambiguous path target could
+ *   be found.
+ *
+ * @example
+ * ```ts
+ * recoverToolCallFromThink("action: read_file\nrisk: need to check src/App.tsx first");
+ * // { name: "read_file", args: { path: "src/App.tsx" } }
+ * ```
+ */
+export const recoverToolCallFromThink = (
+  thinkText: string,
+): ParsedToolCall | null => {
+  const actionMatch =
+    /^[ \t]*action:[ \t]*([A-Za-z_][A-Za-z0-9_]*)\b(.*)$/im.exec(thinkText);
+  if (!actionMatch) {
+    return null;
+  }
+
+  const toolName = actionMatch[1].toLowerCase();
+  const argField = THINK_RECOVERABLE_TOOLS.get(toolName);
+  if (!argField) {
+    return null;
+  }
+
+  const actionLineTail = actionMatch[2] ?? "";
+  const target =
+    findExplicitTarget(actionLineTail) ??
+    findUnambiguousTargetInBlock(thinkText);
+
+  return target ? { name: toolName, args: { [argField]: target } } : null;
+};

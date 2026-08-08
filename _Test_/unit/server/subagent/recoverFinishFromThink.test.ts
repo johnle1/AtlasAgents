@@ -3,7 +3,10 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { recoverFinishFromThink } from "../../../../packages/server/src/orchestration/toolProtocol.js";
+import {
+  recoverFinishFromThink,
+  recoverToolCallFromThink,
+} from "../../../../packages/server/src/orchestration/toolProtocol.js";
 
 describe("recoverFinishFromThink", () => {
   it("returns null when action is not finish", () => {
@@ -65,5 +68,9 @@ describe("recoverFinishFromThink", () => {
         keyFindings: ["no vitest"],
       },
     });
+  });
+
+  it("is not recovered by recoverToolCallFromThink (ownership symmetry)", () => {
+    expect(recoverToolCallFromThink("action: finish\nrisk: none")).toBeNull();
   });
 });
