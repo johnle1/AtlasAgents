@@ -317,6 +317,18 @@ export type RouterBuilderDeps = {
   providerRegistry: ProviderRegistry;
 
   /**
+   * Base URL the `ollama` client was constructed with (e.g.
+   * `"http://localhost:11434"`), if known.
+   *
+   * @remarks
+   * Used only by `models.storage` to tell whether Ollama's model directory
+   * is readable from this server's own filesystem (host is localhost) or
+   * lives on a remote machine (any other host) — see `ollama/modelStorage.ts`.
+   * Omitted defaults to treating Ollama as local.
+   */
+  ollamaBaseUrl?: string;
+
+  /**
    * Manager for application configuration and settings.
    */
   config: IConfigManager;

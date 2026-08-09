@@ -8,11 +8,14 @@
  */
 
 import type { Connection } from "../connection/index.js";
+import type { ModelStorageReport } from "@loopycode/shared";
 import { formatErrorMessage } from "./utils.js";
 import { logger } from "../utils/logger.js";
 import {
   printInstalledModels,
   printModelFind,
+  printModelStorage,
+  formatStorageBytes,
   printLine,
   printError,
   printSuccess,
@@ -22,12 +25,14 @@ import {
 } from "../renderer.js";
 
 /**
- * Routes `/models list | find | pull | delete | show | running`.
+ * Routes `/models list | find | pull | delete | show | running | storage`.
  *
  * @remarks
  * `find` does a case-insensitive substring match against installed model names.
  * `pull` resets/finishes the CLI progress UI even on failure so spinners do not
- * leak. Errors are printed and not rethrown.
+ * leak. `storage` reports real on-disk usage (unique vs. shared blob bytes,
+ * plus orphaned files an interrupted pull left behind) — read-only, it never
+ * deletes anything. Errors are printed and not rethrown.
  *
  * @param subcommand - Operation name after `/models`.
  * @param modelArgument - Model name for find/pull/delete/show.
@@ -131,11 +136,18 @@ export const handleModels = async (
           ok: boolean;
           wasAgentModel?: boolean;
           wasSubagentModel?: boolean;
+          freedBytes?: number;
         }>("models.delete", { name: modelName });
 
         // ===== DISPLAY SUCCESS AND ANY WARNINGS =====
-        // Step 2: Print success message
-        printSuccess(`Deleted ${modelName}`);
+        // Step 2: Print success message, with the real bytes freed when known —
+        // Ollama shares blob layers across tags, so this can legitimately be
+        // far less than the deleted tag's advertised size, or exactly 0.
+        printSuccess(
+          typeof response.freedBytes === "number"
+            ? `Deleted ${modelName} — freed ${formatStorageBytes(response.freedBytes)}`
+            : `Deleted ${modelName}`,
+        );
 
         // Step 3: Warn if deleted model was the active agent model
         if (response.wasAgentModel) {
@@ -184,9 +196,21 @@ export const handleModels = async (
       }
       break;
     }
+    case "storage": {
+      try {
+        const report = await connection.sendCommand<ModelStorageReport>(
+          "models.storage",
+          {},
+        );
+        printModelStorage(report);
+      } catch (error) {
+        printError(`Failed: ${formatErrorMessage(error)}`);
+      }
+      break;
+    }
     default:
       printError(
-        "Usage: /models list | find <name> | pull <name> | delete <name> | show <name> | running",
+        "Usage: /models list | find <name> | pull <name> | delete <name> | show <name> | running | storage",
       );
   }
 };

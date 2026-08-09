@@ -241,6 +241,67 @@ describe("placement → warnings — the /api/ps matrix", () => {
 });
 
 // ---------------------------------------------------------------------------
+// B2. The two-checks-per-task pattern from orchestratorPipeline.ts: the
+// subagent model isn't loaded when the first (agent) check runs, but is by
+// the time the second (post-pool) check runs.
+// ---------------------------------------------------------------------------
+
+describe("placement → warnings — two checks per task (agent then subagent)", () => {
+  it("reports nothing for the subagent on the first check, then reports its spill on the second", async () => {
+    // Mirrors runOrchestratorPipeline: /api/ps only reflects the agent model
+    // until the subagent pool has actually run at least one turn.
+    let running: RunningModel[] = [{ name: "gemma3:27b", size: 100, size_vram: 100 }];
+    const reporter = createModelPlacementReporter({
+      admin: { listRunning: async () => running } as unknown as IOllamaAdminClient,
+      log: silentLog,
+    });
+
+    const firstCheck = await reporter.reportPlacement(
+      ["gemma3:27b", "qwen3:70b"],
+      "session-1",
+    );
+    expect(firstCheck).toEqual([]);
+
+    // Subagent has now run — Ollama reports it, spilling.
+    running = [
+      { name: "gemma3:27b", size: 100, size_vram: 100 },
+      { name: "qwen3:70b", size: 100, size_vram: 52 },
+    ];
+    const secondCheck = await reporter.reportPlacement(
+      ["gemma3:27b", "qwen3:70b"],
+      "session-1",
+    );
+    expect(secondCheck).toHaveLength(1);
+    expect(secondCheck[0]).toContain("qwen3:70b");
+  });
+
+  it("warns once, not twice, when agent and subagent share one spilling model tag", async () => {
+    // The recommended low-VRAM setup: /set agent and /set subagent both
+    // pointed at the same tag. Both pipeline checks pass the same target
+    // list; per-scope dedup must collapse them to a single warning.
+    const running: RunningModel[] = [
+      { name: "gemma3:12b", size: 100, size_vram: 60 },
+    ];
+    const reporter = createModelPlacementReporter({
+      admin: { listRunning: async () => running } as unknown as IOllamaAdminClient,
+      log: silentLog,
+    });
+
+    const firstCheck = await reporter.reportPlacement(
+      ["gemma3:12b", "gemma3:12b"],
+      "session-1",
+    );
+    const secondCheck = await reporter.reportPlacement(
+      ["gemma3:12b", "gemma3:12b"],
+      "session-1",
+    );
+
+    expect(firstCheck).toHaveLength(1);
+    expect(secondCheck).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // C. /api/tags JSON → ModelSummary wire shape
 // ---------------------------------------------------------------------------
 

@@ -48,3 +48,9 @@ export {
   lockCipher,
 } from "./crypto/configCipher.js";
 export type { ModelSummary, ModelDetails } from "./models/modelSummary.js";
+export type {
+  ModelStorageReport,
+  ModelStorageRow,
+  ModelStorageOrphan,
+  ModelStorageTotals,
+} from "./models/modelStorage.js";

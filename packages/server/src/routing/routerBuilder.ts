@@ -34,6 +34,12 @@ import {
   syncAgentToolSupport,
   syncSubagentToolSupport,
 } from "../ollama/syncAgentToolSupport.js";
+import {
+  describeModelPlacement,
+  matchRunningModel,
+  formatSpillMessage,
+} from "../ollama/modelPlacement.js";
+import { buildModelStorageReport } from "../ollama/modelStorage.js";
 import { isOrchestratorErrorReported } from "../orchestration/taskErrors.js";
 import { NotFoundError, ValidationError, AbortError } from "../errors/index.js";
 import {
@@ -41,6 +47,7 @@ import {
   type McpToolSyncPayload,
 } from "../orchestration/mcp/mcpToolSchema.js";
 import type { OllamaClient } from "../ollama/client.js";
+import type { IOllamaAdminClient } from "../orchestration/interfaces/ollamaInterfaces.js";
 import type { IConfigManager } from "../orchestration/interfaces/configInterfaces.js";
 import type { ProviderRegistry } from "../providers/providerRegistry.js";
 import type { PreferenceRule } from "../orchestration/interfaces.js";
@@ -117,15 +124,44 @@ function createListModelsHandler(ollama: OllamaClient): CommandHandler {
 }
 
 /**
+ * Best-effort disk-usage snapshot taken around a model delete, wrapped so
+ * any failure (directory not local/readable, scan error) yields `undefined`
+ * rather than throwing — a `/models storage`-unavailable environment must
+ * never break plain deletion.
+ */
+async function snapshotStorageBytes(
+  ollamaBaseUrl: string | undefined,
+): Promise<number | undefined> {
+  try {
+    const report = await buildModelStorageReport(ollamaBaseUrl);
+    return report.available ? report.totals.onDiskBytes : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Creates a handler for deleting a model with config reference checking.
  */
 function createDeleteModelHandler(
   ollama: OllamaClient,
   config: IConfigManager,
+  ollamaBaseUrl?: string,
 ): CommandHandler {
   return async (_session, payload) => {
     const modelName = parseStringField(payload, "name");
+
+    // Snapshot before the real delete call, which is allowed to throw and
+    // propagate normally (e.g. "model not found") — the storage snapshot is
+    // purely informational and must never gate or mask that.
+    const bytesBefore = await snapshotStorageBytes(ollamaBaseUrl);
     await ollama.deleteModel(modelName);
+    const bytesAfter =
+      bytesBefore === undefined ? undefined : await snapshotStorageBytes(ollamaBaseUrl);
+    const freedBytes =
+      bytesBefore !== undefined && bytesAfter !== undefined
+        ? Math.max(0, bytesBefore - bytesAfter)
+        : undefined;
 
     // Check if deleted model was configured as active
     const currentConfig = (await config.getAll()) as ServerConfig;
@@ -135,8 +171,18 @@ function createDeleteModelHandler(
     const wasSubagentModel =
       String(currentConfig.subagentModel ?? "").trim() === modelName;
 
-    return { ok: true, wasAgentModel, wasSubagentModel };
+    return { ok: true, wasAgentModel, wasSubagentModel, freedBytes };
   };
+}
+
+/**
+ * Creates a handler reporting real on-disk model storage: per-tag
+ * unique/shared bytes and any blob files no installed tag references
+ * (orphaned by an interrupted `/models pull`) — read-only, never deletes
+ * anything itself.
+ */
+function createModelStorageHandler(ollamaBaseUrl?: string): CommandHandler {
+  return async () => buildModelStorageReport(ollamaBaseUrl);
 }
 
 /**
@@ -217,6 +263,38 @@ function createSetConfigHandler(
 }
 
 /**
+ * Best-effort check for whether a just-selected model is already loaded and,
+ * if so, whether it's spilling off the GPU — reusing the same measured
+ * `/api/ps` classification the task-start check uses (see modelPlacement.ts).
+ *
+ * @remarks
+ * Only reports on a model that happens to already be resident (e.g. it was
+ * used in a prior task). A freshly-picked, not-yet-loaded model is not
+ * warmed up to check — this intentionally never loads anything on its own,
+ * matching the no-warm-up decision for `/set agent|subagent`. Never throws:
+ * any failure to reach the provider's admin API just means no warning.
+ */
+async function checkSelectionPlacement(
+  admin: IOllamaAdminClient,
+  modelName: string,
+): Promise<string | undefined> {
+  try {
+    const running = await admin.listRunning();
+    const runningEntry = matchRunningModel(running, modelName);
+    if (!runningEntry) {
+      return undefined;
+    }
+    const placement = describeModelPlacement(runningEntry);
+    if (placement.kind === "gpu" || placement.kind === "unknown") {
+      return undefined;
+    }
+    return formatSpillMessage(placement);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Creates a handler for setting role-specific models.
  */
 function createSetModelHandler(
@@ -240,7 +318,12 @@ function createSetModelHandler(
         ? await syncAgentToolSupport(admin, config, modelName)
         : await syncSubagentToolSupport(admin, config, modelName);
 
-    return { ok: true, supportsTools };
+    const placementWarning =
+      providerName === OLLAMA_PROVIDER_NAME
+        ? await checkSelectionPlacement(admin, modelName)
+        : undefined;
+
+    return { ok: true, supportsTools, placementWarning };
   };
 }
 
@@ -666,14 +749,16 @@ export const buildRouter = (deps: RouterBuilderDeps): Router => {
     brokerByRequester,
     createPerConnection,
     preferenceRulesToMemoryEntries,
+    ollamaBaseUrl,
   } = deps;
 
   // Build command handlers using factory functions
   const commands: Partial<Record<RouteId, CommandHandler>> = {
     "models.list": createListModelsHandler(ollama),
-    "models.delete": createDeleteModelHandler(ollama, config),
+    "models.delete": createDeleteModelHandler(ollama, config, ollamaBaseUrl),
     "models.show": createShowModelHandler(ollama),
     "models.running": createListRunningModelsHandler(ollama),
+    "models.storage": createModelStorageHandler(ollamaBaseUrl),
     "config.get": createGetConfigHandler(config),
     "config.set": createSetConfigHandler(ollama, config),
     "config.setModel": createSetModelHandler(config, providerRegistry),

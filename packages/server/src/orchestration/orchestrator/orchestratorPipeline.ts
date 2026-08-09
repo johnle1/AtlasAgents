@@ -245,6 +245,13 @@ export const runOrchestratorPipeline = async (
       message: `Plan ready · ${plan.agentCount} group${plan.agentCount === 1 ? "" : "s"} · ${plan.execution}`,
     });
 
+    // Reused by both placement checks below — the agent/subagent providers
+    // and resolved model tags don't change for the rest of this task.
+    const placementTargets = [
+      ...(agentProviderName === "ollama" ? [agentModel] : []),
+      ...(subagentProviderName === "ollama" ? [subagentModel] : []),
+    ];
+
     // Backgrounded GPU/CPU placement check — started here rather than
     // awaited so it never adds latency to the pool phase below, but joined
     // in the `finally` block rather than left fully fire-and-forget. The
@@ -260,21 +267,20 @@ export const runOrchestratorPipeline = async (
     // function had already returned and the caller closed the stream —
     // calling `onNext` after `onComplete` on the underlying RSocket
     // responder, which the protocol doesn't allow.
-    if (modelPlacementReporter) {
-      const placementTargets = [
-        ...(agentProviderName === "ollama" ? [agentModel] : []),
-        ...(subagentProviderName === "ollama" ? [subagentModel] : []),
-      ];
-      if (placementTargets.length > 0) {
-        modelPlacementPromise = modelPlacementReporter
-          .reportPlacement(placementTargets, session.requesterId)
-          .then((messages) => {
-            if (!signal.aborted) {
-              messages.forEach((message) => emit({ kind: "warning", message }));
-            }
-          })
-          .catch(() => {});
-      }
+    //
+    // This only catches the *agent* model spilling — at this point the
+    // subagent has not run yet, so it is never loaded, and its placement
+    // check below always finds nothing here (see the second check after
+    // runAgentPool, which is what actually catches a spilling subagent).
+    if (modelPlacementReporter && placementTargets.length > 0) {
+      modelPlacementPromise = modelPlacementReporter
+        .reportPlacement(placementTargets, session.requesterId)
+        .then((messages) => {
+          if (!signal.aborted) {
+            messages.forEach((message) => emit({ kind: "warning", message }));
+          }
+        })
+        .catch(() => {});
     }
 
     phase = "agent.pool";
@@ -291,6 +297,21 @@ export const runOrchestratorPipeline = async (
       emitStatus,
       signal,
     });
+
+    // Second placement check — the subagent model has now definitely run at
+    // least once (models load lazily), so this is what actually catches a
+    // spilling subagent that the check above could not have seen yet.
+    // Awaited directly rather than backgrounded: it runs between phases, not
+    // concurrently with one, so there's no `onNext`-after-`onComplete` risk
+    // to guard against with a joined promise like the first check needs.
+    if (modelPlacementReporter && placementTargets.length > 0 && !signal.aborted) {
+      const messages = await modelPlacementReporter
+        .reportPlacement(placementTargets, session.requesterId)
+        .catch(() => [] as string[]);
+      if (!signal.aborted) {
+        messages.forEach((message) => emit({ kind: "warning", message }));
+      }
+    }
 
     // Single-subtask plans skip synthesis — emit result directly. Multi-subtask plans
     // invoke agent.combine to synthesize outputs into one coherent final answer.

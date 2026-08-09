@@ -12,6 +12,7 @@ import { getTheme } from "../theme/themeManager.js";
 import { setStreamingText } from "../ui/uiBridge.js";
 import { renderProgressBar } from "../utils/progressBar.js";
 import { appendBlock, appendText } from "./sink.js";
+import type { ModelStorageReport } from "@loopycode/shared";
 
 /**
  * Last rendered pull-progress line per concurrent operation id.
@@ -340,4 +341,101 @@ export const printProgress = (
 
   updatePullProgressLine(trackerKey, formatPullProgressLine(progress, theme));
   return false;
+};
+
+/**
+ * Formats a byte count as `"0 B"` (exact zero, common for "deleting this tag
+ * frees nothing") or a 2-decimal GB figure — matching the GB formatting used
+ * elsewhere in this file for consistency.
+ *
+ * @example
+ * ```ts
+ * formatStorageBytes(0);            // "0 B"
+ * formatStorageBytes(8_100_000_000); // "7.55 GB"
+ * ```
+ */
+export const formatStorageBytes = (bytes: number): string =>
+  bytes === 0 ? "0 B" : `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+
+/**
+ * Prints the `/models storage` report: real on-disk usage from Ollama's
+ * manifests + blobs, per-tag unique-vs-shared bytes, and any orphaned blob
+ * files (interrupted pulls) with copy-pasteable `rm -rf` lines.
+ *
+ * @remarks
+ * Purely a display of what {@link ModelStorageReport} already computed — this
+ * function neither deletes anything nor recomputes byte totals. When
+ * `report.available` is `false`, prints the server's `reason` and returns.
+ *
+ * @param report - Response from the `models.storage` command.
+ *
+ * @example
+ * ```ts
+ * const report = await connection.sendCommand<ModelStorageReport>("models.storage", {});
+ * printModelStorage(report);
+ * ```
+ */
+export const printModelStorage = (report: ModelStorageReport): void => {
+  const theme = getTheme();
+  const outputLines: string[] = [
+    "",
+    `${theme.textBold}  Ollama model storage${theme.reset}`,
+  ];
+
+  if (!report.available) {
+    outputLines.push(
+      `  ${theme.textSecondary}${report.reason}${theme.reset}`,
+      "",
+    );
+    appendBlock(outputLines);
+    return;
+  }
+
+  outputLines.push(
+    `  ${theme.textSecondary}${report.dir}  (${report.dirSource})${theme.reset}`,
+    "",
+    `  ${theme.textAccent}on disk${theme.reset}     ${formatStorageBytes(report.totals.onDiskBytes)}`,
+    `  ${theme.textAccent}referenced${theme.reset}  ${formatStorageBytes(report.totals.referencedBytes)}`,
+    `  ${theme.textAccent}orphaned${theme.reset}    ${formatStorageBytes(report.totals.orphanedBytes)}${report.orphans.length > 0 ? ` (${report.orphans.length} file${report.orphans.length === 1 ? "" : "s"})` : ""}`,
+    "",
+  );
+
+  if (report.models.length === 0) {
+    outputLines.push(
+      `  ${theme.textSecondary}No installed models found.${theme.reset}`,
+      "",
+    );
+  } else {
+    outputLines.push(`${theme.textBold}  Installed models${theme.reset}`, "");
+    for (const model of report.models) {
+      const sharedNote =
+        model.sharedBytes > 0
+          ? `  ${theme.textSecondary}${formatStorageBytes(model.sharedBytes)} shared with ${model.sharedWith.join(", ")}${theme.reset}`
+          : "";
+      const freesNothingNote =
+        model.uniqueBytes === 0
+          ? `  ${theme.warning}⚠ deleting frees nothing${theme.reset}`
+          : "";
+      outputLines.push(
+        `  ${theme.warning}${model.tag}${theme.reset}  ${formatStorageBytes(model.totalBytes)} total, ${formatStorageBytes(model.uniqueBytes)} unique${sharedNote}${freesNothingNote}`,
+      );
+    }
+    outputLines.push("");
+  }
+
+  if (report.orphans.length > 0) {
+    outputLines.push(
+      `${theme.textBold}  Orphaned blobs${theme.reset} ${theme.textSecondary}— not visible to /models list, not removed by /models delete${theme.reset}`,
+      `  ${theme.textSecondary}(left behind by interrupted pulls). Delete manually if you don't need them:${theme.reset}`,
+      "",
+    );
+    for (const orphan of report.orphans) {
+      outputLines.push(
+        `  ${theme.textSecondary}rm -rf '${orphan.path}'${theme.reset}   ${formatStorageBytes(orphan.bytes)}`,
+      );
+    }
+    outputLines.push("");
+  }
+
+  appendBlock(outputLines);
 };

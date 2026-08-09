@@ -83,6 +83,21 @@ export type ModelGroup = {
 };
 
 /**
+ * Currently-configured (provider, model) pair for the agent and/or subagent
+ * role, used to mark matching rows in the `/set agent|subagent` picker.
+ *
+ * @remarks
+ * Either role may be omitted (not yet configured). Selecting the same model
+ * for both roles is valid and is the cheapest VRAM configuration — Ollama
+ * loads one shared instance rather than two — so the picker marks a row that
+ * matches both roles distinctly from a row matching only one.
+ */
+export type CurrentModelSelection = {
+  agent?: { provider: string; model: string };
+  subagent?: { provider: string; model: string };
+};
+
+/**
  * One flat, continuously-numbered model picker row — a (provider, model) pair.
  *
  * @remarks

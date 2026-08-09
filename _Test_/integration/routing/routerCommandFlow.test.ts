@@ -73,15 +73,23 @@ const makeConfigManager = async (): Promise<{
 };
 
 /** Builds a real Router. `ollama` is a real client whose network methods are
- * never called except where a test explicitly stubs `deleteModel`. */
+ * never called except where a test explicitly stubs `deleteModel`.
+ *
+ * `ollamaBaseUrl` defaults to an obviously-remote host so `models.storage`
+ * (and `models.delete`'s `freedBytes` scan) short-circuits to "unavailable"
+ * instead of reading this dev machine's real `~/.ollama/models` — keeping
+ * these tests hermetic and their outcome independent of what's actually
+ * installed locally. */
 const makeRouter = (
   config: ConfigManager,
   ollama: OllamaClient = new OllamaClient(),
+  ollamaBaseUrl = "http://router-command-flow-test.invalid:11434",
 ) => {
   const deps: RouterBuilderDeps = {
     ollama,
     providerRegistry: new ProviderRegistry({ config, ollamaClient: ollama }),
     config,
+    ollamaBaseUrl,
     skills: { saveAll: async () => 0 },
     prefs: {
       getAll: async () => [],
@@ -165,6 +173,68 @@ describe("config.setModel — role → field correctness (regression guard)", ()
     // The regression this guards against: a role/field swap would have
     // clobbered the subagent's model when only the agent's was targeted.
     expect(all.subagentModel).toBe("qwen2.5-coder:7b");
+  });
+});
+
+describe("config.setModel — placementWarning surfaces a measured VRAM spill", () => {
+  it("returns a placementWarning when the newly-selected model is already loaded and spilling", async () => {
+    const { config } = await makeConfigManager();
+    const ollama = new OllamaClient();
+    vi.spyOn(ollama, "showModel").mockResolvedValue({});
+    vi.spyOn(ollama, "listRunning").mockResolvedValue([
+      { name: "qwen3:70b", size: 100, size_vram: 52 },
+    ]);
+    const router = makeRouter(config, ollama);
+
+    const result = await router.routeCommand(SESSION, "config.setModel", {
+      role: "agent",
+      provider: "ollama",
+      model: "qwen3:70b",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect((result as { placementWarning?: string }).placementWarning).toContain(
+      "qwen3:70b",
+    );
+  });
+
+  it("omits placementWarning when the selected model isn't loaded yet (no warm-up)", async () => {
+    const { config } = await makeConfigManager();
+    const ollama = new OllamaClient();
+    vi.spyOn(ollama, "showModel").mockResolvedValue({});
+    vi.spyOn(ollama, "listRunning").mockResolvedValue([]);
+    const router = makeRouter(config, ollama);
+
+    const result = await router.routeCommand(SESSION, "config.setModel", {
+      role: "agent",
+      provider: "ollama",
+      model: "qwen3:70b",
+    });
+
+    expect(
+      (result as { placementWarning?: string }).placementWarning,
+    ).toBeUndefined();
+  });
+
+  it("never throws when listRunning() is unreachable — setModel still succeeds", async () => {
+    const { config } = await makeConfigManager();
+    const ollama = new OllamaClient();
+    vi.spyOn(ollama, "showModel").mockResolvedValue({});
+    vi.spyOn(ollama, "listRunning").mockRejectedValue(
+      new Error("connection refused"),
+    );
+    const router = makeRouter(config, ollama);
+
+    const result = await router.routeCommand(SESSION, "config.setModel", {
+      role: "agent",
+      provider: "ollama",
+      model: "qwen3:70b",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(
+      (result as { placementWarning?: string }).placementWarning,
+    ).toBeUndefined();
   });
 });
 

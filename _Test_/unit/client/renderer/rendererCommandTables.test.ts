@@ -12,6 +12,7 @@ vi.mock("../../../../packages/client/src/theme/themeManager.js", () => ({
     textSecondary: "S",
     textAccent: "A",
     warning: "W",
+    success: "G",
     reset: "R",
   }),
 }));
@@ -68,5 +69,44 @@ describe("commandTables printers", () => {
     expect(lines.some((l) => l.includes("localhost"))).toBe(true);
     const grouped = buildGroupedModelsLines([], "agent");
     expect(grouped.lines.length).toBeGreaterThan(0);
+  });
+
+  describe("buildGroupedModelsLines — current selection markers", () => {
+    const groups = [{ provider: "ollama", models: ["gemma3:12b", "gemma3:4b"] }];
+
+    it("marks a row matching only the agent", () => {
+      const { lines } = buildGroupedModelsLines(groups, "agent", {
+        agent: { provider: "ollama", model: "gemma3:12b" },
+      });
+      const row = lines.find((l) => l.includes("gemma3:12b"))!;
+      expect(row).toContain("current agent");
+      expect(row).not.toContain("subagent");
+    });
+
+    it("marks a row matching both roles distinctly", () => {
+      const { lines } = buildGroupedModelsLines(groups, "agent", {
+        agent: { provider: "ollama", model: "gemma3:12b" },
+        subagent: { provider: "ollama", model: "gemma3:12b" },
+      });
+      const row = lines.find((l) => l.includes("gemma3:12b"))!;
+      expect(row).toContain("current agent + subagent");
+    });
+
+    it("tolerates bare-name vs :latest tag mismatch", () => {
+      const { lines } = buildGroupedModelsLines(
+        [{ provider: "ollama", models: ["gemma3:latest"] }],
+        "agent",
+        { agent: { provider: "ollama", model: "gemma3" } },
+      );
+      const row = lines.find((l) => l.includes("gemma3:latest"))!;
+      expect(row).toContain("current agent");
+    });
+
+    it("leaves rows unmarked when nothing matches", () => {
+      const { lines } = buildGroupedModelsLines(groups, "agent", {
+        agent: { provider: "ollama", model: "qwen3:32b" },
+      });
+      expect(lines.some((l) => l.includes("current"))).toBe(false);
+    });
   });
 });

@@ -12,6 +12,7 @@ vi.mock("../../../../packages/client/src/theme/themeManager.js", () => ({
   getTheme: () => ({
     textBold: "B",
     textSecondary: "S",
+    textAccent: "A",
     warning: "W",
     success: "OK",
     error: "E",
@@ -30,11 +31,14 @@ vi.mock("../../../../packages/client/src/renderer/sink.js", () => ({
 
 import {
   finishPullProgress,
+  formatStorageBytes,
   printInstalledModels,
   printModelFind,
+  printModelStorage,
   printProgress,
   resetPullProgress,
 } from "../../../../packages/client/src/renderer/modelOutput.js";
+import type { ModelStorageReport } from "@loopycode/shared";
 
 beforeEach(() => {
   appendBlock.mockClear();
@@ -78,5 +82,70 @@ describe("modelOutput printers", () => {
     expect(setStreamingText).toHaveBeenCalledWith(
       expect.stringContaining("100.0%"),
     );
+  });
+});
+
+describe("formatStorageBytes", () => {
+  it("renders an exact zero as '0 B' rather than '0.00 GB' (normal — the 'frees nothing' case)", () => {
+    expect(formatStorageBytes(0)).toBe("0 B");
+  });
+
+  it("renders a non-zero byte count as a 2-decimal GB figure (normal)", () => {
+    expect(formatStorageBytes(8_100_000_000)).toBe("7.54 GB");
+  });
+});
+
+describe("printModelStorage", () => {
+  it("prints the unavailable reason and returns without a models section (boundary)", () => {
+    const report: ModelStorageReport = {
+      available: false,
+      reason: "Ollama is running on a remote host.",
+    };
+    printModelStorage(report);
+    expect(appendBlock).toHaveBeenCalledTimes(1);
+    const lines = appendBlock.mock.calls[0]![0] as string[];
+    expect(lines.some((l) => l.includes("remote host"))).toBe(true);
+    expect(lines.some((l) => l.includes("Installed models"))).toBe(false);
+  });
+
+  it("marks a tag whose deletion frees nothing, and lists its sharedWith (normal)", () => {
+    const report: ModelStorageReport = {
+      available: true,
+      dir: "/home/user/.ollama/models",
+      dirSource: "default:~/.ollama/models",
+      models: [
+        {
+          tag: "gemma3:latest",
+          totalBytes: 8_100_000_000,
+          uniqueBytes: 0,
+          sharedBytes: 8_100_000_000,
+          sharedWith: ["gemma3:12b"],
+        },
+      ],
+      orphans: [],
+      totals: { onDiskBytes: 8_100_000_000, referencedBytes: 8_100_000_000, orphanedBytes: 0 },
+    };
+    printModelStorage(report);
+    const lines = appendBlock.mock.calls[0]![0] as string[];
+    expect(lines.some((l) => l.includes("frees nothing"))).toBe(true);
+    expect(lines.some((l) => l.includes("shared with gemma3:12b"))).toBe(true);
+  });
+
+  it("lists orphaned blobs with an rm -rf line each (normal — the headline scenario)", () => {
+    const report: ModelStorageReport = {
+      available: true,
+      dir: "/home/user/.ollama/models",
+      dirSource: "default:~/.ollama/models",
+      models: [],
+      orphans: [
+        { path: "/home/user/.ollama/models/blobs/sha256-abc-partial", bytes: 6_100_000_000 },
+      ],
+      totals: { onDiskBytes: 6_100_000_000, referencedBytes: 0, orphanedBytes: 6_100_000_000 },
+    };
+    printModelStorage(report);
+    const lines = appendBlock.mock.calls[0]![0] as string[];
+    expect(
+      lines.some((l) => l.includes("rm -rf") && l.includes("sha256-abc-partial")),
+    ).toBe(true);
   });
 });

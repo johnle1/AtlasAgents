@@ -105,7 +105,27 @@ Any role (agent/subagent) can be pointed at `ollama` or at a named OpenAI-compat
   loopy-detect-hardware --write  # also add it to config.json
   ```
 
-- Manage providers from the client with `/providers list|add|remove`, and models with `/models list|find|pull|delete|show|running`.
+- Manage providers from the client with `/providers list|add|remove`, and models with `/models list|find|pull|delete|show|running|storage`.
+
+### Model storage: why `/models delete` doesn't always free space
+
+Ollama content-addresses model layers by digest, so two tags that share layers (e.g. `gemma3:12b`
+and `gemma3:latest` built from the same weights) only occupy that space once — deleting one tag
+frees nothing if the other tag still references every blob it used. Interrupted pulls also leave
+behind partial blob files that no tag references at all, which `/models list` can't show and
+`/models delete` can never reach. Run `/models storage` for a real accounting: per-model unique vs.
+shared bytes, and any orphaned files with the exact `rm -rf` command to remove them yourself — the
+command only reports, it never deletes anything on its own.
+
+### Using one model for both agent and subagent
+
+The agent (planning) and subagent (execution) roles are independent settings — nothing stops you
+from picking the same model for both, e.g. `/set agent` → `gemma3:12b` and `/set subagent` →
+`gemma3:12b`. This is fully supported and is actually the cheapest setup on limited VRAM: Ollama
+keys its loaded model by tag, so a shared tag loads into memory **once**, not twice. The
+`/set agent|subagent` picker marks your current selections (`← current agent`, `← current
+subagent`, or `← current agent + subagent` when they match) so you can see at a glance which
+model each role is already using.
 
 ## Common commands
 
@@ -177,7 +197,7 @@ loopy-server --regen-cert
 | `/config`                                         | Show current configuration                              |
 | `/skills list\|add\|sync`                         | Manage skill files                                      |
 | `/memory show\|forget\|clear`                     | Inspect or clear learned memory                         |
-| `/models list\|find\|pull\|delete\|show\|running` | Manage models on the configured provider                |
+| `/models list\|find\|pull\|delete\|show\|running\|storage` | Manage models; `storage` reports real on-disk usage |
 | `/providers list\|add\|remove`                    | Manage LLM provider backends                            |
 | `/new`                                            | Start a new task                                        |
 | `/explore`                                        | Explore-only mode (read, no edits)                      |

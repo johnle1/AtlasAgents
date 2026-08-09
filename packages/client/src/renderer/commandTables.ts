@@ -11,7 +11,19 @@ import type { MemoryEntry } from "../connection/index.js";
 import { getTheme } from "../theme/themeManager.js";
 import { THEMES } from "../theme/themes.js";
 import { appendStyledLines } from "./sink.js";
-import type { ModelGroup, FlatModelEntry } from "./types.js";
+import type { ModelGroup, FlatModelEntry, CurrentModelSelection } from "./types.js";
+
+/**
+ * Whether two Ollama model tags refer to the same model, tolerating the
+ * common bare-name-vs-`:latest` mismatch (e.g. `"gemma3"` and
+ * `"gemma3:latest"`), mirroring {@link matchRunningModel}'s normalization.
+ */
+const modelTagsMatch = (tagA: string, tagB: string): boolean => {
+  if (tagA === tagB) return true;
+  const withLatest = (tag: string): string =>
+    tag.includes(":") ? tag : `${tag}:latest`;
+  return withLatest(tagA) === withLatest(tagB);
+};
 
 /**
  * Masks a secret for config display (password / tokens).
@@ -114,11 +126,14 @@ const buildModelsLines = (models: string[], label: string): string[] => {
  *
  * @param groups - Per-provider model lists from `providers.listModels`.
  * @param label - Role label in the header (`"agent"` / `"subagent"`).
+ * @param current - Currently-configured agent/subagent (provider, model), if
+ *   known, so matching rows can be marked in the list.
  * @returns Styled lines plus the flat (provider, model) list indexed 0..N-1.
  */
 export const buildGroupedModelsLines = (
   groups: ModelGroup[],
   label: string,
+  current?: CurrentModelSelection,
 ): { lines: string[]; entries: FlatModelEntry[] } => {
   const theme = getTheme();
   const lines = [
@@ -133,8 +148,28 @@ export const buildGroupedModelsLines = (
     lines.push(`  ${theme.textAccent}${group.provider}${theme.reset}`);
     for (const model of group.models) {
       entries.push({ provider: group.provider, model });
+
+      const marks: string[] = [];
+      const isAgent =
+        current?.agent?.provider === group.provider &&
+        modelTagsMatch(current.agent.model, model);
+      const isSubagent =
+        current?.subagent?.provider === group.provider &&
+        modelTagsMatch(current.subagent.model, model);
+      if (isAgent && isSubagent) {
+        marks.push("current agent + subagent");
+      } else if (isAgent) {
+        marks.push("current agent");
+      } else if (isSubagent) {
+        marks.push("current subagent");
+      }
+      const marker =
+        marks.length > 0
+          ? `  ${theme.success}← ${marks.join(", ")}${theme.reset}`
+          : "";
+
       lines.push(
-        `  ${theme.warning}${String(entries.length).padStart(3)}${theme.reset}  ${model}`,
+        `  ${theme.warning}${String(entries.length).padStart(3)}${theme.reset}  ${model}${marker}`,
       );
     }
   }
@@ -148,14 +183,18 @@ export const buildGroupedModelsLines = (
  *
  * @param groups - Per-provider model lists from `providers.listModels`.
  * @param label - Role label in the header.
+ * @param current - Currently-configured agent/subagent (provider, model), if
+ *   known, so matching rows show `← current agent`, `← current subagent`, or
+ *   `← current agent + subagent` when the same model serves both roles.
  * @returns Flat (provider, model) entries in display order, for mapping a
  *   chosen number back to a selection.
  */
 export const printGroupedModels = (
   groups: ModelGroup[],
   label: string,
+  current?: CurrentModelSelection,
 ): FlatModelEntry[] => {
-  const { lines, entries } = buildGroupedModelsLines(groups, label);
+  const { lines, entries } = buildGroupedModelsLines(groups, label, current);
   appendStyledLines(lines, { leadingBlank: true, trailingBlank: true });
   return entries;
 };

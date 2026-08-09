@@ -56,10 +56,13 @@ export {
   type DirEntry,
   type ModelGroup,
   type FlatModelEntry,
+  type CurrentModelSelection,
 } from "./types.js";
 export {
   printInstalledModels,
   printModelFind,
+  printModelStorage,
+  formatStorageBytes,
   printProgress,
   resetPullProgress,
   finishPullProgress,

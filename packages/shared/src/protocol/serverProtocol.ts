@@ -39,6 +39,7 @@ export type RouteId =
   | "models.delete"
   | "models.show"
   | "models.running"
+  | "models.storage"
   | "config.get"
   | "config.set"
   | "config.setModel"
@@ -78,6 +79,7 @@ export const ROUTE_IDS: readonly RouteId[] = [
   "models.delete",
   "models.show",
   "models.running",
+  "models.storage",
   "config.get",
   "config.set",
   "config.setModel",
