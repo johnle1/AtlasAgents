@@ -19,12 +19,14 @@ export { CLI_VERSION } from "./version.js";
 export { buildBannerLines } from "./banner.js";
 export {
   buildConfigLines,
+  buildHelpLines,
   printConfig,
   printModels,
   printGroupedModels,
   printProviders,
   printSkills,
   printMemory,
+  printHelp,
 } from "./commandTables.js";
 export {
   formatAgentThinkForDisplay,

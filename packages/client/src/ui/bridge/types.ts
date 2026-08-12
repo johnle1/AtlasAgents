@@ -59,6 +59,11 @@ export type BridgeHooks = {
   onCwd?: (currentWorkingDirectory: string) => void;
   /** Callback invoked when banner should be refreshed. */
   onBannerRefresh?: (configuration: Config) => void;
+  /**
+   * Callback invoked when the user asks to clear the screen (Ctrl+L / `/clear`).
+   * The React root remounts Ink `<Static>` and writes ANSI clear escapes.
+   */
+  onClearScreen?: () => void;
 };
 
 /**

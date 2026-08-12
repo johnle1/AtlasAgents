@@ -43,6 +43,7 @@ const {
   mockSetTaskActive,
   mockStartLiveThink,
   mockUpdateAgentActivity,
+  mockSetActiveTaskCancel,
   mockLoadConfig,
 } = vi.hoisted(() => ({
   mockAppendHistory: vi.fn(),
@@ -59,6 +60,7 @@ const {
   mockSetTaskActive: vi.fn(),
   mockStartLiveThink: vi.fn(),
   mockUpdateAgentActivity: vi.fn(),
+  mockSetActiveTaskCancel: vi.fn(),
   mockLoadConfig: vi.fn(),
 }));
 
@@ -77,6 +79,11 @@ vi.mock("../../../packages/client/src/ui/uiBridge.js", () => ({
   setTaskActive: mockSetTaskActive,
   startLiveThink: mockStartLiveThink,
   updateAgentActivity: mockUpdateAgentActivity,
+  setActiveTaskCancel: mockSetActiveTaskCancel,
+}));
+
+vi.mock("../../../packages/client/src/ui/notify.js", () => ({
+  notifyUser: vi.fn(),
 }));
 
 vi.mock("../../../packages/client/src/config/index.js", () => ({
@@ -165,9 +172,12 @@ const connectionFromFrames = (frames: ServerTaskFrame[]): Connection =>
     sendTask: async (options: {
       onFrame: (frame: ClientTaskFrame) => void | Promise<void>;
     }) => {
-      for (const frame of frames) {
-        await options.onFrame(frame as unknown as ClientTaskFrame);
-      }
+      const done = (async () => {
+        for (const frame of frames) {
+          await options.onFrame(frame as unknown as ClientTaskFrame);
+        }
+      })();
+      return { done, cancel: () => {} };
     },
     respondPlan: async () => {},
   }) as unknown as Connection;

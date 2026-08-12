@@ -2,7 +2,7 @@
  * Unit tests — themeManager (mocked config + bridge).
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const loadConfig = vi.fn(() => ({ ui: { theme: "default" } }));
 const updateConfig = vi.fn();
@@ -33,6 +33,10 @@ describe("themeManager", () => {
     loadTheme();
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("loadTheme / getTheme / getThemeKey expose the active theme", () => {
     expect(getThemeKey()).toBe("default");
     expect(getTheme()).toBeTypeOf("object");
@@ -45,5 +49,19 @@ describe("themeManager", () => {
     expect(getThemeKey()).toBe(alternate);
     expect(updateConfig).toHaveBeenCalled();
     expect(refreshInkBanner).toHaveBeenCalled();
+  });
+
+  it("returns empty CSI fields when NO_COLOR is set, then restores color when unset (normal)", () => {
+    vi.stubEnv("NO_COLOR", "1");
+    const disabled = getTheme();
+    for (const [key, value] of Object.entries(disabled)) {
+      if (key === "name" || key === "shikiTheme") continue;
+      expect(value, key).toBe("");
+    }
+
+    vi.stubEnv("NO_COLOR", "");
+    const restored = getTheme();
+    expect(restored.reset.length).toBeGreaterThan(0);
+    expect(restored).toHaveProperty("error");
   });
 });

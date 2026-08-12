@@ -76,12 +76,14 @@ describe("fg / bg", () => {
   });
 
   it("uses truecolor when supported", () => {
+    vi.stubEnv("NO_COLOR", "");
     vi.stubEnv("COLORTERM", "truecolor");
     expect(fg("#FF5733")).toBe(hexToTrueColor("#FF5733"));
     expect(bg("#112233")).toBe(hexToTrueColorBg("#112233"));
   });
 
   it("uses 256-color when truecolor is unavailable", () => {
+    vi.stubEnv("NO_COLOR", "");
     vi.stubEnv("COLORTERM", "");
     vi.stubEnv("TERM", "dumb");
     expect(fg("#FF5733")).toBe(hexToAnsi256("#FF5733"));

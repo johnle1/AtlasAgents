@@ -25,6 +25,8 @@ const {
   mockSetTaskActive,
   mockStartLiveThink,
   mockUpdateAgentActivity,
+  mockSetActiveTaskCancel,
+  mockNotifyUser,
   mockLoadConfig,
 } = vi.hoisted(() => ({
   mockAppendHistory: vi.fn(),
@@ -41,6 +43,8 @@ const {
   mockSetTaskActive: vi.fn(),
   mockStartLiveThink: vi.fn(),
   mockUpdateAgentActivity: vi.fn(),
+  mockSetActiveTaskCancel: vi.fn(),
+  mockNotifyUser: vi.fn(),
   mockLoadConfig: vi.fn(),
 }));
 
@@ -59,6 +63,11 @@ vi.mock("../../../../packages/client/src/ui/uiBridge.js", () => ({
   setTaskActive: mockSetTaskActive,
   startLiveThink: mockStartLiveThink,
   updateAgentActivity: mockUpdateAgentActivity,
+  setActiveTaskCancel: mockSetActiveTaskCancel,
+}));
+
+vi.mock("../../../../packages/client/src/ui/notify.js", () => ({
+  notifyUser: mockNotifyUser,
 }));
 
 vi.mock("../../../../packages/client/src/config/index.js", () => ({
@@ -69,15 +78,18 @@ import { runTaskStream } from "../../../../packages/client/src/ui/taskStream.js"
 import type { Connection } from "../../../../packages/client/src/connection/index.js";
 import type { TaskFrame } from "../../../../packages/client/src/types/frames.js";
 
-/** Replays a fixed frame sequence through onFrame, then resolves. */
+/** Replays a fixed frame sequence through onFrame, then resolves `done`. */
 const fakeConnection = (frames: TaskFrame[]): Connection =>
   ({
     sendTask: async (options: {
       onFrame: (frame: TaskFrame) => void | Promise<void>;
     }) => {
-      for (const frame of frames) {
-        await options.onFrame(frame);
-      }
+      const done = (async () => {
+        for (const frame of frames) {
+          await options.onFrame(frame);
+        }
+      })();
+      return { done, cancel: () => {} };
     },
     respondPlan: async () => {},
   }) as unknown as Connection;
@@ -311,5 +323,54 @@ describe("runTaskStream — showThinkOutput on", () => {
     );
     expect(thinkIndex).toBeGreaterThanOrEqual(0);
     expect(thinkIndex).toBeLessThan(errorIndex);
+  });
+});
+
+describe("runTaskStream — notifications", () => {
+  it("fires one Task complete notification on success (normal)", async () => {
+    const connection = fakeConnection([]);
+    await runTaskStream(connection, "do something");
+    expect(mockNotifyUser).toHaveBeenCalledOnce();
+    expect(mockNotifyUser).toHaveBeenCalledWith("Task complete");
+  });
+
+  it("does not notify on a server error frame (error)", async () => {
+    const connection = fakeConnection([{ kind: "error", message: "boom" }]);
+    await runTaskStream(connection, "do something");
+    expect(mockNotifyUser).not.toHaveBeenCalled();
+  });
+
+  it("does not notify when the user cancels (boundary)", async () => {
+    let resolveDone: (() => void) | undefined;
+    const connection = {
+      sendTask: async () => {
+        const done = new Promise<void>((resolve) => {
+          resolveDone = resolve;
+        });
+        return {
+          done,
+          cancel: () => {
+            resolveDone?.();
+          },
+        };
+      },
+      respondPlan: async () => {},
+    } as unknown as Connection;
+
+    const running = runTaskStream(connection, "do something");
+    await Promise.resolve();
+    const cancel = mockSetActiveTaskCancel.mock.calls.find(
+      (call) => typeof call[0] === "function",
+    )?.[0] as (() => void) | undefined;
+    expect(cancel).toBeTypeOf("function");
+    cancel!();
+    await running;
+
+    expect(mockNotifyUser).not.toHaveBeenCalled();
+    expect(mockAppendHistory).toHaveBeenCalledWith({
+      kind: "text",
+      text: "Task cancelled by user",
+      variant: "warning",
+    });
   });
 });

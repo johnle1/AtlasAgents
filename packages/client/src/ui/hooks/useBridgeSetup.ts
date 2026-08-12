@@ -80,6 +80,7 @@ export const useBridgeSetup = ({
   setBannerEntries,
   setSubagentStatuses,
   setSubagentBoards,
+  onAfterClearScreen,
 }: BridgeSetupContext): void => {
   // Track whether we entered alternate screen mode so we can exit it on cleanup.
   // Using a ref instead of state avoids triggering re-renders when this changes.
@@ -131,6 +132,15 @@ export const useBridgeSetup = ({
         ),
       onSubagentStatuses: (statusUpdater) => setSubagentStatuses(statusUpdater),
       onSubagentBoards: (boardUpdater) => setSubagentBoards(boardUpdater),
+      onClearScreen: () => {
+        setHistory([]);
+        setStreamingText(null);
+        setLiveThinks([]);
+        onAfterClearScreen?.();
+        if (process.stdout.isTTY) {
+          process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+        }
+      },
     });
 
     // Register the streaming token handler for LLM response streaming.
@@ -181,5 +191,6 @@ export const useBridgeSetup = ({
     setBannerEntries,
     setSubagentStatuses,
     setSubagentBoards,
+    onAfterClearScreen,
   ]);
 };

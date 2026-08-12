@@ -19,6 +19,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  COMMAND_CATALOG,
   commandRequiresArgs,
   getCommandDescription,
   getCommandLabel,
@@ -225,5 +226,31 @@ describe("getCommandDescription — boundary / error cases", () => {
 
   it("returns empty string for empty string input (boundary)", () => {
     expect(getCommandDescription("")).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Catalog entries for Phase 1 commands
+// ---------------------------------------------------------------------------
+
+describe("COMMAND_CATALOG — Phase 1 entries", () => {
+  it("includes /clear and /notify (normal)", () => {
+    const commands = COMMAND_CATALOG.map((entry) => entry.command);
+    expect(commands).toContain("/clear");
+    expect(commands).toContain("/notify");
+  });
+
+  it("describes /clear as Ctrl+L (normal)", () => {
+    expect(getCommandDescription("/clear")).toMatch(/Ctrl\+L/);
+  });
+
+  it("describes /notify as on|off (normal)", () => {
+    expect(getCommandLabel("/notify")).toMatch(/on\|off/);
+  });
+
+  it("does not mention Ctrl+L in /exit (boundary — Ctrl+L now clears)", () => {
+    const description = getCommandDescription("/exit");
+    expect(description).not.toMatch(/Ctrl\+L/i);
+    expect(description).toMatch(/Ctrl\+C/);
   });
 });

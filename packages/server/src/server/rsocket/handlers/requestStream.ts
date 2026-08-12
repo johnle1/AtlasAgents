@@ -153,6 +153,14 @@ export const createRequestStreamHandler =
         );
         responderStream.onComplete();
       } catch (err) {
+        // A cancelled stream is not a failure: complete quietly so the client
+        // does not print a phantom error after "Task cancelled". Check the
+        // signal, not `instanceof AbortError` — callers may reject with a
+        // plain Error whose `name` is "AbortError".
+        if (abortController.signal.aborted) {
+          responderStream.onComplete();
+          return;
+        }
         // The orchestrator formats and emits its own rich error frames. Only
         // emit a fallback error frame here when it has NOT already done so, to
         // avoid showing the user two error messages for one failure.

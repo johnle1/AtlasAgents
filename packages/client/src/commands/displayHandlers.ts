@@ -1,5 +1,5 @@
 /**
- * UI toggle slash commands: `/spinner` and `/think`.
+ * UI toggle slash commands: `/spinner`, `/think`, and `/notify`.
  *
  * @remarks
  * Both accept `on` / `off` in either the subcommand or argument slot
@@ -84,5 +84,42 @@ export const handleThink = (sub: string, arg: string): void => {
   const enabled = loadConfig().showThinkOutput;
   printLine(
     `  Think output: ${enabled ? "on" : "off"} (use /think on | /think off)`,
+  );
+};
+
+/**
+ * Enables, disables, or reports opt-in desktop / terminal notifications.
+ *
+ * @remarks
+ * Persists `ui.notifications` via {@link updateConfig}. Default is off.
+ * Same `on` / `off` token rules as {@link handleSpinner}.
+ *
+ * @param sub - First token after `/notify`.
+ * @param arg - Alternate `on`/`off` position.
+ *
+ * @example
+ * ```ts
+ * handleNotify("on", "");
+ * ```
+ */
+export const handleNotify = (sub: string, arg: string): void => {
+  const token = (sub || arg).trim().toLowerCase();
+  const config = loadConfig();
+
+  if (token === "on") {
+    updateConfig({ ui: { ...config.ui, notifications: true } });
+    printSuccess("Notifications enabled.");
+    return;
+  }
+
+  if (token === "off") {
+    updateConfig({ ui: { ...config.ui, notifications: false } });
+    printSuccess("Notifications disabled.");
+    return;
+  }
+
+  const enabled = config.ui.notifications === true;
+  printLine(
+    `  Notifications: ${enabled ? "on" : "off"} (use /notify on | /notify off)`,
   );
 };

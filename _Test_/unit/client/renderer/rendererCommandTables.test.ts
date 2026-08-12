@@ -22,9 +22,11 @@ vi.mock("../../../../packages/client/src/renderer/sink.js", () => ({
 }));
 
 import type { Config } from "../../../../packages/client/src/config/index.js";
+import { COMMAND_CATALOG } from "../../../../packages/client/src/ui/commandCatalog.js";
 import {
   buildConfigLines,
   buildGroupedModelsLines,
+  buildHelpLines,
   printConfig,
   printGroupedModels,
   printMemory,
@@ -108,5 +110,34 @@ describe("commandTables printers", () => {
       });
       expect(lines.some((l) => l.includes("current"))).toBe(false);
     });
+  });
+});
+
+describe("buildHelpLines", () => {
+  it("renders every catalog command with its description (normal)", () => {
+    const lines = buildHelpLines(COMMAND_CATALOG);
+    const joined = lines.join("\n");
+
+    for (const entry of COMMAND_CATALOG) {
+      expect(joined).toContain(entry.command);
+      expect(joined).toContain(entry.description);
+    }
+  });
+
+  it("never drops an entry — command-line count matches catalog length (boundary)", () => {
+    const lines = buildHelpLines(COMMAND_CATALOG);
+    const commandLines = lines.filter((line) =>
+      COMMAND_CATALOG.some((entry) => line.includes(entry.command)),
+    );
+    expect(commandLines).toHaveLength(COMMAND_CATALOG.length);
+  });
+
+  it("groups commands under section headers (normal)", () => {
+    const lines = buildHelpLines(COMMAND_CATALOG);
+    const joined = lines.join("\n");
+    expect(joined).toMatch(/Models/i);
+    expect(joined).toMatch(/Providers/i);
+    expect(joined).toMatch(/Session/i);
+    expect(joined).toMatch(/UI/i);
   });
 });

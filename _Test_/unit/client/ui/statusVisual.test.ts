@@ -56,6 +56,9 @@ vi.mock("../../../../packages/client/src/ui/terminalEnv", () => ({
    * Pretend we are NOT a screen reader or CI → animation enabled.
    */
   isScreenReaderLikely: vi.fn(() => false),
+  colorDisabled: () => false,
+  colorForced: () => false,
+  supportsOsc9Notifications: () => false,
 }));
 
 import {

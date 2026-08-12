@@ -29,7 +29,26 @@ import type { Config } from "../config/index.js";
 export const STREAM_WINDOW = 64;
 
 /**
- * Low-level `requestStream` with decode, callbacks, and credit refill.
+ * Handle for an in-flight RSocket requestStream.
+ *
+ * @remarks
+ * `done` settles when the server completes, errors, or the caller invokes
+ * {@link StreamHandle.cancel}. A user-initiated cancel resolves `done`
+ * successfully — cancellation is not an error, so UI catch paths must not
+ * print a phantom failure after "Task cancelled".
+ */
+export type StreamHandle = {
+  /** Settles when the stream ends (success, error, or user cancel). */
+  done: Promise<void>;
+  /**
+   * Sends RSocket CANCEL and resolves {@link StreamHandle.done} as success.
+   * Safe to call more than once; later calls are no-ops.
+   */
+  cancel: () => void;
+};
+
+/**
+ * Low-level `requestStream` with decode, callbacks, credit refill, and cancel.
  *
  * @remarks
  * - Decodes each payload via {@link decodeFrame}; unknown / empty payloads are skipped.
@@ -39,19 +58,21 @@ export const STREAM_WINDOW = 64;
  *   frames wait — preserving server order for task state machines.
  * - Stream end is signaled by `onNext(..., isComplete)` and/or `onComplete`;
  *   both wait for the frame chain to drain before resolving.
+ * - {@link StreamHandle.cancel} sends RSocket CANCEL and resolves `done`
+ *   without rejecting, so a cancelled task is not treated as a failure.
  *
  * @param rsocket - Live RSocket connection.
  * @param body - JSON-serializable request body (task / pull / explore).
  * @param metadata - Auth metadata Buffer.
  * @param onFrame - Invoked for every successfully decoded {@link TaskFrame}.
  * @param onToken - Optional incremental token text for streaming display.
- * @returns Resolves when the server completes the stream after handlers finish.
- * @throws {@link Error} When RSocket reports `onError`, or an `onFrame` /
- *   decode path rejects.
+ * @returns A {@link StreamHandle} whose `done` promise settles when the stream
+ *   ends. Rejects `done` when RSocket reports `onError` (and the caller did
+ *   not cancel) or an `onFrame` / decode path rejects.
  *
  * @example
  * ```ts
- * await streamRequest(
+ * const { done, cancel } = streamRequest(
  *   rsocket,
  *   { kind: "explore" },
  *   authMetadata(config),
@@ -59,22 +80,26 @@ export const STREAM_WINDOW = 64;
  *     console.log(frame.kind);
  *   },
  * );
+ * // later: cancel();
+ * await done;
  * ```
  */
-export async function streamRequest(
+export const streamRequest = (
   rsocket: RSocket,
   body: Record<string, unknown>,
   metadata: Buffer,
   onFrame: (frame: TaskFrame) => void | Promise<void>,
   onToken?: (token: string) => void,
-): Promise<void> {
+): StreamHandle => {
   const dataBuf = Buffer.from(JSON.stringify(body), "utf-8");
   const payload: Payload = {
     data: dataBuf,
     metadata,
   };
 
-  await new Promise<void>((resolve, reject) => {
+  let requesterCancel: (() => void) | undefined;
+
+  const done = new Promise<void>((resolve, reject) => {
     let settled = false;
     // Local credit accounting mirrors what we last requested from the peer.
     let pendingBudget = STREAM_WINDOW;
@@ -128,8 +153,20 @@ export async function streamRequest(
 
       onExtension: () => {},
     });
+
+    requesterCancel = () => {
+      requester.cancel?.();
+      finish();
+    };
   });
-}
+
+  return {
+    done,
+    cancel: () => {
+      requesterCancel?.();
+    },
+  };
+};
 
 /**
  * Streams a user task using config models, temperatures, and agent cap.
@@ -146,12 +183,12 @@ export async function streamRequest(
  * @param onFrame - Receives each decoded task frame.
  * @param onToken - Optional streaming token sink for the CLI.
  * @param maxSubagents - Optional concurrency hint (`1`, `2`, `"max"`, or a number).
- * @returns Resolves when the task stream completes.
+ * @returns A {@link StreamHandle} for the task stream.
  * @throws {@link Error} Propagates stream / handler failures from {@link streamRequest}.
  *
  * @example
  * ```ts
- * await sendTask(
+ * const { done, cancel } = sendTask(
  *   "Fix the flaky reconnect test",
  *   config,
  *   authMetadata(config),
@@ -160,9 +197,10 @@ export async function streamRequest(
  *   (token) => process.stdout.write(token),
  *   2,
  * );
+ * await done;
  * ```
  */
-export async function sendTask(
+export const sendTask = (
   task: string,
   config: Config,
   metadata: Buffer,
@@ -170,7 +208,7 @@ export async function sendTask(
   onFrame: (frame: TaskFrame) => void | Promise<void>,
   onToken?: (token: string) => void,
   maxSubagents?: 1 | 2 | "max" | number,
-): Promise<void> {
+): StreamHandle => {
   const body: TaskStreamPayload = {
     kind: "task",
     text: task,
@@ -183,8 +221,8 @@ export async function sendTask(
     subagentTemp: config.subagentTemp,
   };
 
-  await streamRequest(rsocket, body, metadata, onFrame, onToken);
-}
+  return streamRequest(rsocket, body, metadata, onFrame, onToken);
+};
 
 /**
  * Streams a long-running server operation (model pull or explore).
@@ -197,12 +235,12 @@ export async function sendTask(
  * @param opts - Operation kind, payload, and frame callback.
  * @param metadata - Auth metadata Buffer.
  * @param rsocket - Live RSocket connection.
- * @returns Resolves when the operation stream completes.
+ * @returns A {@link StreamHandle} for the operation stream.
  * @throws {@link Error} Propagates stream / handler failures from {@link streamRequest}.
  *
  * @example
  * ```ts
- * await sendStream(
+ * const { done } = sendStream(
  *   {
  *     kind: "models.pull",
  *     payload: { name: "gemma3:27b" },
@@ -211,9 +249,10 @@ export async function sendTask(
  *   authMetadata(config),
  *   rsocket,
  * );
+ * await done;
  * ```
  */
-export async function sendStream(
+export const sendStream = (
   opts:
     | {
         kind: "models.pull";
@@ -227,12 +266,12 @@ export async function sendStream(
       },
   metadata: Buffer,
   rsocket: RSocket,
-): Promise<void> {
+): StreamHandle => {
   // Flatten pull payload so the server sees `name` at the top level of the body.
   const body =
     opts.kind === "models.pull"
       ? { kind: opts.kind, name: opts.payload.name }
       : { kind: "explore" };
 
-  await streamRequest(rsocket, body, metadata, opts.onFrame);
-}
+  return streamRequest(rsocket, body, metadata, opts.onFrame);
+};

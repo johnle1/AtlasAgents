@@ -10,9 +10,10 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockRequestApproval, mockRequestPrompt } = vi.hoisted(() => ({
+const { mockRequestApproval, mockRequestPrompt, mockNotifyUser } = vi.hoisted(() => ({
   mockRequestApproval: vi.fn(),
   mockRequestPrompt: vi.fn(),
+  mockNotifyUser: vi.fn(),
 }));
 
 vi.mock("../../../../packages/client/src/ui/uiBridge.js", () => ({
@@ -20,7 +21,12 @@ vi.mock("../../../../packages/client/src/ui/uiBridge.js", () => ({
   requestPrompt: mockRequestPrompt,
 }));
 
+vi.mock("../../../../packages/client/src/ui/notify.js", () => ({
+  notifyUser: mockNotifyUser,
+}));
+
 import { requestApprovalWithFeedback } from "../../../../packages/client/src/ui/approvalFlow.js";
+import { dismissValueFor } from "../../../../packages/client/src/ui/components/approvalKeymap.js";
 
 const request = { type: "runSkip", command: "rm -rf build" } as const;
 
@@ -73,5 +79,35 @@ describe("requestApprovalWithFeedback", () => {
     mockRequestPrompt.mockResolvedValue("something");
     const outcome = await requestApprovalWithFeedback(request, "revise?");
     expect(outcome.approved).toBe(false);
+  });
+});
+
+describe("Esc dismiss defaults match cancelPendingApprovals", () => {
+  it("dismissing a keepUndo request resolves false (normal)", () => {
+    expect(dismissValueFor("keepUndo")).toBe(false);
+  });
+
+  it("dismissing a planReview request resolves skip (normal)", () => {
+    expect(dismissValueFor("planReview")).toBe("skip");
+  });
+});
+
+describe("requestApproval notification (via real approval bridge)", () => {
+  it("fires exactly one Action required notification when UI is active (normal)", async () => {
+    const { setInkUIActiveValue, setPendingApprovalEntry, setBridgeHooks } =
+      await import("../../../../packages/client/src/ui/bridge/state.js");
+    const { requestApproval, resolveApproval } = await import(
+      "../../../../packages/client/src/ui/bridge/approval.js"
+    );
+    setBridgeHooks({});
+    setPendingApprovalEntry(null);
+    setInkUIActiveValue(true);
+    mockNotifyUser.mockClear();
+
+    const pending = requestApproval({ type: "keepUndo", contextLabel: "a.ts" });
+    expect(mockNotifyUser).toHaveBeenCalledOnce();
+    expect(mockNotifyUser).toHaveBeenCalledWith("Action required");
+    resolveApproval(false);
+    await pending;
   });
 });

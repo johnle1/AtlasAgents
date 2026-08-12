@@ -5,7 +5,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { CommandHandler } from "../../../../packages/client/src/commands/index.js";
 import { handleAgent, handleConfig, handleSet } from "../../../../packages/client/src/commands/configHandlers.js";
-import { handleSpinner, handleThink } from "../../../../packages/client/src/commands/displayHandlers.js";
+import { handleSpinner, handleThink, handleNotify } from "../../../../packages/client/src/commands/displayHandlers.js";
 import { handleMemory } from "../../../../packages/client/src/commands/memoryHandlers.js";
 import { handleModels } from "../../../../packages/client/src/commands/modelHandlers.js";
 import { handleExplore, handleExit, handleNew } from "../../../../packages/client/src/commands/sessionHandlers.js";
@@ -63,11 +63,13 @@ vi.mock("../../../../packages/client/src/renderer.js", () => ({
   finishPullProgress: vi.fn(),
   printSkills: vi.fn(),
   printSuccessOp: vi.fn(),
+  printHelp: vi.fn(),
 }));
 
 vi.mock("../../../../packages/client/src/ui/uiBridge.js", () => ({
   appendLog: vi.fn(),
   setStreamingText: vi.fn(),
+  clearScreen: vi.fn(),
 }));
 
 vi.mock("../../../../packages/client/src/theme/themeManager.js", () => ({
@@ -79,6 +81,7 @@ const fakeConn = (overrides: Partial<Connection> = {}): Connection =>
     sendCommand: vi.fn(async () => ({ message: "ok" })),
     sendStream: vi.fn(async (opts: { onFrame: (f: { kind: string; text?: string }) => void }) => {
       await opts.onFrame({ kind: "token", text: "explore" });
+      return { done: Promise.resolve(), cancel: () => {} };
     }),
     getMemory: vi.fn(async () => [{ topic: "t", rules: ["r"] }]),
     forgetMemory: vi.fn(async () => {}),
@@ -122,7 +125,7 @@ describe("handleSet / handleConfig", () => {
   });
 });
 
-describe("handleSpinner / handleThink", () => {
+describe("handleSpinner / handleThink / handleNotify", () => {
   it("toggles spinner setting", () => {
     handleSpinner("off", "");
     expect(configState.ui.showSpinner).toBe(false);
@@ -135,6 +138,13 @@ describe("handleSpinner / handleThink", () => {
     expect(configState.showThinkOutput).toBe(false);
     handleThink("on", "");
     expect(configState.showThinkOutput).toBe(true);
+  });
+
+  it("toggles notifications setting (normal)", () => {
+    handleNotify("on", "");
+    expect(configState.ui.notifications).toBe(true);
+    handleNotify("off", "");
+    expect(configState.ui.notifications).toBe(false);
   });
 });
 
@@ -253,5 +263,30 @@ describe("CommandHandler", () => {
     expect(await handler.handle("/agent cap 2")).toBe(true);
     expect(await handler.handle("/spinner off")).toBe(true);
     expect(configState.subagentCap).toBe(2);
+  });
+
+  it("routes /help to the help printer and returns true (normal)", async () => {
+    const { printHelp, printError } = await import(
+      "../../../../packages/client/src/renderer.js"
+    );
+    const handler = new CommandHandler({ conn: fakeConn(), prompts });
+    expect(await handler.handle("/help")).toBe(true);
+    expect(printHelp).toHaveBeenCalledOnce();
+    expect(printError).not.toHaveBeenCalled();
+  });
+
+  it("routes /clear to clearScreen and returns true (normal)", async () => {
+    const { clearScreen } = await import(
+      "../../../../packages/client/src/ui/uiBridge.js"
+    );
+    const handler = new CommandHandler({ conn: fakeConn(), prompts });
+    expect(await handler.handle("/clear")).toBe(true);
+    expect(clearScreen).toHaveBeenCalledOnce();
+  });
+
+  it("routes /notify on and returns true (normal)", async () => {
+    const handler = new CommandHandler({ conn: fakeConn(), prompts });
+    expect(await handler.handle("/notify on")).toBe(true);
+    expect(configState.ui.notifications).toBe(true);
   });
 });

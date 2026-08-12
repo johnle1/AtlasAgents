@@ -31,7 +31,13 @@ export type BridgeSetupContext = Pick<
   | "setBannerEntries"
   | "setSubagentStatuses"
   | "setSubagentBoards"
->;
+> & {
+  /**
+   * Extra work after a screen clear (e.g. bumping Ink `<Static>`'s remount key).
+   * History / streaming / live-think reset is handled inside the hook.
+   */
+  onAfterClearScreen?: () => void;
+};
 
 /**
  * State setters from {@link AppContextValue} that need to be reset on disconnect.
@@ -72,6 +78,7 @@ export type KeyboardInputContext = Pick<
   | "input"
   | "activeIndex"
   | "scrollOffset"
+  | "sigintBusy"
   | "setSigintBusy"
   | "onSaveHistory"
   | "fileProxy"
@@ -80,6 +87,8 @@ export type KeyboardInputContext = Pick<
   | "setScrollOffset"
   | "setInput"
   | "setHistIdx"
+  | "showShortcuts"
+  | "setShowShortcuts"
 >;
 
 /**
@@ -87,11 +96,16 @@ export type KeyboardInputContext = Pick<
  *
  * @remarks
  * These are actions that don't belong in the React context but are needed
- * by the keyboard handler, such as exiting the application.
+ * by the keyboard handler: exiting, cancelling the in-flight task, and
+ * clearing the screen.
  */
 export type KeyboardInputHandlers = {
   /** Function to exit the application. */
   exit: () => void;
+  /** Abort the in-flight task stream without quitting the CLI. */
+  cancelActiveTask: () => void;
+  /** Clear committed history and redraw the UI (Ctrl+L / `/clear`). */
+  clearScreen: () => void;
 };
 
 /**

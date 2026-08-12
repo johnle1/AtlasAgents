@@ -133,7 +133,8 @@ if (BINARY_EXISTS) {
 async function runCli(
   args: string[] = [],
   env: Record<string, string> = {},
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  options: { stripColor?: boolean } = {},
+): Promise<{ stdout: string; stderr: string; exitCode: number; rawStdout: string; rawStderr: string }> {
   const result = await execa("node", [CLI_PATH, ...args], {
     reject: false,
     input: `${TEST_PASSPHRASE}\n`,
@@ -153,9 +154,13 @@ async function runCli(
     stderr: "pipe",
   });
 
+  const stripColor = options.stripColor !== false;
+
   return {
-    stdout: stripAnsi(result.stdout),
-    stderr: stripAnsi(result.stderr),
+    stdout: stripColor ? stripAnsi(result.stdout) : result.stdout,
+    stderr: stripColor ? stripAnsi(result.stderr) : result.stderr,
+    rawStdout: result.stdout,
+    rawStderr: result.stderr,
     exitCode: result.exitCode ?? 1,
   };
 }
@@ -327,6 +332,23 @@ describe("CLI environment variant — bad OLLAMA_HOST", () => {
         combined.includes("econnrefused") ||
         combined.includes("unable");
       expect(hasErrorContent).toBe(true);
+    },
+  );
+});
+
+describe("CLI NO_COLOR — unreachable server emits no color", () => {
+  itWhenBuilt(
+    "raw stdout/stderr contain no SGR color sequences when NO_COLOR=1 (environment variant)",
+    async () => {
+      const { rawStdout, rawStderr } = await runCli(
+        ["--host", "127.0.0.1", "--port", "1"],
+        { NO_COLOR: "1" },
+        { stripColor: false },
+      );
+      const combined = rawStdout + rawStderr;
+      // Cursor/erase CSI (Ink redraw, `\x1b[2K`) is not color. NO_COLOR only
+      // blanks the theme pipeline's SGR (`\x1b[…m`) sequences.
+      expect(combined).not.toMatch(/\x1b\[[0-9;]*m/);
     },
   );
 });

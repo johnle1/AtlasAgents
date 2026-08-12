@@ -7,13 +7,17 @@ import type { Config } from "../../../../packages/client/src/config/index.js";
 import {
   setBridgeHooks,
   setTaskActiveValue,
+  setActiveTaskCancelValue,
 } from "../../../../packages/client/src/ui/bridge/state.js";
 import {
+  cancelActiveTask,
+  clearScreen,
   enterAlternateScreen,
   exitAlternateScreen,
   getTaskActive,
   isTaskActive,
   refreshInkBanner,
+  setActiveTaskCancel,
   setBusy,
   setCwdLabel,
   setTaskActive,
@@ -22,6 +26,7 @@ import {
 beforeEach(() => {
   setBridgeHooks({});
   setTaskActiveValue(false);
+  setActiveTaskCancelValue(null);
 });
 
 describe("display bridge", () => {
@@ -62,5 +67,22 @@ describe("display bridge", () => {
     exitAlternateScreen();
     expect(write).not.toHaveBeenCalled();
     write.mockRestore();
+  });
+
+  it("clearScreen invokes onClearScreen", () => {
+    const onClearScreen = vi.fn();
+    setBridgeHooks({ onClearScreen });
+    clearScreen();
+    expect(onClearScreen).toHaveBeenCalledOnce();
+  });
+
+  it("cancelActiveTask invokes the registered cancel handle and is a no-op when idle", () => {
+    const cancel = vi.fn();
+    setActiveTaskCancel(cancel);
+    cancelActiveTask();
+    expect(cancel).toHaveBeenCalledOnce();
+
+    setActiveTaskCancel(null);
+    expect(() => cancelActiveTask()).not.toThrow();
   });
 });

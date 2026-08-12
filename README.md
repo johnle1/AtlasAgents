@@ -207,7 +207,23 @@ loopy-server --regen-cert
 | `/think`                                          | Toggle/adjust reasoning verbosity                       |
 | `/spinner`                                        | Toggle the loading spinner                              |
 | `/theme`                                          | Pick a color theme                                      |
-| `/exit`                                           | Quit                                                    |
+| `/help`                                           | Show all slash commands                                 |
+| `/clear`                                          | Clear the screen (Ctrl+L)                               |
+| `/notify on\|off`                                 | Toggle desktop notifications (opt-in, default off)      |
+| `/exit`                                           | Quit (Ctrl+C on empty input)                            |
+
+### Keyboard shortcuts
+
+| Keys     | Action                                          |
+| -------- | ----------------------------------------------- |
+| `Esc`    | Cancel running task / clear input               |
+| `Ctrl+C` | Cancel task / clear input / quit                |
+| `Ctrl+L` | Clear the screen                                |
+| `Ctrl+O` | Expand truncated directory listing              |
+| `Tab`    | Accept autocomplete suggestion                  |
+| `↑` / `↓` | Previous / next history or suggestion          |
+| `Enter`  | Submit input / confirm autocomplete             |
+| `?`      | Toggle the shortcuts cheat-sheet (empty input)  |
 
 ### Optional: TokenSave
 

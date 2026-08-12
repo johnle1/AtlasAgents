@@ -3,6 +3,15 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { mockNotifyUser } = vi.hoisted(() => ({
+  mockNotifyUser: vi.fn(),
+}));
+
+vi.mock("../../../../packages/client/src/ui/notify.js", () => ({
+  notifyUser: mockNotifyUser,
+}));
+
 import {
   setBridgeHooks,
   setInkUIActiveValue,
@@ -19,6 +28,7 @@ beforeEach(() => {
   setBridgeHooks({});
   setInkUIActiveValue(false);
   setPendingApprovalEntry(null);
+  mockNotifyUser.mockClear();
 });
 
 describe("approval bridge", () => {
@@ -61,5 +71,33 @@ describe("approval bridge", () => {
     cancelPendingApprovals();
     await expect(pending).resolves.toBe(false);
     expect(getPendingApproval()).toBeNull();
+  });
+
+  it("cancelPendingApprovals resolves planReview as skip (Esc / disconnect parity)", async () => {
+    setInkUIActiveValue(true);
+    const pending = requestApproval({
+      type: "planReview",
+      task: "refactor",
+      stepCount: 1,
+      agentCount: 1,
+      execution: "sequential",
+      modeLabel: null,
+    });
+    cancelPendingApprovals();
+    await expect(pending).resolves.toBe("skip");
+  });
+
+  it("fires exactly one Action required notification when the UI is active (normal)", async () => {
+    setInkUIActiveValue(true);
+    const pending = requestApproval({ type: "runSkip", command: "ls" });
+    expect(mockNotifyUser).toHaveBeenCalledOnce();
+    expect(mockNotifyUser).toHaveBeenCalledWith("Action required");
+    resolveApproval(true);
+    await pending;
+  });
+
+  it("does not notify when the UI is inactive (boundary)", async () => {
+    await requestApproval({ type: "runSkip", command: "ls" });
+    expect(mockNotifyUser).not.toHaveBeenCalled();
   });
 });

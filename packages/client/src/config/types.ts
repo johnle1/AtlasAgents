@@ -111,6 +111,16 @@ export interface UiConfig {
    * inline with previous terminal content. Defaults to false.
    */
   useAlternateBuffer?: boolean;
+
+  /**
+   * Whether to raise a desktop / terminal notification on approval and
+   * task-complete edges.
+   *
+   * @remarks
+   * Off by default. Enable with `/notify on`. Uses OSC 9 where the terminal
+   * supports it (iTerm2, WezTerm, Ghostty, kitty) and BEL otherwise.
+   */
+  notifications?: boolean;
 }
 
 /**
@@ -371,7 +381,12 @@ export const DEFAULT_CONFIG: Config = {
   subagentCap: 3,
 
   // Default UI preferences
-  ui: { theme: "default", showSpinner: true, useAlternateBuffer: false },
+  ui: {
+    theme: "default",
+    showSpinner: true,
+    useAlternateBuffer: false,
+    notifications: false,
+  },
 
   // No servers trusted yet — populated on first connect to each host:port (TOFU)
   serverFingerprints: {},

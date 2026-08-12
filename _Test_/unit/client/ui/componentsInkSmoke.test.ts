@@ -14,6 +14,9 @@ vi.mock("../../../../packages/client/src/config/index.js", () => ({
 vi.mock("../../../../packages/client/src/ui/terminalEnv.js", () => ({
   inTmux: () => false,
   isScreenReaderLikely: () => false,
+  colorDisabled: () => false,
+  colorForced: () => false,
+  supportsOsc9Notifications: () => false,
 }));
 
 import { Banner } from "../../../../packages/client/src/ui/components/Banner.js";

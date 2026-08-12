@@ -59,7 +59,7 @@ describe("streamRequest", () => {
         frames.push(frame.kind);
       },
       (token) => tokens.push(token),
-    );
+    ).done;
 
     expect(tokens).toEqual(["hi"]);
     expect(frames).toEqual(["token", "done"]);
@@ -70,7 +70,7 @@ describe("streamRequest", () => {
       onError(new Error("stream failed"));
     });
     await expect(
-      streamRequest(rsocket, { kind: "explore" }, meta, () => {}),
+      streamRequest(rsocket, { kind: "explore" }, meta, () => {}).done,
     ).rejects.toThrow("stream failed");
   });
 });
@@ -114,7 +114,7 @@ describe("sendTask", () => {
       () => {},
       undefined,
       2,
-    );
+    ).done;
 
     expect(capturedBody).toMatchObject({
       kind: "task",
@@ -144,7 +144,7 @@ describe("sendStream", () => {
       },
       meta,
       rsocket,
-    );
+    ).done;
     expect(capturedBody).toEqual({ kind: "models.pull", name: "gemma:4b" });
   });
 
@@ -162,7 +162,7 @@ describe("sendStream", () => {
       { kind: "explore", onFrame: () => {} },
       meta,
       rsocket,
-    );
+    ).done;
     expect(capturedBody).toEqual({ kind: "explore" });
   });
 });

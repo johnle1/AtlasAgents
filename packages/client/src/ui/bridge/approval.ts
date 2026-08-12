@@ -10,6 +10,8 @@
 import type { ApprovalRequest, ApprovalResult } from "../types.js";
 import { getInkUIActive, getBridgeHooks } from "./state.js";
 import { getPendingApprovalEntry, setPendingApprovalEntry } from "./state.js";
+import { dismissValueFor } from "../components/approvalKeymap.js";
+import { notifyUser } from "../notify.js";
 
 /**
  * Retrieves the currently pending approval request from the state registry.
@@ -35,10 +37,7 @@ export const requestApproval = (
 ): Promise<ApprovalResult> => {
   const isUIActive = getInkUIActive();
   if (!isUIActive) {
-    if (approvalRequest.type === "planReview") {
-      return Promise.resolve("skip" as const);
-    }
-    return Promise.resolve(false);
+    return Promise.resolve(dismissValueFor(approvalRequest.type));
   }
 
   const existingPendingApproval = getPendingApprovalEntry();
@@ -53,6 +52,7 @@ export const requestApproval = (
     });
 
     getBridgeHooks().onApprovalChange?.(approvalRequest);
+    notifyUser("Action required");
   });
 };
 
@@ -83,10 +83,9 @@ export const cancelPendingApprovals = (): void => {
   setPendingApprovalEntry(null);
   getBridgeHooks().onApprovalChange?.(null);
 
-  const approvalResult: ApprovalResult =
-    currentPendingApproval.req.type === "planReview"
-      ? ("skip" as const)
-      : false;
+  const approvalResult: ApprovalResult = dismissValueFor(
+    currentPendingApproval.req.type,
+  );
   currentPendingApproval.resolve(approvalResult);
 };
 

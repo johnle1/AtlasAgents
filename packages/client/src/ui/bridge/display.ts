@@ -11,6 +11,8 @@ import {
   getBridgeHooks,
   getTaskActiveValue,
   setTaskActiveValue,
+  getActiveTaskCancelValue,
+  setActiveTaskCancelValue,
 } from "./state.js";
 
 /**
@@ -91,5 +93,41 @@ export const exitAlternateScreen = (): void => {
   if (!process.stdout.isTTY) return;
   // \x1b[?25h: show terminal cursor; \x1b[?1049l: restore normal screen buffer
   process.stdout.write("\x1b[?25h\x1b[?1049l");
+};
+
+/**
+ * Registers the cancel callback for the in-flight task stream.
+ *
+ * @remarks
+ * The task-stream runner stores the RSocket cancel handle here so Esc / Ctrl+C
+ * can abort the task without quitting the CLI. Pass `null` in `finally` so a
+ * stale handle cannot cancel a later task.
+ *
+ * @param cancel - Stream cancel function, or `null` to clear.
+ */
+export const setActiveTaskCancel = (cancel: (() => void) | null): void => {
+  setActiveTaskCancelValue(cancel);
+};
+
+/**
+ * Aborts the in-flight task stream, if one is registered.
+ *
+ * @remarks
+ * No-op when idle. Does not exit the process — that is Ctrl+C's second press.
+ */
+export const cancelActiveTask = (): void => {
+  getActiveTaskCancelValue()?.();
+};
+
+/**
+ * Asks the Ink root to clear committed history and redraw the UI.
+ *
+ * @remarks
+ * Ink `<Static>` does not drop already-committed rows when React state is
+ * emptied — the root must remount Static (via a key) and write ANSI clears.
+ * Invoked by Ctrl+L and `/clear`.
+ */
+export const clearScreen = (): void => {
+  getBridgeHooks().onClearScreen?.();
 };
 

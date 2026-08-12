@@ -304,7 +304,7 @@ const updatePullProgressLine = (
  * @example
  * ```ts
  * resetPullProgress(name);
- * await connection.sendStream({
+ * const { done } = await connection.sendStream({
  *   kind: "models.pull",
  *   payload: { name },
  *   onFrame: (frame) => {
@@ -313,6 +313,7 @@ const updatePullProgressLine = (
  *     }
  *   },
  * });
+ * await done;
  * finishPullProgress(name);
  * ```
  */

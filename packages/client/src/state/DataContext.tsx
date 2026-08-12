@@ -137,6 +137,10 @@ export type AppContextValue = {
   sigintBusy: number;
   setSigintBusy: React.Dispatch<React.SetStateAction<number>>;
 
+  /** Whether the `?` shortcuts cheat-sheet overlay is visible. */
+  showShortcuts: boolean;
+  setShowShortcuts: React.Dispatch<React.SetStateAction<boolean>>;
+
   /** Registered by {@link App} once submit/autocomplete logic is ready. */
   handleSubmit: (line: string) => Promise<void>;
   setHandleSubmit: React.Dispatch<
@@ -274,6 +278,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({
   const [busy, setBusy] = useState(false);
   const [taskActive, setTaskActive] = useState(false);
   const [sigintBusy, setSigintBusy] = useState(0);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [scrollOffset, setScrollOffset] = useState(0);
 
@@ -341,6 +346,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({
       setSubagentBoards,
       sigintBusy,
       setSigintBusy,
+      showShortcuts,
+      setShowShortcuts,
       handleSubmit,
       setHandleSubmit,
       inputDisabled,
@@ -372,6 +379,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({
       subagentStatuses,
       subagentBoards,
       sigintBusy,
+      showShortcuts,
       handleSubmit,
       inputDisabled,
       connection,

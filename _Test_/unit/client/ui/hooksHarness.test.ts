@@ -31,6 +31,9 @@ describe("useKeyboardInput", () => {
           input: "",
           activeIndex: 0,
           scrollOffset: 0,
+          sigintBusy: 0,
+          showShortcuts: false,
+          setShowShortcuts: vi.fn(),
           setSigintBusy: vi.fn(),
           onSaveHistory: vi.fn(),
           fileProxy: { clearScreen: vi.fn() } as never,
@@ -40,7 +43,7 @@ describe("useKeyboardInput", () => {
           setInput,
           setHistIdx: vi.fn(),
         },
-        { exit: vi.fn() },
+        { exit: vi.fn(), cancelActiveTask: vi.fn(), clearScreen: vi.fn() },
       );
       useEffect(() => {
         handler("a", {});

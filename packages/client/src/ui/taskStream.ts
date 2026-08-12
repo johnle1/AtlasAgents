@@ -24,6 +24,7 @@ import {
   endLiveThink,
   requestApproval,
   requestPrompt,
+  setActiveTaskCancel,
   setSubagentBoards,
   setSubagentStatus,
   setBusy,
@@ -33,6 +34,7 @@ import {
   startLiveThink,
   updateAgentActivity,
 } from "./uiBridge.js";
+import { notifyUser } from "./notify.js";
 import { spinnerForStatusFrame } from "./spinnerSync.js";
 import type { PlanDecision } from "./types.js";
 
@@ -382,8 +384,11 @@ export const runTaskStream = async (
     });
   };
 
+  let cancelledByUser = false;
+  let completedSuccessfully = false;
+
   try {
-    await connection.sendTask({
+    const { done, cancel } = await connection.sendTask({
       task,
       maxSubagents,
       onToken: (token) => {
@@ -412,8 +417,22 @@ export const runTaskStream = async (
         }
       },
     });
+    setActiveTaskCancel(() => {
+      cancelledByUser = true;
+      cancel();
+    });
+    await done;
     // Commit any remaining streaming buffer after stream completes normally
     appendStreamTail();
+    if (cancelledByUser) {
+      appendHistory({
+        kind: "text",
+        text: "Task cancelled by user",
+        variant: "warning",
+      });
+    } else if (!errorFrameShown) {
+      completedSuccessfully = true;
+    }
   } catch (streamError) {
     // Only throw if we haven't already shown an error frame from the server
     // This prevents double-displaying errors when stream fails after error
@@ -423,6 +442,10 @@ export const runTaskStream = async (
     // Commit buffer even on error to preserve partial output
     appendStreamTail();
   } finally {
+    setActiveTaskCancel(null);
+    if (completedSuccessfully) {
+      notifyUser("Task complete");
+    }
     // Cleanup UI state regardless of success or failure
     setStreamingText(null);
     // Safety net: commits any think stream still open at this point (e.g. a

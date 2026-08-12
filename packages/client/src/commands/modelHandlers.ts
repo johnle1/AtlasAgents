@@ -95,7 +95,7 @@ export const handleModels = async (
 
         let pullFailed = false;
 
-        await connection.sendStream({
+        const { done } = await connection.sendStream({
           kind: "models.pull",
           payload: { name: modelName },
           onFrame: (frame) => {
@@ -111,6 +111,7 @@ export const handleModels = async (
             }
           },
         });
+        await done;
 
         finishPullProgress(modelName);
         if (!pullFailed) {

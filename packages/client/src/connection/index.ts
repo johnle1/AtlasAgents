@@ -38,3 +38,4 @@ export type {
 export { Connection } from "./connection.js";
 
 export type { PullProgress, TaskFrame } from "../types/frames.js";
+export type { StreamHandle } from "./streaming.js";
