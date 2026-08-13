@@ -31,6 +31,8 @@ export type BridgeSetupContext = Pick<
   | "setBannerEntries"
   | "setSubagentStatuses"
   | "setSubagentBoards"
+  | "setContextUsage"
+  | "setApprovalMode"
 > & {
   /**
    * Extra work after a screen clear (e.g. bumping Ink `<Static>`'s remount key).
@@ -89,15 +91,22 @@ export type KeyboardInputContext = Pick<
   | "setHistIdx"
   | "showShortcuts"
   | "setShowShortcuts"
->;
+  | "markdownRaw"
+  | "setMarkdownRaw"
+  | "approvalMode"
+  | "setApprovalMode"
+> & {
+  /** Cwd file/dir names for `@` Tab completion. */
+  mentionNames?: string[];
+};
 
 /**
  * External handlers that the keyboard input handler can invoke.
  *
  * @remarks
  * These are actions that don't belong in the React context but are needed
- * by the keyboard handler: exiting, cancelling the in-flight task, and
- * clearing the screen.
+ * by the keyboard handler: exiting, cancelling the in-flight task,
+ * clearing the screen, and inserting a newline into the multiline prompt.
  */
 export type KeyboardInputHandlers = {
   /** Function to exit the application. */
@@ -106,6 +115,17 @@ export type KeyboardInputHandlers = {
   cancelActiveTask: () => void;
   /** Clear committed history and redraw the UI (Ctrl+L / `/clear`). */
   clearScreen: () => void;
+  /**
+   * Insert a newline at the prompt caret (Ctrl+J / Shift+Enter / Alt+Enter).
+   * Implemented by {@link MultilineInput}; a no-op if the input is unmounted.
+   */
+  insertNewline: () => void;
+  /**
+   * Queue a line to run after the in-flight task (Enter while busy).
+   *
+   * @param line - Trimmed prompt text.
+   */
+  enqueueMessage: (line: string) => void;
 };
 
 /**
@@ -133,4 +153,6 @@ export type SubmitLineContext = Pick<
   | "setSigintBusy"
   | "connection"
   | "commandHandler"
+  | "fileProxy"
+  | "setQueuedMessages"
 >;

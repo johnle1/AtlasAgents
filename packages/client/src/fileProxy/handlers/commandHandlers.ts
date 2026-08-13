@@ -30,6 +30,12 @@ import {
 } from "../../ui/approvalFlow.js";
 import type { DispatchContext, ShellResult } from "../types.js";
 import { logger } from "../../utils/logger.js";
+import { getApprovalMode } from "../../ui/bridge/allowlist.js";
+import {
+  detectSandboxDenial,
+  resolveSandbox,
+} from "../sandbox/index.js";
+import type { SandboxProvider } from "../sandbox/types.js";
 
 /** {@link ShellResult} plus the optional revise reason a decline can carry. */
 type CommandRunResult = ShellResult & { feedback?: string };
@@ -86,13 +92,14 @@ const runBackgroundCommand = async (
   context: DispatchContext,
   command: string,
 ): Promise<CommandRunResult> => {
-  const { approved, feedback } = await confirmRunOrSkip(command);
-  if (!approved) {
-    printDeclineFeedback(feedback);
-    return declinedCommandResult(feedback);
+  if (getApprovalMode() !== "bypass") {
+    const { approved, feedback } = await confirmRunOrSkip(command);
+    if (!approved) {
+      printDeclineFeedback(feedback);
+      return declinedCommandResult(feedback);
+    }
+    printBashApproved();
   }
-
-  printBashApproved();
 
   const commandParts = command.trim().split(/\s+/);
   if (commandParts.length === 0 || !commandParts[0]) {
@@ -166,11 +173,12 @@ const executeForegroundCommand = async (
   context: DispatchContext,
   command: string,
   commandClassification: BashClass,
+  sandbox?: SandboxProvider,
 ): Promise<ShellResult> => {
   const startTime = Date.now();
 
   const trackedCommand = wrapCommandForCwdTracking(command, isWindowsShell());
-  const executionResult = await context.runShell(trackedCommand);
+  const executionResult = await context.runShell(trackedCommand, { sandbox });
 
   const { cleanedStdout, newCwd } = extractCwdFromOutput(
     executionResult.stdout,
@@ -212,6 +220,13 @@ const executeForegroundCommand = async (
  *    stdout, and call `setCurrentDir` when the new path is inside the workspace
  *    (escapes like `cd /` are ignored).
  *
+ * Mode overrides (consulted via {@link getApprovalMode}):
+ * - `bypass` skips every prompt (including background).
+ * - `auto` + `cautious` runs under {@link resolveSandbox} when a provider
+ *   exists; sandbox denials re-prompt to retry unsandboxed. Without a
+ *   provider, cautious commands prompt (capability, not a gate).
+ * - `auto` + `dangerous` still prompts. `safe` always runs free.
+ *
  * Skipped commands return `exitCode: -1` and a stderr note — they do not throw.
  *
  * @param context - Shell + classification + cwd helpers.
@@ -230,6 +245,7 @@ export const handleCommandRun = async (
 ): Promise<unknown> => {
   const command = String(requestBody.command ?? "");
   const forceBackgroundExecution = requestBody.background === true;
+  const mode = getApprovalMode();
 
   // background flag wins over heuristics so long-running servers skip CWD wrap.
   const commandClassification: BashClass = forceBackgroundExecution
@@ -242,7 +258,28 @@ export const handleCommandRun = async (
     return runBackgroundCommand(context, command);
   }
 
-  if (commandClassification !== "safe") {
+  const skipPrompt = mode === "bypass";
+  let sandbox: SandboxProvider | undefined;
+
+  if (
+    !skipPrompt &&
+    mode === "auto" &&
+    commandClassification === "cautious"
+  ) {
+    const provider = resolveSandbox();
+    if (provider) {
+      sandbox = provider;
+    } else {
+      logSandboxUnavailableOnce();
+    }
+  }
+
+  const needsPrompt =
+    !skipPrompt &&
+    commandClassification !== "safe" &&
+    !(mode === "auto" && commandClassification === "cautious" && sandbox);
+
+  if (needsPrompt) {
     const declineResult = await confirmForegroundCommand(
       command,
       commandClassification,
@@ -252,5 +289,45 @@ export const handleCommandRun = async (
     }
   }
 
-  return executeForegroundCommand(context, command, commandClassification);
+  const result = await executeForegroundCommand(
+    context,
+    command,
+    commandClassification,
+    sandbox,
+  );
+
+  if (
+    sandbox &&
+    detectSandboxDenial(sandbox, result)
+  ) {
+    const { approved, feedback } = await confirmRunOrSkip(command);
+    if (!approved) {
+      printDeclineFeedback(feedback);
+      return declinedCommandResult(feedback);
+    }
+    printBashApproved();
+    return executeForegroundCommand(
+      context,
+      command,
+      commandClassification,
+    );
+  }
+
+  return result;
+};
+
+let sandboxUnavailableLogged = false;
+
+/**
+ * Logs once per process that auto-mode cautious commands will prompt
+ * because this machine has no sandbox backend.
+ */
+const logSandboxUnavailableOnce = (): void => {
+  if (sandboxUnavailableLogged) {
+    return;
+  }
+  sandboxUnavailableLogged = true;
+  logger.info(
+    "sandbox unavailable on this platform — auto mode prompts instead",
+  );
 };

@@ -211,6 +211,7 @@ loopy-server --regen-cert
 | `/clear`                                          | Clear the screen (Ctrl+L)                               |
 | `/notify on\|off`                                 | Toggle desktop notifications (opt-in, default off)      |
 | `/exit`                                           | Quit (Ctrl+C on empty input)                            |
+| `!<command>`                                      | Run a local shell command (not sent to the agent)       |
 
 ### Keyboard shortcuts
 
@@ -222,8 +223,39 @@ loopy-server --regen-cert
 | `Ctrl+O` | Expand truncated directory listing              |
 | `Tab`    | Accept autocomplete suggestion                  |
 | `↑` / `↓` | Previous / next history or suggestion          |
-| `Enter`  | Submit input / confirm autocomplete             |
+| `Enter`  | Submit input; while a task runs, queue the line |
+| `Shift+Enter` / `Alt+Enter` / `Ctrl+J` | Insert a newline in the prompt     |
+| `Alt+M`  | Toggle raw markdown source for assistant text   |
+| `Shift+Tab` | Cycle approval mode (default / accept-edits / plan) |
 | `?`      | Toggle the shortcuts cheat-sheet (empty input)  |
+
+A trailing `\` before Enter also continues the line (shell-style). Pastes
+longer than a short threshold collapse to an atomic `[Pasted text #N: X lines]`
+placeholder; the original text is what gets submitted.
+
+The footer (always visible, including during approvals) shows
+`cwd · git-branch · agent-model · approval-mode · remaining-context-%`.
+Context % updates from the server during a task; before the first sample it
+shows `—`.
+
+Approval modes (Shift+Tab): `default` asks every time; `accept_edits`
+automatically accepts file edits — shell commands and other risky actions
+still prompt; `plan` stops after the plan review and does not run subagents.
+`/set approval auto` approves a much broader set of actions so the agent runs
+with much less interruption: the plan review is auto-implemented, file edits
+are accepted, safe shell commands run free, and cautious commands run inside a
+sandbox when one is available (macOS Seatbelt this release; otherwise those
+commands still prompt). Dangerous commands and background daemons always
+prompt. `/set approval bypass` skips every prompt for this
+session only — it is never saved. "Always allow (session)" on a command or
+file prompt auto-approves matching requests until you quit.
+
+While a task is running, type the next prompt and press Enter to queue it
+(FIFO, cap 20). It runs automatically when the current task finishes; Esc
+cancels the task and drops the queue. `@path` in a prompt inlines that file
+or directory (missing paths become an inline error; `.env` and key files are
+refused). A line starting with `!` runs the rest as a local shell command
+(stdout/stderr land in history; it is never sent to the agent).
 
 ### Optional: TokenSave
 

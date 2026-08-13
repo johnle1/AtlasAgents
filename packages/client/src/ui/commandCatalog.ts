@@ -47,9 +47,11 @@ export const COMMAND_CATALOG: CommandEntry[] = [
       "Choose agent model (from any configured provider) — same model as subagent is fine",
   },
   {
-    command: "/set subagent",
+    command: "/set approval",
+    label: "/set approval [mode]",
     description:
-      "Choose subagent model (from any configured provider) — same model as agent is fine",
+      "Set permission mode (default / accept_edits / plan / auto / bypass)",
+    requiresArgs: true,
   },
   {
     command: "/providers list",

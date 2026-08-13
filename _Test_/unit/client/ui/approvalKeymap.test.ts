@@ -48,14 +48,34 @@ describe("buildOptions", () => {
     ]);
   });
 
-  it("returns Run / Skip / Revise for runSkip (normal)", () => {
+  it("returns Run / Skip / Revise / Always allow for runSkip (normal)", () => {
     const options = buildOptions(runSkip);
-    expect(options.map((option) => option.value)).toEqual([true, false, "edit"]);
+    expect(options.map((option) => option.value)).toEqual([
+      true,
+      false,
+      "edit",
+      "always",
+    ]);
   });
 
-  it("returns Keep / Undo / Revise for keepUndo (normal)", () => {
+  it("returns Keep / Undo / Revise / Always allow for keepUndo (normal)", () => {
     const options = buildOptions(keepUndo);
-    expect(options.map((option) => option.value)).toEqual([true, false, "edit"]);
+    expect(options.map((option) => option.value)).toEqual([
+      true,
+      false,
+      "edit",
+      "always",
+    ]);
+  });
+
+  it("does not include Always allow for planReview (boundary)", () => {
+    const options = buildOptions(planReview);
+    expect(options.map((option) => option.value)).toEqual([
+      "implement",
+      "skip",
+      "edit",
+    ]);
+    expect(options.some((option) => option.value === "always")).toBe(false);
   });
 });
 
@@ -87,10 +107,10 @@ describe("resolveApprovalKey", () => {
         "",
         { ...emptyKey, downArrow: true },
         options,
-        2,
+        options.length - 1,
         "runSkip",
       ),
-    ).toEqual({ type: "move", index: 2 });
+    ).toEqual({ type: "move", index: options.length - 1 });
 
     expect(
       resolveApprovalKey(
@@ -128,11 +148,18 @@ describe("resolveApprovalKey", () => {
     });
   });
 
+  it("digit 4 confirms Always allow for runSkip (normal)", () => {
+    expect(resolveApprovalKey("4", emptyKey, options, 0, "runSkip")).toEqual({
+      type: "confirm",
+      value: "always",
+    });
+  });
+
   it("out-of-range digits are a no-op (boundary)", () => {
     expect(resolveApprovalKey("0", emptyKey, options, 1, "runSkip")).toEqual({
       type: "noop",
     });
-    expect(resolveApprovalKey("4", emptyKey, options, 1, "runSkip")).toEqual({
+    expect(resolveApprovalKey("5", emptyKey, options, 1, "runSkip")).toEqual({
       type: "noop",
     });
   });

@@ -20,6 +20,7 @@ import type {
 } from "../types.js";
 import { parsePasswordFromMetadata } from "../types.js";
 import { noopStreamSubscriber } from "./utils.js";
+import { normalizeTaskApprovalMode } from "@loopycode/shared";
 
 /**
  * Creates a handler for a single requestStream frame.
@@ -64,6 +65,7 @@ export const createRequestStreamHandler =
       agentTemp?: number;
       subagentTemp?: number;
       debug?: boolean;
+      approvalMode?: string;
     };
     try {
       const parsedBody: unknown = JSON.parse(
@@ -140,6 +142,7 @@ export const createRequestStreamHandler =
                   ? parsed.subagentTemp
                   : undefined,
               debug: parsed.debug === true ? true : undefined,
+              approvalMode: normalizeTaskApprovalMode(parsed.approvalMode),
             };
 
     void (async () => {

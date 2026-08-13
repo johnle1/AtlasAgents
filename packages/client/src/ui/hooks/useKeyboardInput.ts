@@ -13,6 +13,7 @@
  *   exit,
  *   cancelActiveTask,
  *   clearScreen,
+ *   insertNewline,
  * });
  * useInput(keyboardHandler);
  * ```
@@ -54,7 +55,14 @@ export const useKeyboardInput = (
     context.setHistIdx,
     context.showShortcuts,
     context.setShowShortcuts,
+    context.markdownRaw,
+    context.setMarkdownRaw,
+    context.approvalMode,
+    context.setApprovalMode,
     handlers.exit,
     handlers.cancelActiveTask,
     handlers.clearScreen,
+    handlers.insertNewline,
+    handlers.enqueueMessage,
+    context.mentionNames,
   ]);

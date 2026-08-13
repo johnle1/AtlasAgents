@@ -87,6 +87,7 @@ export const buildConfigLines = (config: Config): string[] => {
     `  ${theme.textAccent}ui.theme${theme.reset}       ${resolvedThemeName} (${config.ui.theme})`,
     `  ${theme.textAccent}show think${theme.reset}     ${config.showThinkOutput ? "on" : "off"} (/think on|off)`,
     `  ${theme.textAccent}show spinner${theme.reset}   ${spinnerState}`,
+    `  ${theme.textAccent}approval mode${theme.reset}  ${config.approvalMode} (/set approval; Shift+Tab cycles default/accept_edits/plan)`,
   ];
 };
 
@@ -421,7 +422,7 @@ const helpGroupFor = (command: string): (typeof HELP_GROUP_ORDER)[number] => {
   }
   if (command.startsWith("/providers")) return "Providers";
   if (command.startsWith("/agent")) return "Agent";
-  if (command === "/config") return "Config";
+  if (command === "/config" || command.startsWith("/set approval")) return "Config";
   if (command.startsWith("/skills")) return "Skills";
   if (command.startsWith("/memory")) return "Memory";
   if (command.startsWith("/workspace") || command === "/cwd") return "Workspace";

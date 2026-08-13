@@ -99,6 +99,7 @@ export type TaskFrame =
   | { kind: "progress"; data: PullProgress }
   | { kind: "error"; message: string }
   | { kind: "warning"; message: string }
+  | { kind: "usage"; usedTokens: number; contextWindow: number }
   | { kind: "done" };
 
 export const encodeFrame = (frame: TaskFrame): Buffer =>

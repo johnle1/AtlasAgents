@@ -8,6 +8,7 @@
  */
 
 import type { BashClass } from "../renderer.js";
+import type { RunShellOptions } from "./sandbox/types.js";
 
 /**
  * Captured result of one shell process started by {@link runShell}.
@@ -130,9 +131,13 @@ export type DispatchContext = {
    * perform approval UI — callers decide when to prompt.
    *
    * @param command - Shell command line (may already be CWD-wrapped).
+   * @param options - Optional sandbox provider for auto-mode containment.
    * @returns Captured {@link ShellResult}.
    */
-  runShell: (command: string) => Promise<ShellResult>;
+  runShell: (
+    command: string,
+    options?: RunShellOptions,
+  ) => Promise<ShellResult>;
 
   /**
    * Builds an indented directory tree text under {@link currentDir}.

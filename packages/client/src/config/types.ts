@@ -11,6 +11,31 @@
 import * as path from "node:path";
 import * as os from "node:os";
 import type { SecretsEnvelope } from "@loopycode/shared";
+import type { ApprovalMode, PersistedApprovalMode } from "./approvalMode.js";
+
+/**
+ * Footer / status presentation for a mode (icon + label + Ink color).
+ */
+export type ApprovalModeDisplay = {
+  /** Icon-prefixed label shown in the footer. */
+  label: string;
+  /** Ink `color` hex when the mode should stand out; omit for dim default. */
+  color?: string;
+  /** When true, render the label bold (bypass). */
+  bold?: boolean;
+};
+
+/**
+ * Footer presentation table for every {@link ApprovalMode}.
+ */
+export const APPROVAL_MODE_DISPLAY: Record<ApprovalMode, ApprovalModeDisplay> =
+  {
+    default: { label: "default" },
+    accept_edits: { label: "⏵ Accept Edits", color: "#FB923C" },
+    plan: { label: "⏸ Plan", color: "#60A5FA" },
+    auto: { label: "⏵⏵ Auto", color: "#A78BFA" },
+    bypass: { label: "⚠ BYPASS", color: "#FF5555", bold: true },
+  };
 
 /** The `Config` fields sensitive enough to encrypt at rest. */
 export type SecretConfigFields = Pick<Config, "password" | "server">;
@@ -315,6 +340,16 @@ export interface Config {
   ui: UiConfig;
 
   /**
+   * Session permission mode persisted across launches.
+   *
+   * @remarks
+   * `"default"` | `"accept_edits"` | `"plan"` | `"auto"`. `"bypass"` is
+   * session-only and is never stored here — a hand-edited `"bypass"` value
+   * is coerced to `"default"` on load.
+   */
+  approvalMode: PersistedApprovalMode;
+
+  /**
    * Pinned SHA-256 fingerprints of server TLS certificates, keyed by `"host:port"`.
    *
    * @remarks
@@ -387,6 +422,9 @@ export const DEFAULT_CONFIG: Config = {
     useAlternateBuffer: false,
     notifications: false,
   },
+
+  // Permission mode — Shift+Tab cycles default / accept_edits / plan
+  approvalMode: "default",
 
   // No servers trusted yet — populated on first connect to each host:port (TOFU)
   serverFingerprints: {},

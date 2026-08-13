@@ -131,3 +131,14 @@ export const clearScreen = (): void => {
   getBridgeHooks().onClearScreen?.();
 };
 
+/**
+ * Pushes a clamped context-usage sample into the footer.
+ *
+ * @param usage - `{ usedTokens, contextWindow }` or `null` to show `—`.
+ */
+export const setContextUsage = (
+  usage: { usedTokens: number; contextWindow: number } | null,
+): void => {
+  getBridgeHooks().onContextUsage?.(usage);
+};
+

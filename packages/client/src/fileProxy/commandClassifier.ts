@@ -37,19 +37,26 @@ const hasUnknownFindPrimary = (commandTokens: string[]): boolean =>
         !/^-\d+$/.test(token),
     );
 
+const isPipeToShell = (command: string): boolean =>
+  /(?:curl|wget)\b[\s\S]*\|\s*(?:sh|bash|zsh|dash)\b/.test(command);
+
+const isForkBomb = (command: string): boolean =>
+  /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/.test(command);
+
 /**
  * Classifies a shell command line for auto-run vs approval flows.
  *
  * @remarks
  * Evaluation order:
  * 1. Empty → `"cautious"`
- * 2. Any token in {@link DANGEROUS_TOKENS} → `"dangerous"`
- * 3. Contains a shell metacharacter ({@link SHELL_METACHARACTER_PATTERN}) → `"cautious"`
- * 4. `find` with a primary outside {@link SAFE_FIND_PRIMARIES} → `"cautious"`
- * 5. An argument matching {@link ESCAPING_PATH_PATTERN} → `"cautious"`
- * 6. Base command in {@link SAFE_BASE_COMMANDS} → `"safe"`
- * 7. `git` + safe subcommand → `"safe"`
- * 8. Otherwise → `"cautious"`
+ * 2. Fork-bomb, `curl|sh` / `wget|sh`, or `git clean` → `"dangerous"`
+ * 3. Any token in {@link DANGEROUS_TOKENS} → `"dangerous"`
+ * 4. Contains a shell metacharacter ({@link SHELL_METACHARACTER_PATTERN}) → `"cautious"`
+ * 5. `find` with a primary outside {@link SAFE_FIND_PRIMARIES} → `"cautious"`
+ * 6. An argument matching {@link ESCAPING_PATH_PATTERN} → `"cautious"`
+ * 7. Base command in {@link SAFE_BASE_COMMANDS} → `"safe"`
+ * 8. `git` + safe subcommand → `"safe"`
+ * 9. Otherwise → `"cautious"`
  *
  * Danger, metacharacter, `find`-primary, and escaping-path checks all run
  * unconditionally, before the allow-list fast paths — otherwise a command
@@ -88,6 +95,14 @@ export const classifyCommand = (command: string): BashClass => {
   }
 
   const baseCommand = commandTokens[0] ?? "";
+
+  if (isForkBomb(normalizedCommand) || isPipeToShell(normalizedCommand)) {
+    return "dangerous";
+  }
+
+  if (baseCommand === "git" && commandTokens[1] === "clean") {
+    return "dangerous";
+  }
 
   // Scan every token unconditionally, even when the base command is
   // allow-listed — a chained/subsequent command must not hide behind it.

@@ -9,6 +9,7 @@
 
 import type { Connection } from "../connection/index.js";
 import type { SubagentStatusSource, TaskFrame } from "../types/frames.js";
+import { clampUsage } from "@loopycode/shared";
 import { loadConfig } from "../config/index.js";
 import { formatAgentThinkForDisplay } from "../renderer.js";
 import { thinkDisplayThreshold } from "./thinkDisplay.js";
@@ -33,8 +34,10 @@ import {
   setTaskActive,
   startLiveThink,
   updateAgentActivity,
+  setContextUsage,
 } from "./uiBridge.js";
 import { notifyUser } from "./notify.js";
+import { getApprovalMode } from "./bridge/allowlist.js";
 import { spinnerForStatusFrame } from "./spinnerSync.js";
 import type { PlanDecision } from "./types.js";
 
@@ -391,6 +394,7 @@ export const runTaskStream = async (
     const { done, cancel } = await connection.sendTask({
       task,
       maxSubagents,
+      approvalMode: getApprovalMode(),
       onToken: (token) => {
         // Clear initial thinking spinner once real token output begins
         setSpinner(null);
@@ -414,6 +418,14 @@ export const runTaskStream = async (
           handleErrorFrame(taskFrame);
         } else if (taskFrame.kind === "warning") {
           handleWarningFrame(taskFrame);
+        } else if (taskFrame.kind === "usage") {
+          const clamped = clampUsage(
+            taskFrame.usedTokens,
+            taskFrame.contextWindow,
+          );
+          if (clamped) {
+            setContextUsage(clamped);
+          }
         }
       },
     });

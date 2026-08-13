@@ -9,7 +9,7 @@ import type { OllamaClient } from "../ollama/client.js";
 import type { ProviderRegistry } from "../providers/providerRegistry.js";
 import type { IConfigManager } from "../orchestration/interfaces/configInterfaces.js";
 import type { MaxSubagentsParam } from "../orchestration/maxSubagents.js";
-import type { RouteId, StreamKind } from "@loopycode/shared";
+import type { RouteId, StreamKind, TaskApprovalMode } from "@loopycode/shared";
 
 /**
  * Represents an authenticated TCP/RSocket session for routing and cleanup.
@@ -234,6 +234,7 @@ export interface IOrchestrator {
    * @param perConn - Optional per-connection state for resources.
    * @param modelOverrides - Optional model overrides for this task.
    * @param maxSubagents - Optional limits on concurrent subagent execution.
+   * @param approvalMode - Session mode: `"plan"` stops after confirm-plan.
    */
   runTask(
     session: SessionInfo,
@@ -243,6 +244,7 @@ export interface IOrchestrator {
     perConn?: PerConnection,
     modelOverrides?: TaskModelOverrides,
     maxSubagents?: MaxSubagentsParam,
+    approvalMode?: TaskApprovalMode,
   ): Promise<void>;
 }
 

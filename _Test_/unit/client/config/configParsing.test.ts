@@ -39,6 +39,33 @@ describe("mergeConfigFromDisk", () => {
     expect(merged.ui.theme).toBe("ocean");
     expect(merged.ui.showSpinner).toBe(DEFAULT_CONFIG.ui.showSpinner);
   });
+
+  it("persists default / accept_edits / plan / auto and migrates auto_edit (normal)", () => {
+    expect(mergeConfigFromDisk({ approvalMode: "auto" }).approvalMode).toBe(
+      "auto",
+    );
+    expect(
+      mergeConfigFromDisk({ approvalMode: "accept_edits" }).approvalMode,
+    ).toBe("accept_edits");
+    expect(
+      mergeConfigFromDisk({
+        approvalMode: "auto_edit" as unknown as "accept_edits",
+      }).approvalMode,
+    ).toBe("accept_edits");
+  });
+
+  it("drops bypass and unknown approvalMode (error)", () => {
+    expect(
+      mergeConfigFromDisk({
+        approvalMode: "bypass" as unknown as "default",
+      }).approvalMode,
+    ).toBe("default");
+    expect(
+      mergeConfigFromDisk({
+        approvalMode: "nope" as unknown as "default",
+      }).approvalMode,
+    ).toBe("default");
+  });
 });
 
 describe("configNeedsPersist", () => {

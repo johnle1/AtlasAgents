@@ -10,7 +10,7 @@
  */
 
 import type { Payload, RSocket } from "@rsocket/core";
-import type { TaskStreamPayload } from "@loopycode/shared";
+import type { TaskApprovalMode, TaskStreamPayload } from "@loopycode/shared";
 import type { TaskFrame } from "../types/frames.js";
 import { decodeFrame } from "../types/frames.js";
 import type { Config } from "../config/index.js";
@@ -208,6 +208,7 @@ export const sendTask = (
   onFrame: (frame: TaskFrame) => void | Promise<void>,
   onToken?: (token: string) => void,
   maxSubagents?: 1 | 2 | "max" | number,
+  approvalMode?: TaskApprovalMode,
 ): StreamHandle => {
   const body: TaskStreamPayload = {
     kind: "task",
@@ -219,6 +220,7 @@ export const sendTask = (
     subagentProvider: config.subagentProvider,
     agentTemp: config.agentTemp,
     subagentTemp: config.subagentTemp,
+    approvalMode,
   };
 
   return streamRequest(rsocket, body, metadata, onFrame, onToken);

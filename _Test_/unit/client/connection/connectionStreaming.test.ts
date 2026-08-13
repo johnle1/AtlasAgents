@@ -123,6 +123,35 @@ describe("sendTask", () => {
       subagentModel: "m1",
     });
   });
+
+  it("includes approvalMode on the task payload when provided (normal)", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    const rsocket = {
+      requestStream: (payload: Payload, _n: number, callbacks: {
+        onComplete: () => void;
+      }) => {
+        capturedBody = JSON.parse(payload.data!.toString("utf8"));
+        callbacks.onComplete();
+        return { request: vi.fn() };
+      },
+    } as unknown as RSocket;
+
+    await sendTask(
+      "do work",
+      minimalConfig,
+      meta,
+      rsocket,
+      () => {},
+      undefined,
+      2,
+      "plan",
+    ).done;
+
+    expect(capturedBody).toMatchObject({
+      kind: "task",
+      approvalMode: "plan",
+    });
+  });
 });
 
 describe("sendStream", () => {

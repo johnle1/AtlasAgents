@@ -9,7 +9,7 @@
  */
 
 import { RSocketConnector, type RSocket } from "@rsocket/core";
-import type { RouteId } from "@loopycode/shared";
+import type { RouteId, TaskApprovalMode } from "@loopycode/shared";
 import type { Config } from "../config/index.js";
 import { createTlsClientTransport } from "./tls/tlsClientTransport.js";
 import { checkAndPinFingerprint } from "./tls/fingerprintStore.js";
@@ -631,7 +631,7 @@ export class Connection {
    * Uses models and temperatures from the current config. `onToken` enables
    * token-by-token CLI output; `onFrame` receives the full task event stream.
    *
-   * @param taskOptions - Task text, optional `maxSubagents`, and stream callbacks.
+   * @param taskOptions - Task text, optional `maxSubagents` / `approvalMode`, and stream callbacks.
    * @returns A {@link StreamHandle} whose `done` promise settles when the
    *   server completes the task stream. Call `cancel()` to abort without
    *   treating the abort as an error.
@@ -651,6 +651,7 @@ export class Connection {
   sendTask = async (taskOptions: {
     task: string;
     maxSubagents?: 1 | 2 | "max" | number;
+    approvalMode?: TaskApprovalMode;
     onFrame: (frame: TaskFrame) => void | Promise<void>;
     onToken?: (token: string) => void;
   }): Promise<StreamHandle> => {
@@ -663,6 +664,7 @@ export class Connection {
       taskOptions.onFrame,
       taskOptions.onToken,
       taskOptions.maxSubagents,
+      taskOptions.approvalMode,
     );
   };
 

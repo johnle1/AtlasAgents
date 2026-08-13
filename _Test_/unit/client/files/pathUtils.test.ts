@@ -5,9 +5,24 @@
 import { describe, expect, it } from "vitest";
 import {
   assertInsideRoot,
+  isInsideRoot,
   requireNonEmptyPath,
   resolveAbsolutePath,
 } from "../../../../packages/client/src/fileProxy/pathUtils.js";
+
+describe("isInsideRoot", () => {
+  it("returns true for a nested path (normal)", () => {
+    expect(isInsideRoot("/proj", "/proj/src/a.ts")).toBe(true);
+  });
+
+  it("returns true when candidate equals the root (boundary)", () => {
+    expect(isInsideRoot("/proj", "/proj")).toBe(true);
+  });
+
+  it("returns false for a path outside the root (error)", () => {
+    expect(isInsideRoot("/proj", "/tmp/outside-loopy.ts")).toBe(false);
+  });
+});
 
 describe("assertInsideRoot", () => {
   it("allows paths under the root", () => {

@@ -20,6 +20,10 @@
  */
 
 import { loadConfig, updateConfig } from "../config/index.js";
+import {
+  parseApprovalMode,
+  setSessionApprovalMode,
+} from "../ui/bridge/allowlist.js";
 import type { PromptPort } from "../ui/promptPort.js";
 import type { Connection } from "../connection/index.js";
 import { getTheme } from "../theme/themeManager.js";
@@ -204,7 +208,7 @@ export const handleSet = async (
   // Validate that a setting name was provided.
   if (!sub) {
     printError(
-      "Usage: /set password [value] | /set server [host] | /set port [n] | /set agent | /set subagent",
+      "Usage: /set password [value] | /set server [host] | /set port [n] | /set agent | /set subagent | /set approval [mode]",
     );
     return;
   }
@@ -291,10 +295,42 @@ export const handleSet = async (
       break;
     }
 
+    case "approval": {
+      const parsed = parseApprovalMode(arg);
+      if (!parsed) {
+        printError(
+          "Usage: /set approval default|accept_edits|plan|auto|bypass  (Shift+Tab cycles the first three)",
+        );
+        return;
+      }
+      if (parsed === "bypass") {
+        const confirmation = (
+          await prompts.question(
+            "  Type 'bypass' to confirm disabling all prompts this session: ",
+          )
+        )
+          .trim()
+          .toLowerCase();
+        if (confirmation !== "bypass") {
+          printError("Bypass not enabled.");
+          return;
+        }
+        setSessionApprovalMode("bypass");
+        printError(
+          "Approval mode BYPASS — all prompts skipped this session (not saved).",
+        );
+        break;
+      }
+      updateConfig({ approvalMode: parsed });
+      setSessionApprovalMode(parsed);
+      printSuccess(`Approval mode set to ${parsed}.`);
+      break;
+    }
+
     default: {
       // Reject unknown settings and remind the user of valid options.
       printError(
-        "Unknown /set subcommand. Use: password, server, port, agent, or subagent.",
+        "Unknown /set subcommand. Use: password, server, port, agent, subagent, or approval.",
       );
       break;
     }

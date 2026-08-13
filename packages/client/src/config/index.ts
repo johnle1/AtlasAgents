@@ -20,8 +20,15 @@
  * `config/index.js` instead of `config.js`.
  */
 
-export type { Config, UiConfig } from "./types.js";
-export { HISTORY_FILE, SKILLS_DIR } from "./types.js";
+export type { Config, UiConfig, ApprovalModeDisplay } from "./types.js";
+export type { ApprovalMode, PersistedApprovalMode } from "./approvalMode.js";
+export {
+  parseApprovalMode,
+  parsePersistedApprovalMode,
+  formatApprovalModeLabel,
+  approvalModeDisplay,
+} from "./approvalMode.js";
+export { HISTORY_FILE, SKILLS_DIR, APPROVAL_MODE_DISPLAY } from "./types.js";
 export {
   ensureDirs,
   getConfig,

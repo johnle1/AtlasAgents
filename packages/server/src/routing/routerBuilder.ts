@@ -14,6 +14,7 @@
  */
 
 import { parseMaxSubagentsPayload } from "../orchestration/maxSubagents.js";
+import { normalizeTaskApprovalMode } from "@loopycode/shared";
 import type { PlanDecision } from "../orchestration/types.js";
 import { exploreCodebase } from "../orchestration/exploreCodebase.js";
 import type {
@@ -631,10 +632,12 @@ function createTaskStreamHandler(
       agentTemp?: number;
       subagentTemp?: number;
       debug?: boolean;
+      approvalMode?: unknown;
     };
 
     const taskText = String(body.text ?? "");
     const maxSubagents = parseMaxSubagentsPayload(body.maxSubagents);
+    const approvalMode = normalizeTaskApprovalMode(body.approvalMode);
     const modelOverrides = buildModelOverrides(body);
 
     let perConnection = brokerByRequester.get(session.requesterId);
@@ -654,6 +657,7 @@ function createTaskStreamHandler(
         perConnection,
         modelOverrides,
         maxSubagents,
+        approvalMode,
       );
       emit({ kind: "done" });
     } catch (error) {

@@ -24,6 +24,7 @@ import type { SessionInfo, TaskModelOverrides } from "../types.js";
 import type { Agent } from "../agent/agent.js";
 import type { TaskFrame } from "../../transport/frames.js";
 import type { IModelPlacementReporter } from "../../ollama/modelPlacement.js";
+import type { TaskApprovalMode } from "@loopycode/shared";
 
 /**
  * Dependency injection container for the orchestrator pipeline.
@@ -93,6 +94,13 @@ export type OrchestratorPipelineParams = {
 
   /** Optional agent count constraint. */
   maxSubagents?: MaxSubagentsParam;
+
+  /**
+   * Session approval mode from the client. `"plan"` stops after confirm-plan
+   * (no subagent pool). Other modes execute the pool; file/command policy
+   * is enforced on the client.
+   */
+  approvalMode?: TaskApprovalMode;
 };
 
 /** Context header and skill body assembled ahead of agent planning. */

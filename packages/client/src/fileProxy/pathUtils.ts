@@ -11,7 +11,7 @@
 import * as path from "node:path";
 
 /**
- * Throws if `candidate` is outside `workspaceRoot`.
+ * Returns whether `candidate` sits on or under `workspaceRoot`.
  *
  * @remarks
  * Uses `path.relative(workspaceRoot, candidate)`:
@@ -19,7 +19,32 @@ import * as path from "node:path";
  * - an absolute relative result on Windows means a different drive / root escape
  *
  * Call after `path.resolve` / `path.join` so symlinks and `..` segments are
- * normalized first (callers are responsible for resolving).
+ * normalized first (callers are responsible for resolving). Used by auto-mode
+ * keepUndo confinement — {@link assertInsideRoot} throws the same check.
+ *
+ * @param workspaceRoot - Absolute sandbox root.
+ * @param candidate - Absolute path to test.
+ * @returns `true` when `candidate` is the root or a descendant.
+ *
+ * @example
+ * ```ts
+ * isInsideRoot("/proj", "/proj/src/a.ts"); // true
+ * isInsideRoot("/proj", "/etc/passwd"); // false
+ * ```
+ */
+export const isInsideRoot = (
+  workspaceRoot: string,
+  candidate: string,
+): boolean => {
+  const relativePathFromRoot = path.relative(workspaceRoot, candidate);
+  return (
+    !relativePathFromRoot.startsWith("..") &&
+    !path.isAbsolute(relativePathFromRoot)
+  );
+};
+
+/**
+ * Throws if `candidate` is outside `workspaceRoot`.
  *
  * @param workspaceRoot - Absolute sandbox root.
  * @param candidate - Absolute path to validate.
@@ -35,13 +60,7 @@ export const assertInsideRoot = (
   workspaceRoot: string,
   candidate: string,
 ): void => {
-  const relativePathFromRoot = path.relative(workspaceRoot, candidate);
-
-  // `..` → walked above root; absolute relative → different Windows drive/root.
-  if (
-    relativePathFromRoot.startsWith("..") ||
-    path.isAbsolute(relativePathFromRoot)
-  ) {
+  if (!isInsideRoot(workspaceRoot, candidate)) {
     throw new Error(`Path escapes workspace root: ${candidate}`);
   }
 };

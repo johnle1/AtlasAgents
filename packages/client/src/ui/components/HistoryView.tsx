@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import type { HistoryItem } from "../types.js";
 import { formatAgentThinkForDisplay } from "../../renderer.js";
 import { tailRows } from "../thinkDisplay.js";
+import { MarkdownView } from "../markdown/MarkdownView.js";
 import { useAppContext } from "../../state/DataContext.js";
 
 /**
@@ -63,13 +64,12 @@ const hasAnsi = (text: string): boolean => /\x1b\[[0-9;]*m/.test(text);
 export const renderHistoryItem = (
   item: HistoryItem,
   key: string,
+  markdownRaw = false,
 ): React.ReactNode => {
   switch (item.kind) {
     case "text": {
-      // Check if the server pre-colored this text stream. If so, we bypass the variant theme coloring to avoid corruption.
       const hasAnsiCodes = hasAnsi(item.text);
 
-      // Resolve the terminal text color based on the semantic variant of the response payload.
       const color =
         item.variant === "error"
           ? "red"
@@ -82,6 +82,16 @@ export const renderHistoryItem = (
                 : item.variant === "assistant"
                   ? undefined
                   : "gray";
+
+      if (item.variant === "assistant" && !hasAnsiCodes) {
+        return (
+          <MarkdownView
+            key={key}
+            source={item.text}
+            raw={markdownRaw}
+          />
+        );
+      }
 
       return (
         <Text key={key} {...(hasAnsiCodes ? {} : { color })}>
@@ -182,9 +192,9 @@ export const renderHistoryItem = (
  * ```
  */
 export const HistoryView: React.FC = () => {
-  const { streamingText } = useAppContext();
+  const { streamingText, markdownRaw } = useAppContext();
   return streamingText !== null && streamingText.length > 0 ? (
-    <Text>{streamingText}</Text>
+    <MarkdownView source={streamingText} raw={markdownRaw} />
   ) : null;
 };
 

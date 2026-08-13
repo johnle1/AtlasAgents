@@ -64,6 +64,18 @@ export type BridgeHooks = {
    * The React root remounts Ink `<Static>` and writes ANSI clear escapes.
    */
   onClearScreen?: () => void;
+  /**
+   * Callback invoked when a `usage` frame updates the live context fill.
+   * Pass `null` to reset the footer to `—`.
+   */
+  onContextUsage?: (
+    usage: { usedTokens: number; contextWindow: number } | null,
+  ) => void;
+  /**
+   * Callback invoked when the session approval mode changes (`/set approval`
+   * or Shift+Tab) so the footer stays honest.
+   */
+  onApprovalModeChange?: (mode: string) => void;
 };
 
 /**

@@ -54,6 +54,7 @@ import type { MaxSubagentsParam } from "../maxSubagents.js";
 import type { SessionInfo, TaskModelOverrides } from "../types.js";
 import { runOrchestratorPipeline } from "./orchestratorPipeline.js";
 import type { IModelPlacementReporter } from "../../ollama/modelPlacement.js";
+import type { TaskApprovalMode } from "@loopycode/shared";
 
 export class AgentOrchestrator {
   /**
@@ -107,6 +108,7 @@ export class AgentOrchestrator {
     perConn?: PerConnection,
     modelOverrides?: TaskModelOverrides,
     maxSubagents: MaxSubagentsParam = 3,
+    approvalMode: TaskApprovalMode = "default",
   ): Promise<void> => {
     await runOrchestratorPipeline(
       {
@@ -127,6 +129,7 @@ export class AgentOrchestrator {
         perConn,
         modelOverrides,
         maxSubagents,
+        approvalMode,
       },
     );
   };

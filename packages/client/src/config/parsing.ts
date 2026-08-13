@@ -6,6 +6,7 @@
 
 import type { Config } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
+import { parsePersistedApprovalMode } from "./approvalMode.js";
 
 /**
  * Merges parsed config from disk with DEFAULT_CONFIG to fill missing keys.
@@ -34,6 +35,7 @@ export const mergeConfigFromDisk = (parsedConfig: Partial<Config>): Config => ({
     parsedConfig.subagentCap >= 1
       ? parsedConfig.subagentCap
       : DEFAULT_CONFIG.subagentCap,
+  approvalMode: parsePersistedApprovalMode(parsedConfig.approvalMode),
   ui: { ...DEFAULT_CONFIG.ui, ...parsedConfig.ui },
 });
 

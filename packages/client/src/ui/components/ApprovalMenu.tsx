@@ -95,7 +95,9 @@ export const ApprovalMenu: React.FC = () => {
       ))}
 
       {/* Helper tooltip to assist developers navigating keyboard interactions */}
-      <Text dimColor>↑↓ move · Enter confirm · 1-3 select · Esc dismiss</Text>
+      <Text dimColor>
+        ↑↓ move · Enter confirm · 1-{options.length} select · Esc dismiss
+      </Text>
     </Box>
   );
 };

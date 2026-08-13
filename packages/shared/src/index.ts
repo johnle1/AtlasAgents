@@ -7,12 +7,14 @@ export type {
   RouteId,
   StreamKind,
   TaskStreamPayload,
+  TaskApprovalMode,
 } from "./protocol/serverProtocol.js";
 export {
   ROUTE_IDS,
   isRouteId,
   STREAM_KINDS,
   isStreamKind,
+  normalizeTaskApprovalMode,
 } from "./protocol/serverProtocol.js";
 export type { DiffDisplayLine } from "./diff/diffEngine.js";
 export {
@@ -35,6 +37,7 @@ export type {
   TaskLifecycleState,
 } from "./frames/frames.js";
 export { decodeFrame, encodeFrame } from "./frames/frames.js";
+export { clampUsage, estimateTokensFromText } from "./frames/usage.js";
 export type { SecretsEnvelope } from "./crypto/configCipher.js";
 export {
   ConfigCipherLockedError,

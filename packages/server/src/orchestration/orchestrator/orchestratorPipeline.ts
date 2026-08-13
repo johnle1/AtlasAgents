@@ -18,6 +18,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { TaskFrame } from "../../transport/frames.js";
+import { clampUsage, estimateTokensFromText } from "@loopycode/shared";
 import { Agent } from "../agent/agent.js";
 import { Subagent } from "../subagent/subagent.js";
 import { modeLabelFromMaxAgents } from "../planHelpers.js";
@@ -92,6 +93,7 @@ export const runOrchestratorPipeline = async (
     perConn,
     modelOverrides,
     maxSubagents = 3,
+    approvalMode = "default",
   } = params;
 
   // Unique ID for this task run — used for experience recording, auditing, and linking logs across the pipeline.
@@ -116,6 +118,13 @@ export const runOrchestratorPipeline = async (
 
   const emitStatus = (frame: Extract<TaskFrame, { kind: "status" }>): void => {
     emit(frame);
+  };
+
+  const emitUsage = (usedTokens: number, contextWindow: number): void => {
+    const clamped = clampUsage(usedTokens, contextWindow);
+    if (clamped) {
+      emit({ kind: "usage", ...clamped });
+    }
   };
 
   // Track current pipeline phase for error reporting — allows diagnostics to pinpoint
@@ -164,6 +173,9 @@ export const runOrchestratorPipeline = async (
         ? await contextBuilder.resolveNumCtx(subagentModel)
         : undefined;
     const keepAlive = await config.getKeepAlive();
+    const contextWindow = agentNumCtx ?? subagentNumCtx ?? 0;
+    let usedTokens = estimateTokensFromText(taskText);
+    emitUsage(usedTokens, contextWindow);
 
     const agent = new Agent({
       ollama: providerRegistry.getRoleClient(
@@ -236,6 +248,18 @@ export const runOrchestratorPipeline = async (
       return outcome;
     }
     plan = planningResult.plan;
+    usedTokens +=
+      estimateTokensFromText(contextHeader) +
+      estimateTokensFromText(skillBody);
+    emitUsage(usedTokens, contextWindow);
+
+    if (approvalMode === "plan") {
+      emitToken(
+        "\nPlan complete (plan mode — not executing). Shift+Tab to leave plan mode.\n",
+      );
+      outcome = { ok: true, plan, results: [] };
+      return outcome;
+    }
 
     emitStatus({
       kind: "status",
@@ -326,6 +350,10 @@ export const runOrchestratorPipeline = async (
       emitStatus,
       signal,
     });
+    usedTokens += estimateTokensFromText(
+      ordered.map((result) => result.content).join("\n"),
+    );
+    emitUsage(usedTokens, contextWindow);
 
     emitStatus({
       kind: "status",

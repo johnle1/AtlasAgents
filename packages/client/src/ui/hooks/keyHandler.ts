@@ -6,7 +6,7 @@
  * without rendering an Ink tree. The React hook is a thin `useMemo` wrapper
  * around {@link createKeyHandler}.
  *
- * Contract (gemini-cli-aligned):
+ * Contract for key handling:
  * - Esc while busy → cancel the running task; CLI stays alive
  * - Esc while idle → clear the input buffer (no-op if empty)
  * - Ctrl+C while busy → cancel + warn; second press force-quits
@@ -20,6 +20,11 @@
 import { formatErrorMessage } from "../../commands/utils.js";
 import type { KeyboardInputContext, KeyboardInputHandlers } from "./types.js";
 import {
+  cycleApprovalMode,
+  setSessionApprovalMode,
+  type ApprovalMode,
+} from "../bridge/allowlist.js";
+import {
   commandRequiresArgs,
   getCommandSuggestions,
 } from "../commandCatalog.js";
@@ -27,6 +32,8 @@ import {
   AUTOCOMPLETE_SCROLL_TRIGGER_OFFSET,
   AUTOCOMPLETE_VISIBLE_COUNT,
 } from "../constants.js";
+import { completeMention } from "../mentions/expand.js";
+import { hasTrailingBackslash } from "../multiline/textBuffer.js";
 
 /**
  * Keys this handler consumes. Kept in sync with {@link SHORTCUT_CATALOG}
@@ -37,7 +44,13 @@ export const HANDLED_KEYS = [
   "ctrl+c",
   "ctrl+l",
   "ctrl+o",
+  "ctrl+j",
+  "shift+enter",
+  "alt+enter",
+  "alt+m",
+  "shift+tab",
   "tab",
+  "enter",
   "up",
   "down",
   "?",
@@ -48,6 +61,7 @@ export const HANDLED_KEYS = [
  *
  * @remarks
  * `escape` is the Phase 1 addition — Ink sets it for Esc / Ctrl+[.
+ * `return` / `shift` / `meta` are the Phase 2 newline chords.
  */
 export type KeyInformation = {
   ctrl?: boolean;
@@ -55,6 +69,9 @@ export type KeyInformation = {
   downArrow?: boolean;
   tab?: boolean;
   escape?: boolean;
+  return?: boolean;
+  shift?: boolean;
+  meta?: boolean;
 };
 
 /**
@@ -70,38 +87,48 @@ export type KeyInformation = {
  *   exit,
  *   cancelActiveTask,
  *   clearScreen,
+ *   insertNewline,
  * });
  * handle("c", { ctrl: true });
  * ```
  */
-export const createKeyHandler = (
-  {
-    approval,
-    promptReq,
-    busy,
-    inputHistory,
-    histIdx,
-    input,
-    activeIndex,
-    scrollOffset,
-    sigintBusy,
-    setSigintBusy,
-    onSaveHistory,
-    fileProxy,
-    setHistory,
-    setActiveIndex,
-    setScrollOffset,
-    setInput,
-    setHistIdx,
-    showShortcuts,
-    setShowShortcuts,
-  }: KeyboardInputContext,
-  { exit, cancelActiveTask, clearScreen }: KeyboardInputHandlers,
-) =>
+export const createKeyHandler =
   (
-    inputCharacter: string,
-    keyInformation: KeyInformation,
-  ): void => {
+    {
+      approval,
+      promptReq,
+      busy,
+      inputHistory,
+      histIdx,
+      input,
+      activeIndex,
+      scrollOffset,
+      sigintBusy,
+      setSigintBusy,
+      onSaveHistory,
+      fileProxy,
+      setHistory,
+      setActiveIndex,
+      setScrollOffset,
+      setInput,
+      setHistIdx,
+      showShortcuts,
+      setShowShortcuts,
+      markdownRaw,
+      setMarkdownRaw,
+      approvalMode,
+      setApprovalMode,
+      mentionNames,
+    }: KeyboardInputContext,
+    {
+      exit,
+      cancelActiveTask,
+      clearScreen,
+      insertNewline,
+      enqueueMessage,
+    }: KeyboardInputHandlers,
+  ) =>
+  (inputCharacter: string, keyInformation: KeyInformation): void => {
     // Overlays own the keyboard; do not steal Esc/Ctrl+C from them.
     if (approval || promptReq) return;
 
@@ -159,35 +186,48 @@ export const createKeyHandler = (
       }
     }
 
-    if (busy) return;
+    const wantsNewline =
+      (keyInformation.ctrl && inputCharacter === "j") ||
+      (Boolean(keyInformation.return) &&
+        (Boolean(keyInformation.shift) || Boolean(keyInformation.meta)));
+    if (wantsNewline) {
+      insertNewline();
+      return;
+    }
 
-    if (keyInformation.ctrl && inputCharacter === "o") {
-      void import("../../state/listExpandState.js").then(
-        ({ peekUnexpanded }) => {
-          const expandResult = peekUnexpanded();
-          if (expandResult.found && expandResult.entry) {
-            void fileProxy
-              .expandDirectory(
-                expandResult.entry.absolutePath,
-                expandResult.entry.indent,
-              )
-              .catch((expansionError) => {
-                setHistory((previousHistory) => [
-                  ...previousHistory,
-                  {
-                    kind: "text",
-                    text: formatErrorMessage(expansionError),
-                    variant: "error",
-                  },
-                ]);
-              });
-          }
-        },
+    if (keyInformation.meta && inputCharacter === "m" && setMarkdownRaw) {
+      setMarkdownRaw(!markdownRaw);
+      return;
+    }
+
+    if (keyInformation.shift && keyInformation.tab && setApprovalMode) {
+      const next = cycleApprovalMode(
+        (approvalMode ?? "default") as ApprovalMode,
+        busy,
       );
+      setApprovalMode(next);
+      setSessionApprovalMode(next);
       return;
     }
 
     const commandSuggestions = getCommandSuggestions(input);
+
+    if (
+      keyInformation.return &&
+      busy &&
+      !keyInformation.shift &&
+      !keyInformation.meta
+    ) {
+      if (hasTrailingBackslash(input)) {
+        return;
+      }
+      const trimmed = input.trim();
+      if (trimmed.length > 0) {
+        enqueueMessage(trimmed);
+        setInput("");
+      }
+      return;
+    }
 
     if (commandSuggestions.length > 0) {
       if (keyInformation.upArrow) {
@@ -232,8 +272,47 @@ export const createKeyHandler = (
         }
         return;
       }
-    } else {
-      if (keyInformation.upArrow && inputHistory.length > 0) {
+    } else if (keyInformation.tab) {
+      const completed = completeMention(input, mentionNames ?? []);
+      if (completed) {
+        setInput(completed);
+        return;
+      }
+    }
+
+    if (busy) return;
+
+    if (keyInformation.ctrl && inputCharacter === "o") {
+      void import("../../state/listExpandState.js").then(
+        ({ peekUnexpanded }) => {
+          const expandResult = peekUnexpanded();
+          if (expandResult.found && expandResult.entry) {
+            void fileProxy
+              .expandDirectory(
+                expandResult.entry.absolutePath,
+                expandResult.entry.indent,
+              )
+              .catch((expansionError) => {
+                setHistory((previousHistory) => [
+                  ...previousHistory,
+                  {
+                    kind: "text",
+                    text: formatErrorMessage(expansionError),
+                    variant: "error",
+                  },
+                ]);
+              });
+          }
+        },
+      );
+      return;
+    }
+
+    if (commandSuggestions.length === 0) {
+      // MultilineInput owns vertical caret movement once the prompt has
+      // more than one line; history recall would clobber the buffer.
+      const multiline = input.includes("\n");
+      if (keyInformation.upArrow && inputHistory.length > 0 && !multiline) {
         const nextHistoryIndex =
           histIdx < 0 ? inputHistory.length - 1 : Math.max(0, histIdx - 1);
 
@@ -244,7 +323,7 @@ export const createKeyHandler = (
         return;
       }
 
-      if (keyInformation.downArrow && histIdx >= 0) {
+      if (keyInformation.downArrow && histIdx >= 0 && !multiline) {
         const nextHistoryIndex = histIdx + 1;
 
         if (nextHistoryIndex >= inputHistory.length) {

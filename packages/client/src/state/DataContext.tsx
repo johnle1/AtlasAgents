@@ -14,7 +14,9 @@ import React, {
   useState,
 } from "react";
 
-import { loadConfig, type Config } from "../config/index.js";
+import { loadConfig, parsePersistedApprovalMode, type Config } from "../config/index.js";
+import { setSessionApprovalMode } from "../ui/bridge/allowlist.js";
+import type { ApprovalMode } from "../config/approvalMode.js";
 import { buildPromptLabel } from "../utils/pathDisplay.js";
 import { buildBannerLines } from "../renderer/banner.js";
 import type {
@@ -141,13 +143,45 @@ export type AppContextValue = {
   showShortcuts: boolean;
   setShowShortcuts: React.Dispatch<React.SetStateAction<boolean>>;
 
+  /**
+   * Latest context-window sample from a server `usage` frame, or `null`
+   * before any has arrived (footer shows `—`).
+   */
+  contextUsage: { usedTokens: number; contextWindow: number } | null;
+  setContextUsage: React.Dispatch<
+    React.SetStateAction<{
+      usedTokens: number;
+      contextWindow: number;
+    } | null>
+  >;
+
+  /**
+   * Session approval mode. Defaults to the persisted config value;
+   * Shift+Tab cycles default / accept-edits / plan.
+   */
+  approvalMode: ApprovalMode;
+  setApprovalMode: React.Dispatch<React.SetStateAction<ApprovalMode>>;
+
+  /**
+   * When true, assistant markdown is shown as the raw source (Alt+M).
+   * Default false — formatted markdown is on.
+   */
+  markdownRaw: boolean;
+  setMarkdownRaw: React.Dispatch<React.SetStateAction<boolean>>;
+
+  /**
+   * Lines waiting to run after the current task (Enter while busy).
+   */
+  queuedMessages: string[];
+  setQueuedMessages: React.Dispatch<React.SetStateAction<string[]>>;
+
   /** Registered by {@link App} once submit/autocomplete logic is ready. */
   handleSubmit: (line: string) => Promise<void>;
   setHandleSubmit: React.Dispatch<
     React.SetStateAction<(line: string) => Promise<void>>
   >;
 
-  /** Derived: main input is blocked while busy, approving, or prompting. */
+  /** Derived: main input is blocked while an overlay owns the keyboard. */
   inputDisabled: boolean;
 
   connection: AppProps["connection"];
@@ -279,6 +313,17 @@ export const AppProvider: React.FC<AppProviderProps> = ({
   const [taskActive, setTaskActive] = useState(false);
   const [sigintBusy, setSigintBusy] = useState(0);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [contextUsage, setContextUsage] = useState<{
+    usedTokens: number;
+    contextWindow: number;
+  } | null>(null);
+  const [approvalMode, setApprovalMode] = useState<ApprovalMode>(() => {
+    const persisted = parsePersistedApprovalMode(loadConfig().approvalMode);
+    setSessionApprovalMode(persisted);
+    return persisted;
+  });
+  const [markdownRaw, setMarkdownRaw] = useState(false);
+  const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [scrollOffset, setScrollOffset] = useState(0);
 
@@ -288,8 +333,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({
   >(async () => {});
 
   const inputDisabled = useMemo(
-    () => busy || approval !== null || promptReq !== null,
-    [busy, approval, promptReq],
+    () => approval !== null || promptReq !== null,
+    [approval, promptReq],
   );
 
   useEffect(() => {
@@ -348,6 +393,14 @@ export const AppProvider: React.FC<AppProviderProps> = ({
       setSigintBusy,
       showShortcuts,
       setShowShortcuts,
+      contextUsage,
+      setContextUsage,
+      approvalMode,
+      setApprovalMode,
+      markdownRaw,
+      setMarkdownRaw,
+      queuedMessages,
+      setQueuedMessages,
       handleSubmit,
       setHandleSubmit,
       inputDisabled,
@@ -388,6 +441,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({
       onSaveHistory,
       registerExit,
       onInputHistoryRef,
+      contextUsage,
+      approvalMode,
+      markdownRaw,
+      queuedMessages,
     ],
   );
 

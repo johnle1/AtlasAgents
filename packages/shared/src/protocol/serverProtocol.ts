@@ -247,4 +247,59 @@ export type TaskStreamPayload = {
 
   /** Subagent sampling temperature in roughly `0.0`–`1.0`. */
   subagentTemp: number;
+
+  /**
+   * Session approval mode. `"plan"` stops after confirm-plan; other values
+   * execute. `"accept_edits"` / `"auto"` / `"bypass"` are client-side
+   * permission policies the server does not enforce.
+   */
+  approvalMode?: TaskApprovalMode;
+};
+
+/**
+ * Permission mode sent with a task stream.
+ *
+ * @remarks
+ * Only `"plan"` changes server behavior (stop after confirm-plan).
+ * Legacy `"auto_edit"` is accepted and treated like `"accept_edits"`.
+ */
+export type TaskApprovalMode =
+  | "default"
+  | "accept_edits"
+  | "plan"
+  | "auto"
+  | "bypass"
+  | "auto_edit";
+
+/**
+ * Coerces a task-payload approvalMode to a known token.
+ *
+ * @remarks
+ * Legacy `"auto_edit"` becomes `"accept_edits"`. Unknown values become
+ * `"default"` so an old or buggy client cannot strand the server.
+ *
+ * @param raw - Value from the stream payload.
+ * @returns A known mode. `"plan"` is the only value the server special-cases.
+ *
+ * @example
+ * ```ts
+ * normalizeTaskApprovalMode("plan"); // "plan"
+ * normalizeTaskApprovalMode("auto_edit"); // "accept_edits"
+ * normalizeTaskApprovalMode("nope"); // "default"
+ * ```
+ */
+export const normalizeTaskApprovalMode = (raw: unknown): TaskApprovalMode => {
+  if (raw === "auto_edit") {
+    return "accept_edits";
+  }
+  if (
+    raw === "default" ||
+    raw === "accept_edits" ||
+    raw === "plan" ||
+    raw === "auto" ||
+    raw === "bypass"
+  ) {
+    return raw;
+  }
+  return "default";
 };

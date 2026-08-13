@@ -54,6 +54,31 @@ export const SHORTCUT_CATALOG: ShortcutEntry[] = [
     action: "Expand truncated directory listing",
   },
   {
+    id: "ctrl+j",
+    keys: "Ctrl+J",
+    action: "Insert newline",
+  },
+  {
+    id: "shift+enter",
+    keys: "Shift+Enter",
+    action: "Insert newline",
+  },
+  {
+    id: "alt+enter",
+    keys: "Alt+Enter",
+    action: "Insert newline",
+  },
+  {
+    id: "alt+m",
+    keys: "Alt+M",
+    action: "Toggle raw markdown source",
+  },
+  {
+    id: "shift+tab",
+    keys: "Shift+Tab",
+    action: "Cycle approval mode (default / accept-edits / plan)",
+  },
+  {
     id: "tab",
     keys: "Tab",
     action: "Accept autocomplete suggestion",
@@ -71,7 +96,7 @@ export const SHORTCUT_CATALOG: ShortcutEntry[] = [
   {
     id: "enter",
     keys: "Enter",
-    action: "Submit input / confirm autocomplete",
+    action: "Submit input / queue while busy",
   },
   {
     id: "?",

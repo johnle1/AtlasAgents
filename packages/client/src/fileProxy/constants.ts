@@ -86,6 +86,7 @@ export const DANGEROUS_TOKENS = new Set([
   "mkfs",
   "reset",
   "chmod",
+  "-fdx",
   // find primaries that execute commands
   "-exec",
   "-execdir",

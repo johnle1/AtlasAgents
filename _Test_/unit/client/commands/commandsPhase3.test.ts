@@ -125,6 +125,64 @@ describe("handleSet / handleConfig", () => {
   });
 });
 
+describe("handleSet approval", () => {
+  const setDeps = (prompts: { question: ReturnType<typeof vi.fn> }) => ({
+    connection: fakeConn(),
+    prompts: prompts as never,
+    handleSetModel: vi.fn(),
+  });
+
+  it("parses /set approval auto and persistable modes (normal)", async () => {
+    const { updateConfig } = await import(
+      "../../../../packages/client/src/config/index.js"
+    );
+    const { getApprovalMode } = await import(
+      "../../../../packages/client/src/ui/bridge/allowlist.js"
+    );
+    await handleSet("approval", "auto", setDeps({ question: vi.fn() }));
+    expect(updateConfig).toHaveBeenCalledWith({ approvalMode: "auto" });
+    expect(getApprovalMode()).toBe("auto");
+
+    await handleSet(
+      "approval",
+      "accept-edits",
+      setDeps({ question: vi.fn() }),
+    );
+    expect(updateConfig).toHaveBeenCalledWith({
+      approvalMode: "accept_edits",
+    });
+  });
+
+  it("requires typing bypass to confirm and does not persist it (boundary)", async () => {
+    const { updateConfig } = await import(
+      "../../../../packages/client/src/config/index.js"
+    );
+    const { getApprovalMode, setSessionApprovalMode } = await import(
+      "../../../../packages/client/src/ui/bridge/allowlist.js"
+    );
+    setSessionApprovalMode("default");
+    const question = vi.fn(async () => "nope");
+    await handleSet("approval", "bypass", setDeps({ question }));
+    expect(question).toHaveBeenCalled();
+    expect(getApprovalMode()).toBe("default");
+    expect(updateConfig).not.toHaveBeenCalledWith({ approvalMode: "bypass" });
+
+    const confirm = vi.fn(async () => "bypass");
+    await handleSet("approval", "bypass", setDeps({ question: confirm }));
+    expect(getApprovalMode()).toBe("bypass");
+    expect(updateConfig).not.toHaveBeenCalledWith({ approvalMode: "bypass" });
+    setSessionApprovalMode("default");
+  });
+
+  it("rejects unknown approval modes (error)", async () => {
+    const { printError } = await import(
+      "../../../../packages/client/src/renderer.js"
+    );
+    await handleSet("approval", "nope", setDeps({ question: vi.fn() }));
+    expect(printError).toHaveBeenCalled();
+  });
+});
+
 describe("handleSpinner / handleThink / handleNotify", () => {
   it("toggles spinner setting", () => {
     handleSpinner("off", "");
@@ -247,6 +305,11 @@ describe("CommandHandler", () => {
   it("returns false for non-slash input", async () => {
     const handler = new CommandHandler({ conn: fakeConn(), prompts });
     expect(await handler.handle("plain task")).toBe(false);
+  });
+
+  it("returns false for !ls so bang passthrough stays client-local (boundary)", async () => {
+    const handler = new CommandHandler({ conn: fakeConn(), prompts });
+    expect(await handler.handle("!ls")).toBe(false);
   });
 
   it("routes /memory and /models", async () => {

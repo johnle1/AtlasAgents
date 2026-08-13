@@ -31,6 +31,15 @@ import { listStructure } from "../directoryListing.js";
 import { assertInsideRoot, requireNonEmptyPath } from "../pathUtils.js";
 import type { DispatchContext } from "../types.js";
 
+const KEEP_UNDO_REVISE = "What should change?";
+const KEEP_UNDO_EDIT_REVISE = "What should change about this edit?";
+
+/**
+ * Builds a keep/undo prompt for a file mutation.
+ */
+const requestKeepUndo = (contextLabel: string, revisePrompt: string) =>
+  requestApprovalWithFeedback({ type: "keepUndo", contextLabel }, revisePrompt);
+
 /**
  * Reads a UTF-8 file relative to the proxy cwd.
  *
@@ -98,12 +107,9 @@ export const handleFileWrite = async (
   const diffChunks = computeDiff(previousContent, newContent);
   await printWrite(absolutePath, diffChunks);
 
-  const { approved, feedback } = await requestApprovalWithFeedback(
-    {
-      type: "keepUndo",
-      contextLabel: `Apply changes to ${formatDisplayPath(absolutePath)}`,
-    },
-    "What should change about this edit?",
+  const { approved, feedback } = await requestKeepUndo(
+    `Apply changes to ${formatDisplayPath(absolutePath)}`,
+    KEEP_UNDO_EDIT_REVISE,
   );
 
   if (!approved) {
@@ -200,12 +206,9 @@ export const handleFileCreateDir = async (
   const absolutePath = context.resolveAbsolute(directoryPath);
   printCreateDir(absolutePath);
 
-  const { approved } = await requestApprovalWithFeedback(
-    {
-      type: "keepUndo",
-      contextLabel: `Create directory ${formatDisplayPath(absolutePath)}`,
-    },
-    "What should change?",
+  const { approved } = await requestKeepUndo(
+    `Create directory ${formatDisplayPath(absolutePath)}`,
+    KEEP_UNDO_REVISE,
   );
 
   if (!approved) {
@@ -234,12 +237,9 @@ export const handleFileDeleteFile = async (
   const absolutePath = context.resolveAbsolute(filePath);
   printDelete(absolutePath);
 
-  const { approved } = await requestApprovalWithFeedback(
-    {
-      type: "keepUndo",
-      contextLabel: `Delete file ${formatDisplayPath(absolutePath)}`,
-    },
-    "What should change?",
+  const { approved } = await requestKeepUndo(
+    `Delete file ${formatDisplayPath(absolutePath)}`,
+    KEEP_UNDO_REVISE,
   );
 
   if (!approved) {
@@ -271,12 +271,9 @@ export const handleFileDeleteDir = async (
   const absolutePath = context.resolveAbsolute(directoryPath);
   printDelete(absolutePath);
 
-  const { approved } = await requestApprovalWithFeedback(
-    {
-      type: "keepUndo",
-      contextLabel: `Delete directory ${formatDisplayPath(absolutePath)}`,
-    },
-    "What should change?",
+  const { approved } = await requestKeepUndo(
+    `Delete directory ${formatDisplayPath(absolutePath)}`,
+    KEEP_UNDO_REVISE,
   );
 
   if (!approved) {

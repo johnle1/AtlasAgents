@@ -27,6 +27,7 @@ const {
   mockUpdateAgentActivity,
   mockSetActiveTaskCancel,
   mockNotifyUser,
+  mockSetContextUsage,
   mockLoadConfig,
 } = vi.hoisted(() => ({
   mockAppendHistory: vi.fn(),
@@ -45,6 +46,7 @@ const {
   mockUpdateAgentActivity: vi.fn(),
   mockSetActiveTaskCancel: vi.fn(),
   mockNotifyUser: vi.fn(),
+  mockSetContextUsage: vi.fn(),
   mockLoadConfig: vi.fn(),
 }));
 
@@ -64,6 +66,7 @@ vi.mock("../../../../packages/client/src/ui/uiBridge.js", () => ({
   startLiveThink: mockStartLiveThink,
   updateAgentActivity: mockUpdateAgentActivity,
   setActiveTaskCancel: mockSetActiveTaskCancel,
+  setContextUsage: mockSetContextUsage,
 }));
 
 vi.mock("../../../../packages/client/src/ui/notify.js", () => ({

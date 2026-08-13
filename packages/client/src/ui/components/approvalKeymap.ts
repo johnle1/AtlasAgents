@@ -12,7 +12,7 @@ import type { ApprovalRequest, PlanDecision } from "../types.js";
 import type { ApprovalMenuOption as Option } from "./types.js";
 
 /** Decision value a menu option can resolve to. */
-export type ApprovalKeyValue = boolean | PlanDecision;
+export type ApprovalKeyValue = boolean | PlanDecision | "always";
 
 /**
  * Result of mapping a keystroke onto the approval menu.
@@ -72,11 +72,13 @@ export const buildOptions = (
           { label: "Run", value: true, color: "green" },
           { label: "Skip", value: false, color: "red" },
           { label: "Revise", value: "edit", color: "cyan" },
+          { label: "Always allow (session)", value: "always", color: "green" },
         ]
       : [
           { label: "Keep", value: true, color: "cyan" },
           { label: "Undo", value: false },
           { label: "Revise", value: "edit", color: "cyan" },
+          { label: "Always allow (session)", value: "always", color: "green" },
         ];
 
 /**
@@ -84,7 +86,7 @@ export const buildOptions = (
  *
  * @remarks
  * Digit keys `"1"`–`"3"` jump to that option and confirm immediately
- * (gemini-cli behavior). Out-of-range digits are ignored. Esc uses
+ * Out-of-range digits are ignored. Esc uses
  * {@link dismissValueFor}.
  *
  * @param input - Raw character from Ink `useInput`.

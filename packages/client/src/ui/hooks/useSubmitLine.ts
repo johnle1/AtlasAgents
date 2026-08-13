@@ -3,11 +3,16 @@
  *
  * @remarks
  * This hook returns a callback that processes text input when the user presses Enter.
- * It handles three types of input:
+ * It handles these kinds of input:
  *
- * 1. **Slash commands** (e.g., `/help`, `/exit`, `/set`) - Executed locally via CommandHandler
- * 2. **Raw tasks** (e.g., "write a hello world function") - Sent to the server for subagent execution
- * 3. **Empty input** - Ignored
+ * 1. **Bang shell** (`!ls`) — local `runShell`, never sent to the agent
+ * 2. **Slash commands** (e.g., `/help`, `/exit`, `/set`) - Executed locally via CommandHandler
+ * 3. **Raw tasks** (e.g., "write a hello world function") - Sent to the server for subagent execution
+ * 4. **Queued lines** — while a task is running, Enter enqueues instead of submitting
+ * 5. **Empty input** - Ignored
+ *
+ * `@path` mentions in a raw task are expanded (file/dir inlined) before the
+ * line is sent. Secret-ish files such as `.env` are refused with an inline error.
  *
  * Before executing a raw task, the hook validates that the agent and subagent models
  * are configured. If not, it shows an error message instead of attempting to connect.
@@ -26,10 +31,24 @@ import { useCallback, useRef } from "react";
 
 import { formatErrorMessage } from "../../commands/utils.js";
 import { loadConfig } from "../../config/index.js";
+import {
+  handleBang,
+  parseBang,
+} from "../../commands/shellPassthrough.js";
+import { runShell } from "../../fileProxy/shellRunner.js";
 import type { SubmitLineContext } from "./types.js";
 import { sanitizeHistoryLine } from "../historySanitize.js";
 import { MAX_INPUT_HISTORY } from "../constants.js";
 import { runTaskStream } from "../taskStream.js";
+import { requestApproval } from "../uiBridge.js";
+import {
+  dequeueSessionMessage,
+  enqueueSessionMessage,
+} from "../queue/messageQueue.js";
+import {
+  expandMentions,
+  resolverFromFileProxy,
+} from "../mentions/expand.js";
 
 /**
  * Hook returning a submission callback that processes text input on Enter press.
@@ -55,6 +74,8 @@ export const useSubmitLine = ({
   setSigintBusy,
   connection,
   commandHandler,
+  fileProxy,
+  setQueuedMessages,
 }: SubmitLineContext) => {
   // Lock to avoid double execution on duplicate quick clicks/Enters.
   // This prevents the same command from being submitted twice if the user
@@ -73,7 +94,15 @@ export const useSubmitLine = ({
       // Don't execute anything if input is empty or if blocking interaction dialogs are open.
       // This prevents submitting commands while the user is responding to an approval
       // or prompt, which could lead to confusing state.
-      if (!trimmedInputLine.length || busy || approval || promptReq) {
+      if (!trimmedInputLine.length || approval || promptReq) {
+        submitLockRef.current = false;
+        return;
+      }
+
+      if (busy) {
+        const queued = enqueueSessionMessage(trimmedInputLine);
+        setQueuedMessages(queued.items);
+        setInput("");
         submitLockRef.current = false;
         return;
       }
@@ -97,36 +126,57 @@ export const useSubmitLine = ({
       setBusy(true);
 
       try {
-        // Attempt to run as a local command first (e.g., /help, /exit, /set).
-        // CommandHandler.handle returns true if it handled the command, false if not.
-        const wasCommandExecuted =
-          await commandHandler.handle(trimmedInputLine);
-
-        if (!wasCommandExecuted) {
-          // If not a local command, treat it as a raw task to send to the server.
-          // First validate that the required LLM models are configured.
+        const bangCommand = parseBang(trimmedInputLine);
+        if (bangCommand !== null) {
           const taskConfiguration = loadConfig();
+          const entries = await handleBang({
+            command: bangCommand,
+            runShell,
+            cwd: fileProxy.getCwd(),
+            timeoutMs: taskConfiguration.shellTimeoutMs,
+            classifyCommand: fileProxy.classifyCommand,
+            requestApproval: async (command) => {
+              const decision = await requestApproval({
+                type: "runSkip",
+                command,
+              });
+              return decision === true;
+            },
+          });
+          setHistory((previousHistory) => [...previousHistory, ...entries]);
+        } else {
+          // Attempt to run as a local command first (e.g., /help, /exit, /set).
+          // CommandHandler.handle returns true if it handled the command, false if not.
+          const wasCommandExecuted =
+            await commandHandler.handle(trimmedInputLine);
 
-          // Validate LLM model configuration setup before launching a remote agent task.
-          // Without these models configured, the server cannot execute the task, so we
-          // fail fast with a helpful error message instead of attempting to connect.
-          if (
-            !(taskConfiguration.subagentModel ?? "").trim() ||
-            !(taskConfiguration.subsubagentModel ?? "").trim()
-          ) {
-            setHistory((previousHistory) => [
-              ...previousHistory,
-              {
-                kind: "text",
-                text: "Agent and subagent models must be set. Use /set agent and /set subagent.",
-                variant: "error",
-              },
-            ]);
-          } else {
-            // Models are configured, so send the task to the server for subagent execution.
-            // runTaskStream handles the full workflow: sending the task, streaming
-            // the response, and updating the UI with progress and results.
-            await runTaskStream(connection, trimmedInputLine);
+          if (!wasCommandExecuted) {
+            // If not a local command, treat it as a raw task to send to the server.
+            // First validate that the required LLM models are configured.
+            const taskConfiguration = loadConfig();
+
+            // Validate LLM model configuration setup before launching a remote agent task.
+            // Without these models configured, the server cannot execute the task, so we
+            // fail fast with a helpful error message instead of attempting to connect.
+            if (
+              !(taskConfiguration.subagentModel ?? "").trim() ||
+              !(taskConfiguration.subsubagentModel ?? "").trim()
+            ) {
+              setHistory((previousHistory) => [
+                ...previousHistory,
+                {
+                  kind: "text",
+                  text: "Agent and subagent models must be set. Use /set agent and /set subagent.",
+                  variant: "error",
+                },
+              ]);
+            } else {
+              const { text: expanded } = await expandMentions(
+                trimmedInputLine,
+                resolverFromFileProxy(fileProxy),
+              );
+              await runTaskStream(connection, expanded);
+            }
           }
         }
       } catch (executionError) {
@@ -147,6 +197,11 @@ export const useSubmitLine = ({
         submitLockRef.current = false;
         setBusy(false);
         setSigintBusy(0);
+        const drained = dequeueSessionMessage();
+        setQueuedMessages(drained.state.items);
+        if (drained.next) {
+          void submitHandler(drained.next);
+        }
       }
     },
     [
@@ -163,6 +218,8 @@ export const useSubmitLine = ({
       setSigintBusy,
       connection,
       commandHandler,
+      fileProxy,
+      setQueuedMessages,
     ],
   );
 
