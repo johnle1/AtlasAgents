@@ -3,7 +3,7 @@
  *
  * @remarks
  * Renders {@link BootstrapApp}, which runs first-run setup (when needed),
- * connects to the LoopyCode server, and hands off to the main {@link App}
+ * connects to the AtlasAgents server, and hands off to the main {@link App}
  * shell. On exit, input history is persisted via {@link saveHistory} and
  * the Node process terminates with code `0` (or `1` if Ink fails to shut
  * down cleanly).

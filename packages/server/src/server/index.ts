@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * LoopyCode server — RSocket TCP entry point.
+ * AtlasAgents server — RSocket TCP entry point.
  *
  * @remarks
- * This is the main entry point for the LoopyCode server. It handles:
+ * This is the main entry point for the AtlasAgents server. It handles:
  * - CLI parsing: interactive `start`, `--regen-cert`, and config-repair
  *   (`--password`/`--port`/`--reset`) modes
  * - Interactive startup prompts — on a normal restart, just the server
@@ -14,12 +14,12 @@
  * - Application container initialization
  * - RSocket server startup and client connection management
  *
- * Run with: `node dist/index.js` or `loopy-server`
+ * Run with: `node dist/index.js` or `atlas-server`
  */
 
 import type { RSocket } from "@rsocket/core";
 import { AuthMiddleware } from "../auth/middleware.js";
-import { parseServerArgs, printServerHelp } from "../cli/serverArgs.js";
+import { parseServerArgs, printServerHelp, isServerLaunchCommand } from "../cli/serverArgs.js";
 import { runServerConfigRepair } from "../cli/serverConfigRepair.js";
 import { ConfigError, ConfigManager } from "../config/index.js";
 import {
@@ -59,7 +59,7 @@ const OLLAMA_TAGS_URL = "http://localhost:11434/api/tags";
 const clientPeers = new Map<string, RSocket>();
 
 /**
- * Main entry point for the LoopyCode server.
+ * Main entry point for the AtlasAgents server.
  *
  * @remarks
  * Orchestrates the complete server startup sequence:
@@ -100,17 +100,13 @@ const main = async (): Promise<void> => {
     return;
   }
 
-  // Reject anything other than the implicit/explicit "start" command. Read
-  // from the parsed positional rather than raw argv[0], since a flag
-  // appearing first (e.g. `loopy-server --port 8001`) is not itself a
+  // Reject anything other than the implicit/explicit "start"/"run" command.
+  // Read from the parsed positional rather than raw argv[0], since a flag
+  // appearing first (e.g. `atlas-server --port 8001`) is not itself a
   // command.
-  if (
-    parsedArgs.command !== undefined &&
-    parsedArgs.command !== "" &&
-    parsedArgs.command !== "start"
-  ) {
+  if (!isServerLaunchCommand(parsedArgs.command)) {
     logger.error(
-      `Unknown command: ${parsedArgs.command}. Try: loopy-server help`,
+      `Unknown command: ${parsedArgs.command}. Try: atlas-server help`,
     );
     process.exit(1);
   }
@@ -285,13 +281,13 @@ const main = async (): Promise<void> => {
   if (expiry.status === "expired") {
     logger.error(
       "TLS certificate has expired. Refusing to start.\n" +
-        "Run: loopy-server --regen-cert",
+        "Run: atlas-server --regen-cert",
     );
     process.exit(1);
   }
   if (expiry.status === "warning") {
     logger.warn(
-      `TLS certificate expires in ${expiry.daysRemaining} day(s). Run: loopy-server --regen-cert`,
+      `TLS certificate expires in ${expiry.daysRemaining} day(s). Run: atlas-server --regen-cert`,
     );
   }
 

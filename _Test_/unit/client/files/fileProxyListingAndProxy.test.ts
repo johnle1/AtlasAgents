@@ -27,7 +27,7 @@ describe("listDirectoryEntries", () => {
   let workspace: string;
 
   beforeEach(async () => {
-    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-list-"));
+    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-list-"));
     await fs.writeFile(path.join(workspace, "a.txt"), "a");
     await fs.mkdir(path.join(workspace, "sub"));
   });
@@ -54,7 +54,7 @@ describe("listStructure", () => {
   let workspace: string;
 
   beforeEach(async () => {
-    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-tree-"));
+    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-tree-"));
     await fs.mkdir(path.join(workspace, "src"));
     await fs.writeFile(path.join(workspace, "src", "index.ts"), "");
   });
@@ -94,7 +94,7 @@ describe("LocalFileProxy", () => {
   let workspace: string;
 
   beforeEach(async () => {
-    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-proxy-"));
+    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-proxy-"));
     await fs.writeFile(path.join(workspace, "readme.md"), "# hi");
   });
 

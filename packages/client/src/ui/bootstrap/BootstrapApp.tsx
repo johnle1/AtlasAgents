@@ -75,7 +75,7 @@ type BootstrapPhase = "setup" | "connecting" | "ready" | "error";
  * Services and session hints available once bootstrap reaches the `ready` phase.
  */
 type ReadyAppState = {
-  /** Live RSocket connection to the LoopyCode server. */
+  /** Live RSocket connection to the AtlasAgents server. */
   connection: Connection;
   /** Slash-command and prompt handler wired to the connection. */
   commandHandler: CommandHandler;
@@ -323,8 +323,8 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
           If the server&apos;s address, port, or password changed, save the new
           ones with:
         </Text>
-        <Text dimColor> loopy --address &lt;ip&gt; --port &lt;n&gt; --password</Text>
-        <Text dimColor> loopy --reset (clear everything and start over)</Text>
+        <Text dimColor> atlas --address &lt;ip&gt; --port &lt;n&gt; --password</Text>
+        <Text dimColor> atlas --reset (clear everything and start over)</Text>
         <Text dimColor>Press any key to exit</Text>
       </Box>
     );

@@ -11,7 +11,7 @@ import {
   rotateKey,
   unlockCipher,
   type SecretsEnvelope,
-} from "@loopycode/shared";
+} from "@atlasagents/shared";
 import { Mutex } from "./mutex.js";
 import {
   CONFIG_REL_PATH,
@@ -33,7 +33,7 @@ import {
  * Server-wide configuration manager for models, timeouts, and behavior settings.
  *
  * **Responsibility:**
- * - Reads/writes `~/.loopycode/user-data/config.json`
+ * - Reads/writes `./user-data/config.json` relative to the server process cwd
  * - Validates all configuration values with type checking and ranges
  * - Provides getter methods for Agent, Subagent, and other services
  * - Notifies listeners when model changes occur (for cache invalidation)
@@ -262,7 +262,7 @@ export class ConfigManager implements IConfigManager {
     // (`providers` is empty) AND no passphrase has been established this
     // process (`!isUnlocked()`). That's exactly a fresh, standalone process
     // that never called unlockOrSetupProvidersCipher — notably
-    // `loopy-detect-hardware --write` — which otherwise failed every write
+    // `atlas-detect-hardware --write` — which otherwise failed every write
     // with ConfigCipherLockedError for a field with no secret in it.
     //
     // Once a passphrase HAS been established (isUnlocked() is true — e.g.
@@ -377,7 +377,7 @@ export class ConfigManager implements IConfigManager {
    *    port under the very same key/salt as this method protects
    *    `providers` under. Prompting a second time for the same passphrase
    *    would be redundant, so this returns immediately. Standalone callers
-   *    that never unlock anything else first (`loopy-detect-hardware
+   *    that never unlock anything else first (`atlas-detect-hardware
    *    --write`, most unit tests) are unaffected — `isUnlocked()` is false
    *    for them, so they fall through to the normal prompting flow below.
    * 1. **No config file yet** (first run), or a file with no
@@ -858,7 +858,7 @@ export class ConfigManager implements IConfigManager {
    * @remarks
    * Undefined means "not configured" — callers should fall back to Ollama's
    * own default (4096) rather than guessing a value. Set via
-   * `loopy-detect-hardware --write` or `/set numCtx`.
+   * `atlas-detect-hardware --write` or `/set numCtx`.
    *
    * @returns Configured `num_ctx` in tokens, or `undefined` if unset.
    */

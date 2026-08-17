@@ -1,5 +1,5 @@
 /**
- * Vitest configuration for the LoopyCode _Test_ suite.
+ * Vitest configuration for the AtlasAgents _Test_ suite.
  *
  * @remarks
  * This config covers three test layers housed in this folder:
@@ -15,7 +15,7 @@
  * TypeScript source, so we strip the `.js` suffix via a regex alias and let
  * Vite find the matching `.ts` file automatically.
  *
- * The `@loopycode/shared` workspace package is aliased directly to its
+ * The `@atlasagents/shared` workspace package is aliased directly to its
  * TypeScript source so we never need a pre-built dist/ for unit/integration
  * tests.
  */
@@ -116,11 +116,11 @@ export default defineConfig({
       { find: /^(.+)\.js$/, replacement: "$1" },
 
       /**
-       * Map the `@loopycode/shared` package to its TypeScript source directly.
+       * Map the `@atlasagents/shared` package to its TypeScript source directly.
        * This avoids requiring a prior `tsc` build of the shared package.
        */
       {
-        find: "@loopycode/shared",
+        find: "@atlasagents/shared",
         replacement: path.resolve(
           __dirname,
           "../packages/shared/src/index.ts",

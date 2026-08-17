@@ -71,7 +71,7 @@ const writeManifest = async (
 
 describe("scanModelStorage", () => {
   it("splits shared vs. unique blob bytes across two tags sharing one blob (normal)", async () => {
-    const root = await mkTempDir("loopy-model-storage-");
+    const root = await mkTempDir("atlas-model-storage-");
     const manifestsDir = path.join(root, "manifests");
     const blobsDir = path.join(root, "blobs");
     await fs.mkdir(blobsDir, { recursive: true });
@@ -112,7 +112,7 @@ describe("scanModelStorage", () => {
   });
 
   it("prefixes a non-library namespace and leaves library unprefixed (normal)", async () => {
-    const root = await mkTempDir("loopy-model-storage-");
+    const root = await mkTempDir("atlas-model-storage-");
     const manifestsDir = path.join(root, "manifests");
     const blobsDir = path.join(root, "blobs");
     await fs.mkdir(blobsDir, { recursive: true });
@@ -127,7 +127,7 @@ describe("scanModelStorage", () => {
   });
 
   it("finds orphaned blobs, including interrupted-pull -partial files (normal — the headline scenario)", async () => {
-    const root = await mkTempDir("loopy-model-storage-");
+    const root = await mkTempDir("atlas-model-storage-");
     const manifestsDir = path.join(root, "manifests");
     const blobsDir = path.join(root, "blobs");
     await fs.mkdir(blobsDir, { recursive: true });
@@ -152,7 +152,7 @@ describe("scanModelStorage", () => {
   });
 
   it("skips a malformed (invalid JSON) manifest and counts it, without failing the scan (boundary)", async () => {
-    const root = await mkTempDir("loopy-model-storage-");
+    const root = await mkTempDir("atlas-model-storage-");
     const manifestsDir = path.join(root, "manifests");
     const blobsDir = path.join(root, "blobs");
     await fs.mkdir(blobsDir, { recursive: true });
@@ -170,7 +170,7 @@ describe("scanModelStorage", () => {
   });
 
   it("skips a manifest with no recognizable digests (boundary)", async () => {
-    const root = await mkTempDir("loopy-model-storage-");
+    const root = await mkTempDir("atlas-model-storage-");
     const manifestsDir = path.join(root, "manifests");
     await fs.mkdir(path.join(root, "blobs"), { recursive: true });
     await writeManifest(manifestsDir, "registry.ollama.ai", "library", "empty", "latest", {});
@@ -181,7 +181,7 @@ describe("scanModelStorage", () => {
   });
 
   it("returns empty results (never throws) when manifests/ and blobs/ don't exist (error)", async () => {
-    const root = await mkTempDir("loopy-model-storage-");
+    const root = await mkTempDir("atlas-model-storage-");
 
     const result = await scanModelStorage(root);
     expect(result.models).toEqual([]);
@@ -190,7 +190,7 @@ describe("scanModelStorage", () => {
   });
 
   it("de-duplicates a manifest referencing the same digest in config and layers (boundary)", async () => {
-    const root = await mkTempDir("loopy-model-storage-");
+    const root = await mkTempDir("atlas-model-storage-");
     const manifestsDir = path.join(root, "manifests");
     const blobsDir = path.join(root, "blobs");
     await fs.mkdir(blobsDir, { recursive: true });
@@ -212,7 +212,7 @@ describe("resolveModelsDir", () => {
   });
 
   it("prefers OLLAMA_MODELS when its manifests/ subdirectory exists (normal)", async () => {
-    const envDir = await mkTempDir("loopy-model-storage-env-");
+    const envDir = await mkTempDir("atlas-model-storage-env-");
     await fs.mkdir(path.join(envDir, "manifests"), { recursive: true });
     process.env.OLLAMA_MODELS = envDir;
 
@@ -221,7 +221,7 @@ describe("resolveModelsDir", () => {
   });
 
   it("falls through to ~/.ollama/models when OLLAMA_MODELS is unset (normal)", async () => {
-    const homeDir = await mkTempDir("loopy-model-storage-home-");
+    const homeDir = await mkTempDir("atlas-model-storage-home-");
     await fs.mkdir(path.join(homeDir, ".ollama", "models", "manifests"), { recursive: true });
     mockHomedir.value = homeDir;
 
@@ -234,8 +234,8 @@ describe("resolveModelsDir", () => {
   });
 
   it("falls through to the next candidate when OLLAMA_MODELS points nowhere real (boundary — ENOENT)", async () => {
-    process.env.OLLAMA_MODELS = path.join(os.tmpdir(), "loopy-does-not-exist-xyz");
-    const homeDir = await mkTempDir("loopy-model-storage-home-");
+    process.env.OLLAMA_MODELS = path.join(os.tmpdir(), "atlas-does-not-exist-xyz");
+    const homeDir = await mkTempDir("atlas-model-storage-home-");
     await fs.mkdir(path.join(homeDir, ".ollama", "models", "manifests"), { recursive: true });
     mockHomedir.value = homeDir;
 
@@ -250,7 +250,7 @@ describe("resolveModelsDir", () => {
     if (process.getuid && process.getuid() === 0) {
       return;
     }
-    const homeDir = await mkTempDir("loopy-model-storage-home-");
+    const homeDir = await mkTempDir("atlas-model-storage-home-");
     const restrictedModels = path.join(homeDir, ".ollama", "models");
     await fs.mkdir(restrictedModels, { recursive: true });
     await fs.chmod(restrictedModels, 0o000);
@@ -300,7 +300,7 @@ describe("buildModelStorageReport", () => {
   });
 
   it("reports unavailable with a helpful reason when the directory can't be found (boundary)", async () => {
-    mockHomedir.value = path.join(os.tmpdir(), "loopy-nonexistent-home-xyz");
+    mockHomedir.value = path.join(os.tmpdir(), "atlas-nonexistent-home-xyz");
     const report = await buildModelStorageReport("http://localhost:11434");
     expect(report.available).toBe(false);
     if (!report.available) {
@@ -309,7 +309,7 @@ describe("buildModelStorageReport", () => {
   });
 
   it("scans and reports totals for a local, readable directory (normal)", async () => {
-    const homeDir = await mkTempDir("loopy-model-storage-home-");
+    const homeDir = await mkTempDir("atlas-model-storage-home-");
     const modelsDir = path.join(homeDir, ".ollama", "models");
     await fs.mkdir(path.join(modelsDir, "blobs"), { recursive: true });
     await writeBlob(path.join(modelsDir, "blobs"), "sha256-a", 100);
@@ -333,7 +333,7 @@ describe("buildModelStorageReport", () => {
   });
 
   it("treats an undefined base URL as local (boundary)", async () => {
-    const homeDir = await mkTempDir("loopy-model-storage-home-");
+    const homeDir = await mkTempDir("atlas-model-storage-home-");
     await fs.mkdir(path.join(homeDir, ".ollama", "models", "manifests"), { recursive: true });
     mockHomedir.value = homeDir;
 

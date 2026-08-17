@@ -68,7 +68,7 @@ const printSyncResult = (syncedCount: number): void => {
  * ```ts
  * await handleSkills("list", "", skills, connection);
  * await handleSkills("add", "testing", skills, connection);
- * await handleSkills("sync", "", skills, connection); // default ~/.agent-cli/skills/
+ * await handleSkills("sync", "", skills, connection); // default ~/.atlasagents/skills/
  * await handleSkills("sync", "/Users/john/my-skills", skills, connection);
  * ```
  */
@@ -102,7 +102,7 @@ export const handleSkills = async (
     }
     case "sync": {
       // Optional path argument: sync from a custom directory instead of
-      // the default ~/.agent-cli/skills/. Empty arg keeps default behavior.
+      // the default ~/.atlasagents/skills/. Empty arg keeps default behavior.
       const rawPath = arg.trim();
       let dirPath: string | undefined;
       if (rawPath) {

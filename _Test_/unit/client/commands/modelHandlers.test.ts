@@ -11,7 +11,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { handleModels } from "../../../../packages/client/src/commands/modelHandlers.js";
 import type { Connection } from "../../../../packages/client/src/connection/index.js";
-import type { ModelStorageReport } from "@loopycode/shared";
+import type { ModelStorageReport } from "@atlasagents/shared";
 
 const printSuccess = vi.fn();
 const printError = vi.fn();

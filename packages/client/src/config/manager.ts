@@ -11,12 +11,13 @@
  */
 
 import * as fs from "node:fs";
-import { decryptSecrets, encryptSecrets } from "@loopycode/shared";
+import { decryptSecrets, encryptSecrets } from "@atlasagents/shared";
 import type { Config, SecretConfigFields, StoredConfig } from "./types.js";
 import {
   CONFIG_DIR,
   CONFIG_FILE,
   DEFAULT_CONFIG,
+  LEGACY_CONFIG_DIR,
   omitSecretFields,
 } from "./types.js";
 import { configNeedsPersist, mergeConfigFromDisk } from "./parsing.js";
@@ -46,7 +47,7 @@ export const hasConfigFile = (): boolean => fs.existsSync(CONFIG_FILE);
  *
  * An empty password is the signal, because the server rejects unauthenticated
  * clients outright: a blank password means "never configured" (fresh install)
- * or "deliberately cleared" (`loopycode --reset`), and both should land the user in
+ * or "deliberately cleared" (`atlas --reset`), and both should land the user in
  * the setup wizard rather than in a doomed connection attempt.
  *
  * @param config - A loaded configuration object.
@@ -79,27 +80,47 @@ export const getDefaultConfig = (): Config => ({
 });
 
 /**
- * Creates ~/.agent-cli/ if it does not exist yet.
+ * Copies `~/.agent-cli` into `~/.atlasagents` when the new directory is absent.
  *
  * @remarks
- * This function ensures the config directory exists before reading or writing
- * configuration files. It creates parent directories as needed and does not
- * error if the directory already exists.
+ * Copy, not move: the operator can still fall back to the old CLI until they
+ * delete the legacy folder themselves. Failures are ignored so a half-copied
+ * tree still lets {@link ensureDirs} create a usable empty directory.
+ */
+const migrateLegacyConfigDir = (): void => {
+  if (fs.existsSync(CONFIG_DIR) || !fs.existsSync(LEGACY_CONFIG_DIR)) {
+    return;
+  }
+  try {
+    fs.cpSync(LEGACY_CONFIG_DIR, CONFIG_DIR, { recursive: true });
+  } catch {
+    // ensureDirs will mkdir the destination; a partial copy is still better
+    // than refusing to start.
+  }
+};
+
+/**
+ * Creates ~/.atlasagents/ if it does not exist yet.
+ *
+ * @remarks
+ * Copies a leftover `~/.agent-cli` tree first (one-time rename migration),
+ * then creates the destination so later reads/writes never fail on ENOENT.
  *
  * @example
  * ensureDirs(); // Safe to call multiple times
  * fs.writeFileSync(CONFIG_FILE, "{}");
  */
 export const ensureDirs = (): void => {
+  migrateLegacyConfigDir();
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
 };
 
 /**
- * Loads the CLI configuration from ~/.agent-cli/config.json.
+ * Loads the CLI configuration from ~/.atlasagents/config.json.
  *
  * @remarks
  * This function loads configuration from disk with the following behavior:
- * - Ensures ~/.agent-cli/ directory exists
+ * - Ensures ~/.atlasagents/ directory exists (migrating ~/.agent-cli if needed)
  * - If config.json doesn't exist, writes DEFAULT_CONFIG and returns it
  * - Reads config.json as UTF-8 text
  * - Parses JSON and merges with DEFAULT_CONFIG (fills missing keys)
@@ -168,11 +189,11 @@ export const loadConfig = (): Config => {
 };
 
 /**
- * Persists a Config object to ~/.agent-cli/config.json as formatted JSON.
+ * Persists a Config object to ~/.atlasagents/config.json as formatted JSON.
  *
  * @remarks
  * This function:
- * - Ensures ~/.agent-cli/ directory exists
+ * - Ensures ~/.atlasagents/ directory exists
  * - Stringifies the config object with 2-space indentation
  * - Writes the JSON string to config.json, replacing any existing file
  *

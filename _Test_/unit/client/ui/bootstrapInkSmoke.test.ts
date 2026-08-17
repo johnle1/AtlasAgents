@@ -45,7 +45,7 @@ describe("BootstrapApp smoke", () => {
         onSaveHistory: vi.fn(),
       }),
     );
-    expect(stripAnsi(tree.lastFrame() ?? "")).toContain("Welcome to LoopyCode");
+    expect(stripAnsi(tree.lastFrame() ?? "")).toContain("Welcome to AtlasAgents");
     tree.unmount();
   });
 });

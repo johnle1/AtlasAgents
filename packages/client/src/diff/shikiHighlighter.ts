@@ -13,7 +13,7 @@
  *
  * @param code - Source text to colorize.
  * @param lang - Shiki language id (from {@link detectLang}).
- * @param theme - Shiki theme name (from the active LoopyCode UI theme).
+ * @param theme - Shiki theme name (from the active AtlasAgents UI theme).
  * @returns Promise of an ANSI-colored string (often with a trailing newline).
  */
 type CodeToANSI = (

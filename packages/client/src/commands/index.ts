@@ -1,5 +1,5 @@
 /**
- * Slash-command router for the LoopyCode CLI REPL.
+ * Slash-command router for the AtlasAgents CLI REPL.
  *
  * @remarks
  * {@link CommandHandler} sits between user input and task submission: lines that

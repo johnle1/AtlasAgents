@@ -61,7 +61,7 @@ const startEchoServer = async (): Promise<{
   fingerprint256: string;
   requestCount: () => number;
 }> => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-tls-integration-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-tls-integration-"));
   tempRoots.push(root);
   const cert = await loadOrCreateServerCert(root);
 

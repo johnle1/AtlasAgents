@@ -9,7 +9,7 @@
  *                          loadOrCreateServerCert, @rsocket/core — a real TCP
  *                          socket pair on 127.0.0.1 and a real TLS 1.3 handshake.
  * Mocks                  : none. `HOME` is redirected to a temp dir so the real
- *                          on-disk `~/.agent-cli/config.json` pin store is
+ *                          on-disk `~/.atlasagents/config.json` pin store is
  *                          exercised without touching the developer's own.
  *
  * What this test catches that the existing tests miss
@@ -73,7 +73,7 @@ const tempRoots: string[] = [];
 
 beforeAll(async () => {
   originalHome = process.env.HOME;
-  tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "loopy-tofu-integration-"));
+  tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-tofu-integration-"));
   process.env.HOME = tempHome;
 
   const fingerprintModule = await import(
@@ -128,7 +128,7 @@ const startEchoServer = async (
 }> => {
   const root =
     opts.certRoot ??
-    (await fsp.mkdtemp(path.join(os.tmpdir(), "loopy-tofu-cert-")));
+    (await fsp.mkdtemp(path.join(os.tmpdir(), "atlas-tofu-cert-")));
   if (!opts.certRoot) {
     tempRoots.push(root);
   }

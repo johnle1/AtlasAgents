@@ -1,6 +1,6 @@
-# LoopyCode `_Test_/` — Test Suite
+# AtlasAgents `_Test_/` — Test Suite
 
-A dedicated folder for **unit**, **integration**, and **system** tests for the LoopyCode monorepo.
+A dedicated folder for **unit**, **integration**, and **system** tests for the AtlasAgents monorepo.
 All tests use **Vitest** and are structured as a three-layer pyramid.
 
 **All package tests live here.** Co-located `*.test.ts` files under `packages/client` and
@@ -32,6 +32,7 @@ _Test_/
 │   │   ├── configManagerProvidersCipher.test.ts — provider-secrets encryption, passphrase retry/reset
 │   │   ├── configProviders.test.ts    — ConfigManager provider extensions (add/remove/setProvider)
 │   │   ├── configUnlock.test.ts       — client unlockOrSetupConfigCipher (first-run, migration, retry)
+│   │   ├── configDirMigration.test.ts — copies leftover ~/.agent-cli into ~/.atlasagents
 │   │   ├── certificateStore.test.ts   — server TLS certificate store (self-signed cert generation)
 │   │   ├── fingerprintStore.test.ts   — TOFU fingerprint pinning for TLS server certs
 │   │   └── routerSanitize.test.ts     — stripProviderSecrets (keeps API keys out of responses)
@@ -61,7 +62,7 @@ _Test_/
 │   │   ├── connectionHealthCheck.test.ts — runHealthCheck timer cleanup (Bugbot fix)
 │   │   ├── historySanitize.test.ts    — sanitizeHistoryLine (pure fn, no mocks)
 │   │   ├── mcpBridge.test.ts          — callTokenSaveTool, formatToolContentAsString
-│   │   ├── mcpToolSchema.test.ts      — mcpToolToLoopySchema mapping
+│   │   ├── mcpToolSchema.test.ts      — mcpToolToAtlasSchema mapping
 │   │   ├── spinnerSync.test.ts        — spinnerForStatusFrame (all AGENT_THINKING_STAGES)
 │   │   ├── statusVisual.test.ts       — resolveWorkerVisual, resolveQueueVisual, etc.
 │   │   ├── taskBoardLayout.test.ts    — wrapTaskLine, buildTaskBoardLines, borderWidth
@@ -90,7 +91,7 @@ _Test_/
 │
 ├── system/                            ← Layer 3: spawns the compiled binary (2 files)
 │   ├── cli.e2e.test.ts                — --help, flags, invalid/boundary ports, bad server env
-│   └── cliConfigLifecycle.e2e.test.ts — config bootstrap + encryption-at-rest on a real ~/.agent-cli/
+│   └── cliConfigLifecycle.e2e.test.ts — config bootstrap + encryption-at-rest on a real ~/.atlasagents/
 │
 ├── vitest.config.ts                   — Vitest + Vite alias config
 ├── package.json                       — devDeps (vitest, execa, strip-ansi)
@@ -126,7 +127,7 @@ them on-the-fly). You do NOT need to run `tsc` first.
 
 ### System tests — build required
 
-System tests spawn the compiled `loopycode` binary. Build it first:
+System tests spawn the compiled `atlas` binary. Build it first:
 
 ```bash
 cd packages/client
@@ -190,13 +191,13 @@ resolves these to `.ts` files automatically via the regex alias in `vitest.confi
 { find: /^(.+)\.js$/, replacement: '$1' }
 ```
 
-### `@loopycode/shared` aliasing
+### `@atlasagents/shared` aliasing
 
 Rather than building the shared package first, the vitest config maps the import directly
 to the TypeScript source:
 
 ```typescript
-{ find: '@loopycode/shared', replacement: '../packages/shared/src/index.ts' }
+{ find: '@atlasagents/shared', replacement: '../packages/shared/src/index.ts' }
 ```
 
 ### Testability refactors for Bugbot fixes

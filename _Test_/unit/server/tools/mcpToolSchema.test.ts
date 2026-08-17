@@ -3,11 +3,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { mcpToolToLoopySchema } from "../../../../packages/server/src/orchestration/mcp/mcpToolSchema.js";
+import { mcpToolToAtlasSchema } from "../../../../packages/server/src/orchestration/mcp/mcpToolSchema.js";
 
-describe("mcpToolToLoopySchema", () => {
-  it("maps MCP tool shape to Loopy ToolSchema", () => {
-    const schema = mcpToolToLoopySchema({
+describe("mcpToolToAtlasSchema", () => {
+  it("maps MCP tool shape to AtlasAgents ToolSchema", () => {
+    const schema = mcpToolToAtlasSchema({
       name: "tokensave_search",
       description: "Search the codebase",
       inputSchema: {
@@ -27,7 +27,7 @@ describe("mcpToolToLoopySchema", () => {
   });
 
   it("defaults description to empty string when missing", () => {
-    const schema = mcpToolToLoopySchema({
+    const schema = mcpToolToAtlasSchema({
       name: "tokensave_status",
       inputSchema: { type: "object" },
     });
@@ -35,7 +35,7 @@ describe("mcpToolToLoopySchema", () => {
   });
 
   it("defaults properties to empty object when missing", () => {
-    const schema = mcpToolToLoopySchema({
+    const schema = mcpToolToAtlasSchema({
       name: "tokensave_status",
       inputSchema: { type: "object" },
     });
@@ -43,7 +43,7 @@ describe("mcpToolToLoopySchema", () => {
   });
 
   it("defaults required to empty array when missing", () => {
-    const schema = mcpToolToLoopySchema({
+    const schema = mcpToolToAtlasSchema({
       name: "tokensave_status",
       inputSchema: { type: "object", properties: {} },
     });
@@ -51,7 +51,7 @@ describe("mcpToolToLoopySchema", () => {
   });
 
   it("coerces required entries to strings", () => {
-    const schema = mcpToolToLoopySchema({
+    const schema = mcpToolToAtlasSchema({
       name: "tokensave_search",
       inputSchema: {
         type: "object",
@@ -63,7 +63,7 @@ describe("mcpToolToLoopySchema", () => {
   });
 
   it("handles empty inputSchema object", () => {
-    const schema = mcpToolToLoopySchema({
+    const schema = mcpToolToAtlasSchema({
       name: "tokensave_search",
       description: "Search",
       inputSchema: {},
@@ -74,7 +74,7 @@ describe("mcpToolToLoopySchema", () => {
   });
 
   it("handles non-object properties gracefully", () => {
-    const schema = mcpToolToLoopySchema({
+    const schema = mcpToolToAtlasSchema({
       name: "tokensave_search",
       inputSchema: {
         type: "object",

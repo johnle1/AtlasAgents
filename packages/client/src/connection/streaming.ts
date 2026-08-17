@@ -10,7 +10,7 @@
  */
 
 import type { Payload, RSocket } from "@rsocket/core";
-import type { TaskApprovalMode, TaskStreamPayload } from "@loopycode/shared";
+import type { TaskApprovalMode, TaskStreamPayload } from "@atlasagents/shared";
 import type { TaskFrame } from "../types/frames.js";
 import { decodeFrame } from "../types/frames.js";
 import type { Config } from "../config/index.js";

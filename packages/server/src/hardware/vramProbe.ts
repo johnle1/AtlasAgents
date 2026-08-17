@@ -4,7 +4,7 @@
  *
  * @remarks
  * Every probe here is exec/sysfs based and used **only from the CLI**
- * (`detectHardware.ts` → `loopy-detect-hardware`). Nothing in this module is
+ * (`detectHardware.ts` → `atlas-detect-hardware`). Nothing in this module is
  * imported by the running server — hardware probing must stay an explicit,
  * user-triggered action, never something that happens on every boot.
  *

@@ -9,7 +9,7 @@ import type { OllamaClient } from "../ollama/client.js";
 import type { ProviderRegistry } from "../providers/providerRegistry.js";
 import type { IConfigManager } from "../orchestration/interfaces/configInterfaces.js";
 import type { MaxSubagentsParam } from "../orchestration/maxSubagents.js";
-import type { RouteId, StreamKind, TaskApprovalMode } from "@loopycode/shared";
+import type { RouteId, StreamKind, TaskApprovalMode } from "@atlasagents/shared";
 
 /**
  * Represents an authenticated TCP/RSocket session for routing and cleanup.
@@ -60,7 +60,7 @@ export interface Session {
  * `kind: "task"` stream payload shape.
  *
  * @remarks
- * Sourced from `@loopycode/shared` so the client can validate route/stream
+ * Sourced from `@atlasagents/shared` so the client can validate route/stream
  * names against the exact same union the server enforces, instead of
  * sending unchecked strings. See `packages/shared/src/protocol/serverProtocol.ts`.
  */
@@ -68,13 +68,13 @@ export type {
   RouteId,
   StreamKind,
   TaskStreamPayload,
-} from "@loopycode/shared";
+} from "@atlasagents/shared";
 export {
   ROUTE_IDS,
   isRouteId,
   STREAM_KINDS,
   isStreamKind,
-} from "@loopycode/shared";
+} from "@atlasagents/shared";
 
 /**
  * Async function signature for one command route implementation.

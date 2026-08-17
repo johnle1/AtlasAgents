@@ -8,7 +8,7 @@
  * only way to change connection settings while the client cannot reach the
  * server, so it must trigger on exactly the intended flags — and, just as
  * importantly, must *not* trigger on the pre-existing session flags, which
- * would silently turn a one-off `loopycode --host x` into a permanent change.
+ * would silently turn a one-off `atlas --host x` into a permanent change.
  *
  * `parseCliArgs` takes a full argv, so every case prefixes the two entries
  * Node supplies (`node` and the script path) that the parser slices off.
@@ -23,7 +23,7 @@ import {
 import type { Config } from "../../../../packages/client/src/config/index.js";
 
 /** Builds an argv the way Node presents it, so tests read as typed commands. */
-const argv = (...args: string[]): string[] => ["node", "loopycode", ...args];
+const argv = (...args: string[]): string[] => ["node", "atlas", ...args];
 
 describe("parseCliArgs — session override mode (unchanged behaviour)", () => {
   it("keeps --host and --port as session overrides without entering repair mode", () => {
@@ -49,8 +49,8 @@ describe("parseCliArgs — session override mode (unchanged behaviour)", () => {
     expect(result.overrides).toEqual({ server: "10.0.0.7", port: 8001 });
   });
 
-  it("accepts the positional 'start' without producing overrides", () => {
-    const result = parseCliArgs(argv("start"));
+  it("accepts the positional 'run' as an alias of start", () => {
+    const result = parseCliArgs(argv("run"));
     expect(result.repair).toBeUndefined();
     expect(result.overrides).toEqual({});
   });
@@ -189,6 +189,10 @@ describe("parseCliArgs — validation", () => {
     expect(parseCliArgs(argv("--password", "start")).repair?.password).toBe(true);
   });
 
+  it("still allows the 'run' positional after --password", () => {
+    expect(parseCliArgs(argv("--password", "run")).repair?.password).toBe(true);
+  });
+
   it("rejects an empty --address", () => {
     expect(() => parseCliArgs(argv("--address", ""))).toThrow(/invalid --address/i);
   });
@@ -226,7 +230,7 @@ describe("printCliHelp", () => {
     printCliHelp();
     expect(spy).toHaveBeenCalled();
     const joined = spy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(joined).toMatch(/Usage: loopycode/i);
+    expect(joined).toMatch(/Usage: atlas/i);
     spy.mockRestore();
   });
 });

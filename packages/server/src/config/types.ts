@@ -52,7 +52,7 @@ export const EXISTING_PASSPHRASE_LABEL = "Enter your server config passphrase: "
  *
  * **Tuning:**
  * These defaults represent sensible starting points for a typical local
- * LoopyCode development setup. Users can override any value via `/set` command.
+ * AtlasAgents development setup. Users can override any value via `/set` command.
  */
 export const SERVER_DEFAULTS = {
   /**
@@ -282,7 +282,7 @@ export type ServerConfig = {
    *
    * Deliberately has no default: when unset, the effective value falls back
    * to Ollama's own default (4096) rather than a guessed number. Set via
-   * `loopy-detect-hardware --write` (sized to detected VRAM) or `/set numCtx`.
+   * `atlas-detect-hardware --write` (sized to detected VRAM) or `/set numCtx`.
    */
   numCtx?: number;
 

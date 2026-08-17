@@ -20,7 +20,7 @@ import type {
 } from "../types.js";
 import { parsePasswordFromMetadata } from "../types.js";
 import { noopStreamSubscriber } from "./utils.js";
-import { normalizeTaskApprovalMode } from "@loopycode/shared";
+import { normalizeTaskApprovalMode } from "@atlasagents/shared";
 
 /**
  * Creates a handler for a single requestStream frame.

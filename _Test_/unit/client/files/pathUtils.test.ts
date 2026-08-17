@@ -20,7 +20,7 @@ describe("isInsideRoot", () => {
   });
 
   it("returns false for a path outside the root (error)", () => {
-    expect(isInsideRoot("/proj", "/tmp/outside-loopy.ts")).toBe(false);
+    expect(isInsideRoot("/proj", "/tmp/outside-atlas.ts")).toBe(false);
   });
 });
 

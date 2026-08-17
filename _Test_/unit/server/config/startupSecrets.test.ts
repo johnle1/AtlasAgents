@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { lockCipher } from "@loopycode/shared";
+import { lockCipher } from "@atlasagents/shared";
 import { ConfigManager } from "../../../../packages/server/src/config/index.js";
 import {
   findExistingEnvelope,
@@ -25,7 +25,7 @@ const tempRoots: string[] = [];
 
 const makeRoot = async (): Promise<string> => {
   const root = await fs.mkdtemp(
-    path.join(os.tmpdir(), "loopy-startup-secrets-"),
+    path.join(os.tmpdir(), "atlas-startup-secrets-"),
   );
   tempRoots.push(root);
   return root;

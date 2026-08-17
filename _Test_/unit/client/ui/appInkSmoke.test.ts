@@ -19,7 +19,7 @@ vi.mock("../../../../packages/client/src/config/index.js", () => ({
 }));
 
 vi.mock("../../../../packages/client/src/renderer/banner.js", () => ({
-  buildBannerLines: () => ["LoopyCode banner"],
+  buildBannerLines: () => ["AtlasAgents banner"],
 }));
 
 vi.mock("../../../../packages/client/src/utils/pathDisplay.js", () => ({

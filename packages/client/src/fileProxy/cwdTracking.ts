@@ -18,7 +18,7 @@ import * as path from "node:path";
  * Chosen to be unlikely in normal tool output. Handlers use the **last**
  * occurrence so nested or echoed markers do not steal the real trailing path.
  */
-export const CWD_MARKER = "##LOOPY_CWD##";
+export const CWD_MARKER = "##ATLAS_CWD##";
 
 /**
  * Whether the host should use `cmd.exe` wrapping instead of POSIX `/bin/sh`.
@@ -36,7 +36,7 @@ export const isWindowsShell = (): boolean => process.platform === "win32";
  *
  * **Windows:** `setlocal enabledelayedexpansion`, run the command, capture
  * `!errorlevel!` and `!cd!`, then `exit /b`. Do **not** call `endlocal` before
- * exit — that would discard `__loopy_status` before the exit code is applied.
+ * exit — that would discard `__atlas_status` before the exit code is applied.
  *
  * @param command - Original user/agent command line.
  * @param isWindows - Force Windows syntax; defaults to {@link isWindowsShell}.
@@ -45,7 +45,7 @@ export const isWindowsShell = (): boolean => process.platform === "win32";
  * @example
  * ```ts
  * wrapCommandForCwdTracking("cd src", false);
- * // → `{ cd src; }; __loopy_status=$?; printf '%s' '##LOOPY_CWD##'"$(pwd)"; exit $__loopy_status`
+ * // → `{ cd src; }; __atlas_status=$?; printf '%s' '##ATLAS_CWD##'"$(pwd)"; exit $__atlas_status`
  * ```
  */
 export const wrapCommandForCwdTracking = (
@@ -54,11 +54,11 @@ export const wrapCommandForCwdTracking = (
 ): string => {
   if (isWindows) {
     // Delayed expansion required so !errorlevel! / !cd! reflect post-command state.
-    // Intentionally no `endlocal` before `exit /b` — it would drop __loopy_status.
-    return `setlocal enabledelayedexpansion & ${command} & set __loopy_status=!errorlevel! & echo ${CWD_MARKER}!cd! & exit /b !__loopy_status!`;
+    // Intentionally no `endlocal` before `exit /b` — it would drop __atlas_status.
+    return `setlocal enabledelayedexpansion & ${command} & set __atlas_status=!errorlevel! & echo ${CWD_MARKER}!cd! & exit /b !__atlas_status!`;
   }
 
-  return `{ ${command}; }; __loopy_status=$?; printf '%s' '${CWD_MARKER}'"$(pwd)"; exit $__loopy_status`;
+  return `{ ${command}; }; __atlas_status=$?; printf '%s' '${CWD_MARKER}'"$(pwd)"; exit $__atlas_status`;
 };
 
 /**
@@ -84,7 +84,7 @@ export type CwdExtractionResult = {
  *
  * @example
  * ```ts
- * extractCwdFromOutput("list\n##LOOPY_CWD##/tmp\n");
+ * extractCwdFromOutput("list\n##ATLAS_CWD##/tmp\n");
  * → { cleanedStdout: "list\n", newCwd: "/tmp" } (after realpath when possible)
  * ```
  */

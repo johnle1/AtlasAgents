@@ -16,7 +16,7 @@
  *    silently dropped on the next `/set`.
  *
  * The two files share one process-global cipher key/salt (see
- * `@loopycode/shared`'s `configCipher.ts`) — `initializeCipher` picks a
+ * `@atlasagents/shared`'s `configCipher.ts`) — `initializeCipher` picks a
  * fresh salt, so whichever of `unlockOrSetupStartupCipher` (this module) or
  * `ConfigManager.unlockOrSetupProvidersCipher` runs first determines the
  * salt for *both* files. The startup sequence in `server/index.ts` always
@@ -36,7 +36,7 @@ import {
   initializeCipher,
   unlockCipher,
   type SecretsEnvelope,
-} from "@loopycode/shared";
+} from "@atlasagents/shared";
 import { atomicWriteJson } from "../utils/atomicWriteJson.js";
 import {
   CONFIG_REL_PATH,
@@ -93,7 +93,7 @@ const readEnvelopeField = async (
  * so an install that predates this file keeps its existing passphrase
  * instead of being treated as first-run.
  *
- * @param rootDir - Server data root (the directory `loopy-server` was launched from).
+ * @param rootDir - Server data root (the directory `atlas-server` was launched from).
  */
 export const findExistingEnvelope = async (
   rootDir: string,
@@ -211,7 +211,7 @@ const runUnlockAttempts = async (
 
 /**
  * The forgot-passphrase escape hatch, reachable only from
- * {@link unlockOrSetupStartupCipher} (i.e. only from `loopy-server start` —
+ * {@link unlockOrSetupStartupCipher} (i.e. only from `atlas-server start` —
  * never from repair mode; see that module's doc comment for why).
  *
  * @remarks
@@ -304,7 +304,7 @@ const offerStartupPassphraseReset = async (
 };
 
 /**
- * Unlocks (or sets up) the shared cipher, for `loopy-server start` only.
+ * Unlocks (or sets up) the shared cipher, for `atlas-server start` only.
  *
  * @remarks
  * Three cases:
@@ -382,7 +382,7 @@ export const unlockExistingStartupCipher = async (
   const envelope = await findExistingEnvelope(rootDir);
   if (!envelope) {
     throw new Error(
-      "No saved server config yet — run `loopy-server start` first.",
+      "No saved server config yet — run `atlas-server start` first.",
     );
   }
 

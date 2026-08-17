@@ -178,7 +178,7 @@ describe("hasTokenSaveIndex", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(path.join(tmpdir(), "loopycode-tokensave-"));
+    tmpDir = await mkdtemp(path.join(tmpdir(), "atlas-tokensave-"));
   });
 
   afterEach(async () => {

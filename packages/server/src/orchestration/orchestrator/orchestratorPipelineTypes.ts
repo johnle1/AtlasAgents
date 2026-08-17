@@ -24,7 +24,7 @@ import type { SessionInfo, TaskModelOverrides } from "../types.js";
 import type { Agent } from "../agent/agent.js";
 import type { TaskFrame } from "../../transport/frames.js";
 import type { IModelPlacementReporter } from "../../ollama/modelPlacement.js";
-import type { TaskApprovalMode } from "@loopycode/shared";
+import type { TaskApprovalMode } from "@atlasagents/shared";
 
 /**
  * Dependency injection container for the orchestrator pipeline.

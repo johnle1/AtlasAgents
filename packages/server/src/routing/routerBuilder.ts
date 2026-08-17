@@ -14,7 +14,7 @@
  */
 
 import { parseMaxSubagentsPayload } from "../orchestration/maxSubagents.js";
-import { normalizeTaskApprovalMode } from "@loopycode/shared";
+import { normalizeTaskApprovalMode } from "@atlasagents/shared";
 import type { PlanDecision } from "../orchestration/types.js";
 import { exploreCodebase } from "../orchestration/exploreCodebase.js";
 import type {
@@ -44,7 +44,7 @@ import { buildModelStorageReport } from "../ollama/modelStorage.js";
 import { isOrchestratorErrorReported } from "../orchestration/taskErrors.js";
 import { NotFoundError, ValidationError, AbortError } from "../errors/index.js";
 import {
-  mcpToolToLoopySchema,
+  mcpToolToAtlasSchema,
   type McpToolSyncPayload,
 } from "../orchestration/mcp/mcpToolSchema.js";
 import type { OllamaClient } from "../ollama/client.js";
@@ -519,7 +519,7 @@ function createMcpToolsSyncHandler(
     }
 
     const rawTools = Array.isArray(body.tools) ? body.tools : [];
-    perConnection.tokenSaveTools = rawTools.map(mcpToolToLoopySchema);
+    perConnection.tokenSaveTools = rawTools.map(mcpToolToAtlasSchema);
     return { synced: perConnection.tokenSaveTools.length };
   };
 }

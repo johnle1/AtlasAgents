@@ -27,7 +27,7 @@ describe("formatDisplayPath", () => {
   });
 
   it("leaves paths outside home unchanged (resolved)", () => {
-    const outside = path.resolve("/tmp/loopy-outside-test");
+    const outside = path.resolve("/tmp/atlas-outside-test");
     if (outside.startsWith(home + path.sep)) {
       return; // skip on unusual homedir layouts
     }

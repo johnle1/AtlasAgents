@@ -25,7 +25,7 @@ import {
   mergeConfig,
   normaliseKeepAlive,
 } from "../../../../packages/server/src/config/parsing.js";
-import { initializeCipher } from "@loopycode/shared";
+import { initializeCipher } from "@atlasagents/shared";
 
 describe("normaliseKeepAlive", () => {
   it("accepts a duration string with a unit (normal)", () => {
@@ -111,7 +111,7 @@ describe('ConfigManager.set("keepAlive", ...)', () => {
     manager: ConfigManager;
     root: string;
   }> => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-keepalive-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-keepalive-"));
     tempRoots.push(root);
     return { manager: new ConfigManager({ rootDir: root }), root };
   };

@@ -7,7 +7,7 @@
  * config when the server rejects the change.
  *
  * `config.js` is mocked because loadConfig/updateConfig write to the real
- * `~/.agent-cli/config.json` on disk — a real test run must never touch a
+ * `~/.atlasagents/config.json` on disk — a real test run must never touch a
  * developer's actual config file.
  */
 

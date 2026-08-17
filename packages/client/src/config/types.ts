@@ -10,7 +10,7 @@
 
 import * as path from "node:path";
 import * as os from "node:os";
-import type { SecretsEnvelope } from "@loopycode/shared";
+import type { SecretsEnvelope } from "@atlasagents/shared";
 import type { ApprovalMode, PersistedApprovalMode } from "./approvalMode.js";
 
 /**
@@ -149,10 +149,10 @@ export interface UiConfig {
 }
 
 /**
- * Complete CLI configuration persisted to ~/.agent-cli/config.json.
+ * Complete CLI configuration persisted to ~/.atlasagents/config.json.
  *
  * @remarks
- * This interface defines all configuration values for the LoopyCode client,
+ * This interface defines all configuration values for the AtlasAgents client,
  * including server connection settings, model parameters, timeouts, and UI
  * preferences. The config is loaded on startup and can be modified via CLI
  * commands or by editing the JSON file directly.
@@ -370,7 +370,7 @@ export interface Config {
  * Default configuration applied on first run or when config.json is missing.
  *
  * @remarks
- * These values are chosen for the loopycode use case specifically. They serve
+ * These values are chosen for the atlas use case specifically. They serve
  * as the template when the config file is missing and as the base layer when
  * merging disk JSON with DEFAULT_CONFIG.
  */
@@ -430,8 +430,18 @@ export const DEFAULT_CONFIG: Config = {
   serverFingerprints: {},
 };
 
-/** Config directory path (~/.agent-cli) where config, history, and skills live. */
-export const CONFIG_DIR = path.join(os.homedir(), ".agent-cli");
+/** Config directory path (~/.atlasagents) where config, history, and skills live. */
+export const CONFIG_DIR = path.join(os.homedir(), ".atlasagents");
+
+/**
+ * Pre-rename config directory (`~/.agent-cli`).
+ *
+ * @remarks
+ * {@link ensureDirs} copies this into {@link CONFIG_DIR} once, when the new
+ * directory does not exist yet, so existing passphrase, pins, skills, and
+ * history survive the AtlasAgents rename.
+ */
+export const LEGACY_CONFIG_DIR = path.join(os.homedir(), ".agent-cli");
 
 /** Full path to the JSON config file that Connection and /config read from. */
 export const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");

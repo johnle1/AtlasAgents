@@ -38,7 +38,7 @@ import {
   printProgress,
   resetPullProgress,
 } from "../../../../packages/client/src/renderer/modelOutput.js";
-import type { ModelStorageReport } from "@loopycode/shared";
+import type { ModelStorageReport } from "@atlasagents/shared";
 
 beforeEach(() => {
   appendBlock.mockClear();

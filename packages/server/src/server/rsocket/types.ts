@@ -5,7 +5,7 @@
  * These are the small, reusable building blocks that
  * {@link RSocketServer} depends on: the responder/sink shapes it must return
  * to the RSocket core, the per-connection bookkeeping record, and the two pure
- * functions that translate between LoopyCode's wire envelopes and raw
+ * functions that translate between AtlasAgents's wire envelopes and raw
  * `Buffer`s.
  */
 

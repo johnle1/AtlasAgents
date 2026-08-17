@@ -76,6 +76,16 @@ vi.mock("../../../../packages/client/src/theme/themeManager.js", () => ({
   getTheme: () => ({}),
 }));
 
+vi.mock("../../../../packages/client/src/skills/skills.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../../packages/client/src/skills/skills.js")
+  >();
+  return {
+    ...actual,
+    listSkills: () => ["demo"],
+  };
+});
+
 const fakeConn = (overrides: Partial<Connection> = {}): Connection =>
   ({
     sendCommand: vi.fn(async () => ({ message: "ok" })),
@@ -268,7 +278,7 @@ describe("handleSkills", () => {
 
 describe("workspace handlers", () => {
   it("handleCwd prints proxy cwd", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopy-cwd-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-cwd-"));
   try {
       const proxy = new LocalFileProxy(dir);
       handleCwd(proxy);
@@ -278,7 +288,7 @@ describe("workspace handlers", () => {
   });
 
   it("handleWorkspace set updates proxy root", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopy-ws-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-ws-"));
     try {
       const proxy = new LocalFileProxy(dir);
       const onPromptUpdate = vi.fn();

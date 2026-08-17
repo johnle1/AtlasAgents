@@ -4,7 +4,7 @@
  * @remarks
  * `assertSafeSkillName` is tested directly as a pure function rather than
  * through `addSkill`/`readSkill`, since those touch the real
- * `~/.agent-cli/skills` directory (SKILLS_DIR is derived from `os.homedir()`
+ * `~/.atlasagents/skills` directory (SKILLS_DIR is derived from `os.homedir()`
  * with no test-time override) — exercising them here would read/write the
  * developer's actual home directory as a side effect of running the suite.
  */

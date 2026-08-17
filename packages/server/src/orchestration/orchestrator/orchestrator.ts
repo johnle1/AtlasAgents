@@ -54,7 +54,7 @@ import type { MaxSubagentsParam } from "../maxSubagents.js";
 import type { SessionInfo, TaskModelOverrides } from "../types.js";
 import { runOrchestratorPipeline } from "./orchestratorPipeline.js";
 import type { IModelPlacementReporter } from "../../ollama/modelPlacement.js";
-import type { TaskApprovalMode } from "@loopycode/shared";
+import type { TaskApprovalMode } from "@atlasagents/shared";
 
 export class AgentOrchestrator {
   /**

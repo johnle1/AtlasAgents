@@ -9,7 +9,7 @@
  */
 
 import type { Payload, RSocket } from "@rsocket/core";
-import type { ClientOpResponse, ClientRoute } from "@loopycode/shared";
+import type { ClientOpResponse, ClientRoute } from "@atlasagents/shared";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 

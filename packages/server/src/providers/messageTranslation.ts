@@ -1,5 +1,5 @@
 /**
- * Translates LoopyCode's Ollama-native message/tool shapes to and from the
+ * Translates AtlasAgents's Ollama-native message/tool shapes to and from the
  * OpenAI-compatible `/v1/chat/completions` wire format used by vLLM and any
  * other OpenAI-compatible backend.
  *
@@ -50,7 +50,7 @@ export type OpenAiToolDefinition = {
  * name appears at most once between an assistant turn and its result, which
  * matches how {@link Subagent} drives its one-tool-per-turn ReAct loop.
  *
- * @param messages - Conversation turns in LoopyCode's internal Message shape.
+ * @param messages - Conversation turns in AtlasAgents's internal Message shape.
  * @returns Equivalent turns in OpenAI's `/v1/chat/completions` message shape.
  */
 export const toOpenAiMessages = (messages: Message[]): OpenAiChatMessage[] => {
@@ -121,7 +121,7 @@ export const toOpenAiMessages = (messages: Message[]): OpenAiChatMessage[] => {
 };
 
 /**
- * Wraps LoopyCode tool schemas in the OpenAI function-tool envelope.
+ * Wraps AtlasAgents tool schemas in the OpenAI function-tool envelope.
  *
  * @remarks
  * {@link ToolSchema} already matches OpenAI's `{ type: "function", function }`

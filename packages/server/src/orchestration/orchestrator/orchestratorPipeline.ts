@@ -18,7 +18,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { TaskFrame } from "../../transport/frames.js";
-import { clampUsage, estimateTokensFromText } from "@loopycode/shared";
+import { clampUsage, estimateTokensFromText } from "@atlasagents/shared";
 import { Agent } from "../agent/agent.js";
 import { Subagent } from "../subagent/subagent.js";
 import { modeLabelFromMaxAgents } from "../planHelpers.js";

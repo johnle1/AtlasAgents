@@ -62,7 +62,7 @@ describe("SetupWizard smoke", () => {
     const tree = render(
       React.createElement(SetupWizard, { onComplete: vi.fn() }),
     );
-    expect(stripAnsi(tree.lastFrame() ?? "")).toContain("Welcome to LoopyCode");
+    expect(stripAnsi(tree.lastFrame() ?? "")).toContain("Welcome to AtlasAgents");
     tree.unmount();
   });
 });

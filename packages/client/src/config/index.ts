@@ -28,7 +28,13 @@ export {
   formatApprovalModeLabel,
   approvalModeDisplay,
 } from "./approvalMode.js";
-export { HISTORY_FILE, SKILLS_DIR, APPROVAL_MODE_DISPLAY } from "./types.js";
+export {
+  HISTORY_FILE,
+  SKILLS_DIR,
+  APPROVAL_MODE_DISPLAY,
+  CONFIG_DIR,
+  LEGACY_CONFIG_DIR,
+} from "./types.js";
 export {
   ensureDirs,
   getConfig,

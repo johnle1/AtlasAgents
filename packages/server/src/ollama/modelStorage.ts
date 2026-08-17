@@ -28,7 +28,7 @@ import type {
   ModelStorageOrphan,
   ModelStorageReport,
   ModelStorageRow,
-} from "@loopycode/shared";
+} from "@atlasagents/shared";
 
 /** Where `resolveModelsDir` found the directory, for display in the report. */
 export type ModelsDirSource =

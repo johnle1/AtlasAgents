@@ -34,7 +34,7 @@ afterEach(async () => {
 
 describe("ExperienceRecorder", () => {
   it("records activity and persists on finish", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-exp-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-exp-"));
     tempRoots.push(root);
     const extract = vi.fn();
     const append = vi.fn();

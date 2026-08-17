@@ -18,7 +18,7 @@ afterEach(async () => {
 
 describe("SessionManager", () => {
   it("reads empty string when no session file exists", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-session-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-session-"));
     tempRoots.push(root);
     const session = new SessionManager({ rootDir: root });
     await expect(session.read()).resolves.toBe("");
@@ -26,7 +26,7 @@ describe("SessionManager", () => {
   });
 
   it("saveSnapshot, append, and clear round-trip", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-session-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-session-"));
     tempRoots.push(root);
     const session = new SessionManager({ rootDir: root });
 

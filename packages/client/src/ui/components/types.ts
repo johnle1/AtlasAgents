@@ -48,7 +48,7 @@ export type BannerProps = {
   agentModel: string;
   /** The model identifier assigned to background subagents. */
   subagentModel?: string;
-  /** Semantic version string of the current LoopyCode CLI application bundle. */
+  /** Semantic version string of the current AtlasAgents CLI application bundle. */
   version: string;
 };
 

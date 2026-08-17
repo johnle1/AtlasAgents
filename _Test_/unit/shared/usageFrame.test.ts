@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { decodeFrame, encodeFrame, type TaskFrame } from "@loopycode/shared";
+import { decodeFrame, encodeFrame, type TaskFrame } from "@atlasagents/shared";
 
 const roundTrip = (frame: TaskFrame): TaskFrame | null =>
   decodeFrame(encodeFrame(frame));

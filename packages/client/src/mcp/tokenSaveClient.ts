@@ -67,7 +67,7 @@ const connectTokenSaveClient = async (
     args: ["serve"],
     cwd: workspaceRoot,
   });
-  const client = new Client({ name: "loopycode", version: "1.0.0" });
+  const client = new Client({ name: "atlasagents", version: "1.0.0" });
   try {
     await client.connect(transport);
   } catch (error) {

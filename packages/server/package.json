@@ -1,11 +1,11 @@
 {
-  "name": "loopycode-server",
+  "name": "atlasagents-server",
   "version": "1.0.0",
-  "description": "LoopyCode RSocket server",
+  "description": "AtlasAgents RSocket server",
   "main": "dist/server/index.js",
   "bin": {
-    "loopy-server": "dist/server/index.js",
-    "loopy-detect-hardware": "dist/hardware/detectHardware.js"
+    "atlas-server": "dist/server/index.js",
+    "atlas-detect-hardware": "dist/hardware/detectHardware.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -27,7 +27,7 @@
   ],
   "type": "commonjs",
   "dependencies": {
-    "@loopycode/shared": "^1.0.0",
+    "@atlasagents/shared": "^1.0.0",
     "@rsocket/core": "^1.0.0-alpha.3",
     "@rsocket/tcp-server": "^1.0.0-alpha.3",
     "diff": "^9.0.0",

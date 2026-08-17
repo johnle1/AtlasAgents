@@ -55,7 +55,7 @@ describe("loadLanguageHints", () => {
   };
 
   it("loads and parses hints from user-data/language-hints.json", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-lang-hints-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-lang-hints-"));
     tempRoots.push(root);
     await writeHintsFile(
       root,
@@ -67,14 +67,14 @@ describe("loadLanguageHints", () => {
   });
 
   it("returns an empty array when the file is missing", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-lang-hints-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-lang-hints-"));
     tempRoots.push(root);
 
     await expect(loadLanguageHints(root)).resolves.toEqual([]);
   });
 
   it("returns an empty array when JSON is corrupted", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-lang-hints-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-lang-hints-"));
     tempRoots.push(root);
     await writeHintsFile(root, "{ not valid json");
 

@@ -2,7 +2,7 @@
  * Coordinates agent activity spinners and terminal output with the Ink UI.
  *
  * @remarks
- * The LoopyCode client renders a live spinner while an agent or subagent is
+ * The AtlasAgents client renders a live spinner while an agent or subagent is
  * working. This module is the thin bridge between task lifecycle code
  * (file proxy, renderers) and the Ink spinner in {@link ./ui/uiBridge.js | uiBridge}.
  *

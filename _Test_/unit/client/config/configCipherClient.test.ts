@@ -15,7 +15,7 @@ import {
   rotateKey,
   unlockCipher,
   type SecretsEnvelope,
-} from "@loopycode/shared";
+} from "@atlasagents/shared";
 
 beforeEach(() => {
   lockCipher();

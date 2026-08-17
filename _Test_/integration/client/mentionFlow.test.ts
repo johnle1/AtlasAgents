@@ -45,7 +45,7 @@ describe("mentionFlow — LocalFileProxy resolver", () => {
   let proxy: LocalFileProxy;
 
   beforeEach(() => {
-    root = fs.mkdtempSync(path.join(os.tmpdir(), "loopy-mention-"));
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-mention-"));
     fs.writeFileSync(path.join(root, "README.md"), "# Fixture\n");
     fs.writeFileSync(path.join(root, ".env"), "SECRET=do-not-inline\n");
     proxy = new LocalFileProxy(root);

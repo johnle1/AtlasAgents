@@ -16,7 +16,7 @@
     "skipLibCheck": true,
     "types": ["vitest/globals"],
     "paths": {
-      "@loopycode/shared": ["../packages/shared/src/index.ts"]
+      "@atlasagents/shared": ["../packages/shared/src/index.ts"]
     }
   },
   /**

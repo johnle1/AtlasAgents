@@ -8,7 +8,7 @@
  */
 
 import type { Connection } from "../connection/index.js";
-import type { ModelStorageReport } from "@loopycode/shared";
+import type { ModelStorageReport } from "@atlasagents/shared";
 import { formatErrorMessage } from "./utils.js";
 import { logger } from "../utils/logger.js";
 import {

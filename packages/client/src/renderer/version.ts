@@ -3,7 +3,7 @@
  *
  * @remarks
  * Resolved at module load via `createRequire` so ESM can read nearby JSON.
- * Used by the ANSI/Ink startup banner title (`LoopyCode CLI v…`).
+ * Used by the ANSI/Ink startup banner title (`AtlasAgents CLI v…`).
  */
 
 import { createRequire } from "node:module";

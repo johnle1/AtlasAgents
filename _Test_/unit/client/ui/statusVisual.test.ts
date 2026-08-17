@@ -22,7 +22,7 @@
  * Mock strategy
  * -------------
  * `shouldAnimateWorker()` internally calls:
- *   1. loadConfig()           — reads ~/.loopycode/config.json (side effect)
+ *   1. loadConfig()           — reads ~/.atlasagents/config.json (side effect)
  *   2. isScreenReaderLikely() — checks TERM / CI env vars
  *
  * We mock both so animation state is predictable:

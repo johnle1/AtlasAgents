@@ -1,5 +1,5 @@
 /**
- * Interactive TLS certificate rotation (`loopy-server --regen-cert`) and the
+ * Interactive TLS certificate rotation (`atlas-server --regen-cert`) and the
  * startup expiration check that points admins at it.
  *
  * @remarks
@@ -111,7 +111,7 @@ export const runCertRegen = async (
   console.log(cert.fingerprint256);
   console.log(
     "\nTell your clients to trust this fingerprint — e.g. run " +
-      "`loopy --trust-fingerprint` on each client, then verify the " +
+      "`atlas --trust-fingerprint` on each client, then verify the " +
       "fingerprint printed on its next connection matches the one above.",
   );
 };

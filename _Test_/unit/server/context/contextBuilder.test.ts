@@ -55,7 +55,7 @@ const makeBuilder = async (): Promise<{
   prefs: PreferenceStore;
   root: string;
 }> => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-context-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-context-"));
   tempRoots.push(root);
   const prefs = new PreferenceStore(root);
   const builder = new ContextBuilder({
@@ -326,7 +326,7 @@ describe("ContextBuilder.build — non-Ollama provider budget (regression guard)
     // model (say, a 128k-context vLLM deployment) never receives num_ctx on
     // the wire at all. A rule long enough to fit only under the larger,
     // correct budget proves which one was actually used.
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-context-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-context-"));
     tempRoots.push(root);
     const prefs = new PreferenceStore(root);
     let showModelCalls = 0;

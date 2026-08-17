@@ -2,7 +2,7 @@
  * Handlers for configuration slash commands: `/agent`, `/set`, and `/config`.
  *
  * @remarks
- * This module manages user-facing configuration updates in the LoopyCode CLI.
+ * This module manages user-facing configuration updates in the AtlasAgents CLI.
  * All slash commands synchronously load and update the persistent config file,
  * then print feedback to the user.
  *
@@ -114,7 +114,7 @@ export const handleAgent = (sub: string, arg: string): void => {
  */
 export type HandleSetDeps = {
   /**
-   * Live RSocket connection to the LoopyCode agent server.
+   * Live RSocket connection to the AtlasAgents agent server.
    *
    * @remarks
    * When password, server, or port settings change, this connection is
@@ -270,7 +270,7 @@ export const handleSet = async (
           "  Enter port (default 7000): ",
         );
         const trimmedInput = userInput.trim();
-        // 7000 is the conventional LoopyCode agent server port; use it as default.
+        // 7000 is the conventional AtlasAgents agent server port; use it as default.
         portNumber = trimmedInput.length === 0 ? 7000 : parsePort(trimmedInput);
       }
 
@@ -351,7 +351,7 @@ export const handleSet = async (
  * ```ts
  * await handleConfig();
  * prints a table like:
- *  ┌─ LoopyCode Config ──────────────────────┐
+ *  ┌─ AtlasAgents Config ──────────────────────┐
  *  │ agent: gemma4                           │
  *  │ port: 7000                              │
  *  │ ...                                     │

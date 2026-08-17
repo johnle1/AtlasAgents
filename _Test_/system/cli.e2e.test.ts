@@ -1,7 +1,7 @@
 /**
- * System (E2E) tests — LoopyCode CLI binary
+ * System (E2E) tests — AtlasAgents CLI binary
  *
- * Spawns the compiled `loopycode` CLI as a real subprocess and tests it from
+ * Spawns the compiled `atlas` CLI as a real subprocess and tests it from
  * the outside: real stdin/stdout, real exit codes, real environment variables.
  * No internal modules are imported — this layer is intentionally opaque.
  *
@@ -81,7 +81,7 @@ const TEST_PASSPHRASE = "system-test-passphrase";
  *
  * @remarks
  * Without this, the CLI would read/write the developer's real
- * `~/.agent-cli/config.json` — including, post-encryption, attempting to
+ * `~/.atlasagents/config.json` — including, post-encryption, attempting to
  * unlock it with {@link TEST_PASSPHRASE}, which would fail against a real
  * passphrase and hang the wrong-passphrase retry loop waiting for more
  * stdin input than this suite provides.
@@ -103,7 +103,7 @@ const itWhenBuilt = BINARY_EXISTS ? it : it.skip;
 
 if (BINARY_EXISTS) {
   beforeAll(() => {
-    testHome = mkdtempSync(path.join(os.tmpdir(), "loopy-cli-e2e-"));
+    testHome = mkdtempSync(path.join(os.tmpdir(), "atlas-cli-e2e-"));
   });
 
   afterAll(() => {
@@ -144,7 +144,7 @@ async function runCli(
       TMUX: "",
       TERM: "xterm-256color",
       CI: "false",
-      // Isolated config dir — never touch the developer's real ~/.agent-cli/.
+      // Isolated config dir — never touch the developer's real ~/.atlasagents/.
       HOME: testHome,
       ...env,
     },
@@ -207,7 +207,7 @@ describe("CLI --help flag (user journey)", () => {
       // At minimum, the binary name or 'Usage' keyword should appear
       const hasHelpContent =
         combined.toLowerCase().includes("usage") ||
-        combined.toLowerCase().includes("loopycode") ||
+        combined.toLowerCase().includes("atlas") ||
         combined.toLowerCase().includes("help") ||
         combined.toLowerCase().includes("option");
       expect(hasHelpContent).toBe(true);
@@ -269,6 +269,11 @@ describe("CLI argument parsing — host flag aliases and positionals", () => {
     const { stderr } = await runCli(["start", "--host", "127.0.0.1", "--port", "1"]);
     expect(stderr).not.toMatch(/invalid|unknown option/i);
   });
+
+  itWhenBuilt("accepts the positional 'run' argument as an alias of start", async () => {
+    const { stderr } = await runCli(["run", "--host", "127.0.0.1", "--port", "1"]);
+    expect(stderr).not.toMatch(/invalid|unknown option/i);
+  });
 });
 
 describe("CLI help text — stays in sync with the flags parseCliArgs actually accepts", () => {
@@ -302,7 +307,7 @@ describe("CLI environment variant — bad OLLAMA_HOST", () => {
     "exits with a non-zero code when the server host is unreachable (exit code)",
     async () => {
       /**
-       * We set LOOPYCODE_SERVER (or equivalent) to an unreachable address.
+       * We point `--host`/`--port` at an unreachable address.
        * The CLI should detect this quickly and exit non-zero rather than
        * hanging indefinitely.
        *

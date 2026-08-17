@@ -15,7 +15,7 @@ import {
   ConfigError,
   ConfigManager,
 } from "../../../../packages/server/src/config/index.js";
-import { initializeCipher } from "@loopycode/shared";
+import { initializeCipher } from "@atlasagents/shared";
 
 // ConfigManager encrypts the `providers` field at rest; any write requires
 // the cipher to be unlocked first (normally done via
@@ -32,7 +32,7 @@ const makeManager = async (): Promise<{
   manager: ConfigManager;
   root: string;
 }> => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-config-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-config-"));
   tempRoots.push(root);
   return { manager: new ConfigManager({ rootDir: root }), root };
 };

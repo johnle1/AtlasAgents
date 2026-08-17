@@ -12,7 +12,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import fg from "fast-glob";
-import { computeDiff, formatDiffPlain } from "@loopycode/shared";
+import { computeDiff, formatDiffPlain } from "@atlasagents/shared";
 import { formatDisplayPath } from "../../utils/pathDisplay.js";
 import {
   printCd,

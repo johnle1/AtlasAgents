@@ -21,7 +21,7 @@
  * the summary of one installed model from `GET /api/tags`.
  *
  * @remarks
- * Re-exported under Ollama-specific names from `@loopycode/shared`'s
+ * Re-exported under Ollama-specific names from `@atlasagents/shared`'s
  * `ModelDetails`/`ModelSummary` — this is the same wire shape the client's
  * `InstalledModel` type aliases, since `models.list` round-trips it as-is
  * with no transformation.
@@ -38,7 +38,7 @@
 export type {
   ModelSummary as OllamaModelSummary,
   ModelDetails as OllamaModelDetails,
-} from "@loopycode/shared";
+} from "@atlasagents/shared";
 
 /**
  * One progress update streamed from `POST /api/pull` (model download).

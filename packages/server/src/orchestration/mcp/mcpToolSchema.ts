@@ -1,5 +1,5 @@
 /**
- * Converts MCP (Model Context Protocol) tool schemas to LoopyCode's internal schema format.
+ * Converts MCP (Model Context Protocol) tool schemas to AtlasAgents's internal schema format.
  *
  * @remarks
  * MCP servers advertise their tools with a JSON-schema format that varies in structure
@@ -21,7 +21,7 @@
  *     required: ["query"]
  *   }
  * };
- * const schema = mcpToolToLoopySchema(mcpTool);
+ * const schema = mcpToolToAtlasSchema(mcpTool);
  * {
  *   type: "function",
  *   function: {
@@ -63,7 +63,7 @@ export type McpToolSyncPayload = {
 };
 
 /**
- * Converts an MCP tool schema to LoopyCode's internal {@link ToolSchema} format.
+ * Converts an MCP tool schema to AtlasAgents's internal {@link ToolSchema} format.
  *
  * @remarks
  * Adapts the raw MCP schema (which may be incomplete or have structural
@@ -77,7 +77,7 @@ export type McpToolSyncPayload = {
  *
  * @example
  * ```ts
- * const schema = mcpToolToLoopySchema({
+ * const schema = mcpToolToAtlasSchema({
  *   name: "code_search",
  *   description: "Find usages of a symbol",
  *   inputSchema: {
@@ -88,7 +88,7 @@ export type McpToolSyncPayload = {
  * // Now schema can be passed directly to the model for tool calling
  * ```
  */
-export const mcpToolToLoopySchema = (
+export const mcpToolToAtlasSchema = (
   mcpTool: McpToolSyncPayload,
 ): ToolSchema => ({
   type: "function",

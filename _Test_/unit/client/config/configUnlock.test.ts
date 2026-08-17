@@ -27,17 +27,17 @@ describe("config.ts — encryption at rest", () => {
   let setConfig: typeof import("../../../../packages/client/src/config/index.js").setConfig;
   let unlockOrSetupConfigCipher: typeof import("../../../../packages/client/src/config/index.js").unlockOrSetupConfigCipher;
   let rotateConfigPassphrase: typeof import("../../../../packages/client/src/config/index.js").rotateConfigPassphrase;
-  let lockCipher: typeof import("@loopycode/shared").lockCipher;
-  let ConfigDecryptionError: typeof import("@loopycode/shared").ConfigDecryptionError;
+  let lockCipher: typeof import("@atlasagents/shared").lockCipher;
+  let ConfigDecryptionError: typeof import("@atlasagents/shared").ConfigDecryptionError;
   let originalHome: string | undefined;
   let tempHome: string;
   let configFile: string;
 
   beforeAll(async () => {
     originalHome = process.env.HOME;
-    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "loopy-config-unlock-test-"));
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-config-unlock-test-"));
     process.env.HOME = tempHome;
-    configFile = path.join(tempHome, ".agent-cli", "config.json");
+    configFile = path.join(tempHome, ".atlasagents", "config.json");
 
     const configMod = await import("../../../../packages/client/src/config/index.js");
     loadConfig = configMod.loadConfig;
@@ -46,7 +46,7 @@ describe("config.ts — encryption at rest", () => {
     unlockOrSetupConfigCipher = configMod.unlockOrSetupConfigCipher;
     rotateConfigPassphrase = configMod.rotateConfigPassphrase;
 
-    const cipherMod = await import("@loopycode/shared");
+    const cipherMod = await import("@atlasagents/shared");
     lockCipher = cipherMod.lockCipher;
     ConfigDecryptionError = cipherMod.ConfigDecryptionError;
   });

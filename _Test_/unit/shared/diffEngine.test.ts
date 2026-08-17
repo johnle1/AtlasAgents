@@ -7,7 +7,7 @@ import {
   computeDiff,
   formatDiffPlain,
   getDiffDisplayLines,
-} from "@loopycode/shared";
+} from "@atlasagents/shared";
 
 describe("computeDiff", () => {
   it("returns equal chunks for identical content", () => {

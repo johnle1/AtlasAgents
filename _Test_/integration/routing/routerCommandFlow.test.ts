@@ -42,7 +42,7 @@ import type {
 import { buildRouter } from "../../../packages/server/src/routing/routerBuilder.js";
 import { Router } from "../../../packages/server/src/routing/router.js";
 import { ConfigManager } from "../../../packages/server/src/config/index.js";
-import { lockCipher } from "@loopycode/shared";
+import { lockCipher } from "@atlasagents/shared";
 import { OllamaClient } from "../../../packages/server/src/ollama/client.js";
 import { ProviderRegistry } from "../../../packages/server/src/providers/providerRegistry.js";
 
@@ -64,7 +64,7 @@ const makeConfigManager = async (): Promise<{
   root: string;
 }> => {
   const root = await fs.mkdtemp(
-    path.join(os.tmpdir(), "loopy-router-command-flow-"),
+    path.join(os.tmpdir(), "atlas-router-command-flow-"),
   );
   tempRoots.push(root);
   const config = new ConfigManager({ rootDir: root });

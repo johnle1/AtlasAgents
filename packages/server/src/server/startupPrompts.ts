@@ -13,7 +13,7 @@
  * matters more here than it once did: a normal `start` now calls it up to
  * twice in a row (server config passphrase, then auth password) with all the
  * answers arriving in one piped chunk, e.g.
- * `printf 'passphrase\npassword\n' | loopy-server start`.
+ * `printf 'passphrase\npassword\n' | atlas-server start`.
  */
 
 import * as readline from "node:readline";

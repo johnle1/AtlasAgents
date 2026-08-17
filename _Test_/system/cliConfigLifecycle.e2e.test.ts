@@ -1,9 +1,9 @@
 /**
  * System (E2E) tests — CLI config bootstrap and encryption-at-rest.
  *
- * Spawns the compiled `loopycode` CLI as a real subprocess, same as
+ * Spawns the compiled `atlas` CLI as a real subprocess, same as
  * `cli.e2e.test.ts`, but focused specifically on what happens to
- * `~/.agent-cli/config.json` on disk rather than on stdout/exit-code
+ * `~/.atlasagents/config.json` on disk rather than on stdout/exit-code
  * behavior. This is only observable from outside the process — there is no
  * way for a unit or integration test (which never spawns the real binary or
  * touches a real `$HOME`) to prove the file the CLI actually writes on a
@@ -47,7 +47,7 @@ beforeEach(() => {
   // A fresh HOME per test — unlike cli.e2e.test.ts, these tests need to
   // observe a genuine FIRST run each time, so config.json must not already
   // exist when the process starts.
-  testHome = mkdtempSync(path.join(os.tmpdir(), "loopy-cli-config-lifecycle-"));
+  testHome = mkdtempSync(path.join(os.tmpdir(), "atlas-cli-config-lifecycle-"));
 });
 
 afterEach(() => {
@@ -87,10 +87,10 @@ const runCliOnce = async (
   };
 };
 
-const configPath = (): string => path.join(testHome, ".agent-cli", "config.json");
+const configPath = (): string => path.join(testHome, ".atlasagents", "config.json");
 
 describe("CLI config bootstrap — first run (full user journey)", () => {
-  itWhenBuilt("creates ~/.agent-cli/config.json on first launch", async () => {
+  itWhenBuilt("creates ~/.atlasagents/config.json on first launch", async () => {
     expect(existsSync(configPath())).toBe(false);
 
     await runCliOnce();

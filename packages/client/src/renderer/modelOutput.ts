@@ -12,7 +12,7 @@ import { getTheme } from "../theme/themeManager.js";
 import { setStreamingText } from "../ui/uiBridge.js";
 import { renderProgressBar } from "../utils/progressBar.js";
 import { appendBlock, appendText } from "./sink.js";
-import type { ModelStorageReport } from "@loopycode/shared";
+import type { ModelStorageReport } from "@atlasagents/shared";
 
 /**
  * Last rendered pull-progress line per concurrent operation id.

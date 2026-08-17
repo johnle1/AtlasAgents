@@ -32,7 +32,7 @@ export type ShellResult = {
    * UTF-8 combined stdout from the child process.
    *
    * @remarks
-   * After CWD wrapping, may include a trailing `##LOOPY_CWD##…` segment until
+   * After CWD wrapping, may include a trailing `##ATLAS_CWD##…` segment until
    * command handlers strip it for display and persistence.
    */
   stdout: string;

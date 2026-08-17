@@ -64,7 +64,7 @@ describe("trackedCwdsEqual", () => {
   });
 
   it("canonicalizes relative segments before comparing", () => {
-    const base = path.resolve("/tmp/loopy-test");
+    const base = path.resolve("/tmp/atlas-test");
     expect(trackedCwdsEqual(path.join(base, "app"), path.join(base, "app", "."))).toBe(
       true,
     );
@@ -75,7 +75,7 @@ describe("wrapCommandForCwdTracking — Unix shell integration", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-cwd-"));
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-cwd-"));
   });
 
   afterEach(async () => {
@@ -127,7 +127,7 @@ describe("wrapCommandForCwdTracking — Windows wrapper shape", () => {
     expect(wrapped).toContain("enabledelayedexpansion");
     expect(wrapped).toContain(CWD_MARKER);
     expect(wrapped).toContain("!cd!");
-    expect(wrapped).toContain("!__loopy_status!");
+    expect(wrapped).toContain("!__atlas_status!");
     expect(wrapped).not.toContain("endlocal");
   });
 
@@ -147,7 +147,7 @@ describeWindows("wrapCommandForCwdTracking — Windows shell integration", () =>
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-cwd-win-"));
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-cwd-win-"));
   });
 
   afterEach(async () => {

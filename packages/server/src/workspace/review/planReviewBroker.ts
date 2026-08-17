@@ -58,7 +58,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { SubagentPlan, PlanExecution } from "@loopycode/shared";
+import type { SubagentPlan, PlanExecution } from "@atlasagents/shared";
 import type { PlanReviewResponse } from "../../orchestration/types.js";
 
 /**

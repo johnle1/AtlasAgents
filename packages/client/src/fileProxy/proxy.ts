@@ -7,7 +7,7 @@
  */
 
 import * as path from "node:path";
-import type { ClientOpResponse, ClientRoute } from "@loopycode/shared";
+import type { ClientOpResponse, ClientRoute } from "@atlasagents/shared";
 import {
   isTaskActive,
   startThinking,

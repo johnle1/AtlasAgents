@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { computeDiff } from "@loopycode/shared";
+import { computeDiff } from "@atlasagents/shared";
 import {
   injectBackground,
   parseDisplayLine,

@@ -15,7 +15,7 @@ import {
   initializeCipher,
   rotateKey,
   unlockCipher,
-} from "@loopycode/shared";
+} from "@atlasagents/shared";
 import type { SecretConfigFields, StoredConfig } from "./types.js";
 import {
   CONFIG_FILE,

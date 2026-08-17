@@ -9,7 +9,7 @@
 
 import type { Connection } from "../connection/index.js";
 import type { SubagentStatusSource, TaskFrame } from "../types/frames.js";
-import { clampUsage } from "@loopycode/shared";
+import { clampUsage } from "@atlasagents/shared";
 import { loadConfig } from "../config/index.js";
 import { formatAgentThinkForDisplay } from "../renderer.js";
 import { thinkDisplayThreshold } from "./thinkDisplay.js";

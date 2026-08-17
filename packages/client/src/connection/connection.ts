@@ -9,7 +9,7 @@
  */
 
 import { RSocketConnector, type RSocket } from "@rsocket/core";
-import type { RouteId, TaskApprovalMode } from "@loopycode/shared";
+import type { RouteId, TaskApprovalMode } from "@atlasagents/shared";
 import type { Config } from "../config/index.js";
 import { createTlsClientTransport } from "./tls/tlsClientTransport.js";
 import { checkAndPinFingerprint } from "./tls/fingerprintStore.js";
@@ -47,7 +47,7 @@ import { ConnectionLifecycle } from "./lifecycle.js";
 export type { PullProgress, TaskFrame } from "../types/frames.js";
 
 /**
- * Manages one persistent RSocket TCP connection to the LoopyCode server.
+ * Manages one persistent RSocket TCP connection to the AtlasAgents server.
  *
  * @remarks
  * Responsibilities:
