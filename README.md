@@ -16,7 +16,7 @@ AtlasAgents is a self-hosted, client/server AI coding agent. You run **`atlas-se
 
 ## Requirements
 
-- Node.js 24
+- Node.js 22
 - An LLM backend: [Ollama](https://ollama.com) installed locally
 - Optional: Rust/`cargo`, if you want the [TokenSave](#optional-tokensave) integration
 
