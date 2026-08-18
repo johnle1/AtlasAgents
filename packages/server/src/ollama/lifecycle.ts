@@ -2,7 +2,7 @@
  * Manages the Ollama server lifecycle: checks if it's running, and starts `ollama serve` if needed.
  *
  * @remarks
- * On startup, LoopyCode needs a local Ollama HTTP API available. This module
+ * On startup, AtlasAgents needs a local Ollama HTTP API available. This module
  * checks if Ollama is already running (by probing its health endpoint). If not,
  * it spawns an `ollama serve` subprocess, waits for it to become reachable, and
  * returns a handle to stop it later.
@@ -111,13 +111,13 @@ const waitForOllama = async (
  * Handle to control Ollama's lifecycle (only if this server started it).
  *
  * @remarks
- * - `startedByServer`: Whether LoopyCode spawned the Ollama process. If false,
+ * - `startedByServer`: Whether AtlasAgents spawned the Ollama process. If false,
  *   Ollama was already running, and the caller should NOT stop it.
  * - `stop()`: Kills the child process if this server started it. Safe to call
  *   multiple times (checks if process is already killed).
  */
 export type OllamaLifecycle = {
-  /** True if LoopyCode started this Ollama instance and owns the lifecycle. */
+  /** True if AtlasAgents started this Ollama instance and owns the lifecycle. */
   startedByServer: boolean;
 
   /** Stops the child Ollama process (if this server started it). Safe to call multiple times. */

@@ -36,7 +36,7 @@ const makeManager = async (): Promise<{
   root: string;
   skillsDir: string;
 }> => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-skills-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-skills-"));
   tempRoots.push(root);
   const manager = new SkillManager({ rootDir: root });
   const skillsDir = path.join(root, "user-data", "skills");
@@ -331,7 +331,7 @@ describe("SkillManager index build failure recovery", () => {
     // anything else. Replacing the skills directory with a plain file makes
     // fs.readdir() fail with a real ENOTDIR, mirroring an EACCES/EMFILE the
     // caller can't control.
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-skills-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-skills-"));
     tempRoots.push(root);
     const skillsDir = path.join(root, "user-data", "skills");
     await fs.mkdir(path.dirname(skillsDir), { recursive: true });

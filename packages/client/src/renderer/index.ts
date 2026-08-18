@@ -19,12 +19,14 @@ export { CLI_VERSION } from "./version.js";
 export { buildBannerLines } from "./banner.js";
 export {
   buildConfigLines,
+  buildHelpLines,
   printConfig,
   printModels,
   printGroupedModels,
   printProviders,
   printSkills,
   printMemory,
+  printHelp,
 } from "./commandTables.js";
 export {
   formatAgentThinkForDisplay,
@@ -56,10 +58,13 @@ export {
   type DirEntry,
   type ModelGroup,
   type FlatModelEntry,
+  type CurrentModelSelection,
 } from "./types.js";
 export {
   printInstalledModels,
   printModelFind,
+  printModelStorage,
+  formatStorageBytes,
   printProgress,
   resetPullProgress,
   finishPullProgress,

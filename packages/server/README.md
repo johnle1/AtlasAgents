@@ -1,23 +1,23 @@
-# loopycode-server
+# atlasagents-server
 
-RSocket server for LoopyCode — runs the Agent/Subagent orchestration, connects to Ollama or OpenAI-compatible model providers, and serves the [`loopycode`](https://www.npmjs.com/package/loopycode) CLI client over RSocket.
+RSocket server for AtlasAgents — runs the Agent/Subagent orchestration, connects to Ollama or OpenAI-compatible model providers, and serves the [`atlasagents`](https://www.npmjs.com/package/atlasagents) CLI client over RSocket.
 
 ## Install
 
 ```bash
-npm install -g loopycode-server
+npm install -g atlasagents-server
 ```
 
 ## Usage
 
 ```bash
-loopy-server start
+atlas-server start
 ```
 
 Detect local hardware (GPU/CPU capabilities used for model recommendations):
 
 ```bash
-loopy-detect-hardware
+atlas-detect-hardware
 ```
 
 See the [project README](https://github.com/johnle1/LoopyCode#readme) for the full client/server architecture.

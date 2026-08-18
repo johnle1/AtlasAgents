@@ -11,7 +11,7 @@
 import * as path from "node:path";
 
 import type { PreferenceConfidence } from "../../orchestration/interfaces.js";
-import { computeDiff, formatDiffPlain } from "@loopycode/shared";
+import { computeDiff, formatDiffPlain } from "@atlasagents/shared";
 import type { UserEditEntry } from "../types.js";
 import {
   MAX_USER_EDITS_IN_PROMPT,

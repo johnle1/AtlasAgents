@@ -7,6 +7,8 @@
  * otherwise the nearest xterm 256-color index (`38;5` / `48;5`).
  */
 
+import { colorDisabled } from "../ui/terminalEnv.js";
+
 /**
  * Discrete RGB levels used by the 6×6×6 ANSI color cube (indices 16–231).
  *
@@ -238,25 +240,31 @@ export const hexToAnsi256Bg = (hex: string): string => {
  *
  * @param hex - `#RRGGBB` or `RRGGBB`.
  * @returns Truecolor CSI when supported, otherwise 256-color approximation.
+ *   Empty string when {@link colorDisabled} is true.
  *
  * @example
  * ```ts
  * process.stdout.write(`${fg("#58a6ff")}Hello${"\x1b[0m"}`);
  * ```
  */
-export const fg = (hex: string): string =>
-  supportsTrueColor() ? hexToTrueColor(hex) : hexToAnsi256(hex);
+export const fg = (hex: string): string => {
+  if (colorDisabled()) return "";
+  return supportsTrueColor() ? hexToTrueColor(hex) : hexToAnsi256(hex);
+};
 
 /**
  * Best available **background** escape for a hex color on this terminal.
  *
  * @param hex - `#RRGGBB` or `RRGGBB`.
  * @returns Truecolor CSI when supported, otherwise 256-color approximation.
+ *   Empty string when {@link colorDisabled} is true.
  *
  * @example
  * ```ts
  * process.stdout.write(`${bg("#003300")}  ${"\x1b[0m"}`);
  * ```
  */
-export const bg = (hex: string): string =>
-  supportsTrueColor() ? hexToTrueColorBg(hex) : hexToAnsi256Bg(hex);
+export const bg = (hex: string): string => {
+  if (colorDisabled()) return "";
+  return supportsTrueColor() ? hexToTrueColorBg(hex) : hexToAnsi256Bg(hex);
+};

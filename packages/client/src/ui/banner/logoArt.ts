@@ -1,5 +1,5 @@
 /**
- * Shared pixel-art logo geometry and colors for the LoopyCode CLI startup banner.
+ * Shared pixel-art logo geometry and colors for the AtlasAgents CLI startup banner.
  *
  * @remarks
  * Both render paths consume this module so the boxed layout stays identical:
@@ -135,7 +135,7 @@ export const bannerCenterPad = (
 };
 
 /**
- * Row-major pixel grid for the LoopyCode octopus mascot (6 columns × 9 rows).
+ * Row-major pixel grid for the AtlasAgents octopus mascot (6 columns × 9 rows).
  *
  * @remarks
  * Each inner array is one horizontal scanline of {@link LogoColor} cells.

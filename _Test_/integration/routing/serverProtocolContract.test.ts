@@ -58,7 +58,7 @@ import type {
 import { buildRouter } from "../../../packages/server/src/routing/routerBuilder.js";
 import { Router } from "../../../packages/server/src/routing/router.js";
 import { ConfigManager } from "../../../packages/server/src/config/index.js";
-import { lockCipher } from "@loopycode/shared";
+import { lockCipher } from "@atlasagents/shared";
 import { OllamaClient } from "../../../packages/server/src/ollama/client.js";
 import { ProviderRegistry } from "../../../packages/server/src/providers/providerRegistry.js";
 
@@ -77,7 +77,7 @@ const SESSION: Session = { userId: "user_1", requesterId: "req_1" };
 
 const makeRouter = async () => {
   const root = await fs.mkdtemp(
-    path.join(os.tmpdir(), "loopy-protocol-contract-"),
+    path.join(os.tmpdir(), "atlas-protocol-contract-"),
   );
   tempRoots.push(root);
   const config = new ConfigManager({ rootDir: root });

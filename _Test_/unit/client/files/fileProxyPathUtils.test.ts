@@ -10,7 +10,7 @@ import {
   resolveAbsolutePath,
 } from "../../../../packages/client/src/fileProxy/pathUtils.js";
 
-const root = path.resolve("/tmp/loopy-workspace-test-root");
+const root = path.resolve("/tmp/atlas-workspace-test-root");
 
 describe("assertInsideRoot", () => {
   it("allows paths under the workspace root", () => {

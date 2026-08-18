@@ -1,5 +1,5 @@
 /**
- * Unit tests — server TLS certificate rotation (`loopy-server --regen-cert`)
+ * Unit tests — server TLS certificate rotation (`atlas-server --regen-cert`)
  * and the startup expiration check that points admins at it.
  *
  * @remarks
@@ -24,7 +24,7 @@ import {
 const tempRoots: string[] = [];
 
 const makeTempRoot = async (): Promise<string> => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-cert-regen-test-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-cert-regen-test-"));
   tempRoots.push(root);
   return root;
 };

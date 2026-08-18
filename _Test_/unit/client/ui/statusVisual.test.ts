@@ -22,7 +22,7 @@
  * Mock strategy
  * -------------
  * `shouldAnimateWorker()` internally calls:
- *   1. loadConfig()           — reads ~/.loopycode/config.json (side effect)
+ *   1. loadConfig()           — reads ~/.atlasagents/config.json (side effect)
  *   2. isScreenReaderLikely() — checks TERM / CI env vars
  *
  * We mock both so animation state is predictable:
@@ -56,6 +56,9 @@ vi.mock("../../../../packages/client/src/ui/terminalEnv", () => ({
    * Pretend we are NOT a screen reader or CI → animation enabled.
    */
   isScreenReaderLikely: vi.fn(() => false),
+  colorDisabled: () => false,
+  colorForced: () => false,
+  supportsOsc9Notifications: () => false,
 }));
 
 import {

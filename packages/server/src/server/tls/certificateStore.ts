@@ -73,7 +73,7 @@ const generateAndPersist = async (
   notAfterDate.setFullYear(notAfterDate.getFullYear() + validityYears);
 
   const pems = await generate(
-    [{ name: "commonName", value: "loopycode-server" }],
+    [{ name: "commonName", value: "atlasagents-server" }],
     {
       keySize: 2048,
       algorithm: "sha256",

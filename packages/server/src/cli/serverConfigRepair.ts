@@ -1,5 +1,5 @@
 /**
- * Config repair for `loopy-server`: changes the saved auth password and/or
+ * Config repair for `atlas-server`: changes the saved auth password and/or
  * TCP port without starting the server, gated by the server config
  * passphrase.
  *
@@ -68,7 +68,7 @@ const promptNewPassword = async (
  * The new password is never echoed or logged — only {@link describePassword}'s
  * character-count summary reaches stdout.
  *
- * @param rootDir - Server data root (the directory `loopy-server` was launched from).
+ * @param rootDir - Server data root (the directory `atlas-server` was launched from).
  * @param request - The parsed repair request from `parseServerArgs`.
  * @param promptPassphrase - Injected prompt function — used both for the
  *   passphrase gate and, when a new password is needed, for the password
@@ -131,5 +131,5 @@ export const runServerConfigRepair = async (
     `\nCurrent: port ${next.port ?? "(not set — will prompt on next start)"}, ` +
       `password ${describePassword(next.password)}`,
   );
-  console.log("Run `loopy-server start` to launch.");
+  console.log("Run `atlas-server start` to launch.");
 };

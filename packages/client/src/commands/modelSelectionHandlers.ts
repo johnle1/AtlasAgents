@@ -12,7 +12,7 @@ import type { Connection } from "../connection/index.js";
 import type { PromptPort } from "../ui/promptPort.js";
 import { refreshInkBanner } from "../ui/uiBridge.js";
 import { printGroupedModels, printError, printSuccess, printLine } from "../renderer.js";
-import type { ModelGroup } from "../renderer.js";
+import type { ModelGroup, CurrentModelSelection } from "../renderer.js";
 import { formatErrorMessage } from "./utils.js";
 
 /**
@@ -61,7 +61,38 @@ export const handleSetModel = async (
     return;
   }
 
-  const entries = printGroupedModels(groups, modelRole);
+  // Config's on-disk field names are shifted by one role relative to their
+  // meaning: `subagentModel`/`agentProvider` hold the *agent's* selection,
+  // `subsubagentModel`/`subagentProvider` hold the *subagent's* — see the
+  // wire translation in requestStream.ts. Building `current` here (rather
+  // than trusting field names at the call site) keeps that footgun local.
+  //
+  // Trim before the presence check — whitespace-only strings are truthy but
+  // mean "not set" everywhere else (Banner, useSubmitLine). Passing them
+  // through would mark the wrong picker rows (or mark none usefully).
+  const existingConfig = loadConfig();
+  const agentModel = (existingConfig.subagentModel ?? "").trim();
+  const subagentModel = (existingConfig.subsubagentModel ?? "").trim();
+  const current: CurrentModelSelection = {
+    ...(agentModel
+      ? {
+          agent: {
+            provider: existingConfig.agentProvider,
+            model: agentModel,
+          },
+        }
+      : {}),
+    ...(subagentModel
+      ? {
+          subagent: {
+            provider: existingConfig.subagentProvider,
+            model: subagentModel,
+          },
+        }
+      : {}),
+  };
+
+  const entries = printGroupedModels(groups, modelRole, current);
 
   if (entries.length === 0) {
     printError("No models available on any configured provider.");
@@ -106,6 +137,7 @@ export const handleSetModel = async (
     const response = await connection.sendCommand<{
       ok: boolean;
       supportsTools?: boolean;
+      placementWarning?: string;
     }>("config.setModel", {
       role: modelRole,
       provider: selectedProvider,
@@ -125,6 +157,10 @@ export const handleSetModel = async (
           ? "  native tool calling: enabled"
           : "  native tool calling: disabled (using inline/legacy text protocol)",
       );
+    }
+
+    if (response.placementWarning) {
+      printLine(response.placementWarning);
     }
   } catch (error) {
     // Local disk config moved ahead of server — undo so disk matches the live session.

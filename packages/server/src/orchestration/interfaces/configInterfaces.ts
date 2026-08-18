@@ -178,7 +178,7 @@ export interface IConfigManager {
    * @remarks
    * `undefined` means "not configured" — callers fall back to Ollama's own
    * default (4096) rather than guessing. Ollama-only; ignored for other
-   * providers. Set via `loopy-detect-hardware --write` or `/set numCtx`.
+   * providers. Set via `atlas-detect-hardware --write` or `/set numCtx`.
    *
    * @returns Configured `num_ctx` in tokens, or `undefined` if unset.
    */

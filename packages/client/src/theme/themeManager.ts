@@ -1,21 +1,19 @@
 /**
- * Active theme state: load, set, and query LoopyCode CLI color themes.
+ * Active theme state: load, set, and query AtlasAgents CLI color themes.
  *
  * @remarks
  * Themes live in {@link THEMES}. Preferences persist as `config.ui.theme`.
- * On first load, a legacy `~/.agent-cli/theme.txt` may be migrated into config
+ * On first load, a legacy `theme.txt` under {@link CONFIG_DIR} may be migrated into config
  * and deleted. Call {@link loadTheme} during startup before printing styled UI.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as os from "node:os";
 import { loadConfig, updateConfig } from "../config/index.js";
+import { CONFIG_DIR } from "../config/types.js";
 import { refreshInkBanner } from "../ui/uiBridge.js";
+import { colorDisabled } from "../ui/terminalEnv.js";
 import { THEMES, type Theme } from "./themes.js";
-
-/** Config directory used by older CLI builds for standalone files. */
-const CONFIG_DIR = path.join(os.homedir(), ".agent-cli");
 
 /**
  * Legacy plain-text theme preference (`theme.txt`) from pre-config-store builds.
@@ -50,7 +48,37 @@ let activeTheme: Theme = defaultTheme.theme;
 let activeThemeKey = defaultTheme.key;
 
 /**
- * One-time migration of `~/.agent-cli/theme.txt` into `config.ui.theme`.
+ * Theme fields that are ANSI CSI strings (everything except name / shiki id).
+ *
+ * @remarks
+ * Derived from the {@link Theme} shape so a new CSI field cannot be forgotten
+ * when NO_COLOR blanks the palette. `name` and `shikiTheme` stay intact —
+ * they are not escape sequences.
+ */
+const CSI_THEME_KEYS = (
+  Object.keys(THEMES.monochrome ?? THEMES.default ?? {}) as (keyof Theme)[]
+).filter((key) => key !== "name" && key !== "shikiTheme");
+
+/**
+ * Returns a copy of `theme` whose CSI fields are all empty strings.
+ *
+ * @remarks
+ * Does **not** mutate the registry or the active theme — callers under
+ * `NO_COLOR` get a derived snapshot so unsetting the env restores color.
+ *
+ * @param theme - Palette to blank.
+ * @returns A new {@link Theme} with empty CSI fields.
+ */
+const colorlessTheme = (theme: Theme): Theme => {
+  const blanked: Theme = { ...theme };
+  for (const key of CSI_THEME_KEYS) {
+    blanked[key] = "" as Theme[typeof key];
+  }
+  return blanked;
+};
+
+/**
+ * One-time migration of a leftover `theme.txt` into `config.ui.theme`.
  *
  * @remarks
  * No-op when the file is missing. Empty or unknown keys still delete the file
@@ -143,7 +171,8 @@ export const setTheme = (key: string): void => {
  * console.log(`${error}failed${reset}`);
  * ```
  */
-export const getTheme = (): Theme => activeTheme;
+export const getTheme = (): Theme =>
+  colorDisabled() ? colorlessTheme(activeTheme) : activeTheme;
 
 /**
  * Returns the active theme’s registry key.

@@ -1,20 +1,20 @@
-# loopycode
+# atlasagents
 
-CLI client for LoopyCode — a terminal coding agent that talks to a [`loopycode-server`](https://www.npmjs.com/package/loopycode-server) instance over RSocket.
+CLI client for AtlasAgents — a terminal coding agent that talks to a [`atlasagents-server`](https://www.npmjs.com/package/atlasagents-server) instance over RSocket.
 
 ## Install
 
 ```bash
-npm install -g loopycode
+npm install -g atlasagents
 ```
 
 ## Usage
 
 ```bash
-loopy
+atlas
 ```
 
-On first run, `loopy` prompts for the server address and walks through initial setup. See the [project README](https://github.com/johnle1/LoopyCode#readme) for the full client/server architecture.
+On first run, `atlas` prompts for the server address and walks through initial setup. See the [project README](https://github.com/johnle1/LoopyCode#readme) for the full client/server architecture.
 
 ## License
 

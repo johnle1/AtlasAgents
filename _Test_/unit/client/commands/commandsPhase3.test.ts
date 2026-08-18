@@ -5,7 +5,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { CommandHandler } from "../../../../packages/client/src/commands/index.js";
 import { handleAgent, handleConfig, handleSet } from "../../../../packages/client/src/commands/configHandlers.js";
-import { handleSpinner, handleThink } from "../../../../packages/client/src/commands/displayHandlers.js";
+import { handleSpinner, handleThink, handleNotify } from "../../../../packages/client/src/commands/displayHandlers.js";
 import { handleMemory } from "../../../../packages/client/src/commands/memoryHandlers.js";
 import { handleModels } from "../../../../packages/client/src/commands/modelHandlers.js";
 import { handleExplore, handleExit, handleNew } from "../../../../packages/client/src/commands/sessionHandlers.js";
@@ -63,22 +63,35 @@ vi.mock("../../../../packages/client/src/renderer.js", () => ({
   finishPullProgress: vi.fn(),
   printSkills: vi.fn(),
   printSuccessOp: vi.fn(),
+  printHelp: vi.fn(),
 }));
 
 vi.mock("../../../../packages/client/src/ui/uiBridge.js", () => ({
   appendLog: vi.fn(),
   setStreamingText: vi.fn(),
+  clearScreen: vi.fn(),
 }));
 
 vi.mock("../../../../packages/client/src/theme/themeManager.js", () => ({
   getTheme: () => ({}),
 }));
 
+vi.mock("../../../../packages/client/src/skills/skills.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../../packages/client/src/skills/skills.js")
+  >();
+  return {
+    ...actual,
+    listSkills: () => ["demo"],
+  };
+});
+
 const fakeConn = (overrides: Partial<Connection> = {}): Connection =>
   ({
     sendCommand: vi.fn(async () => ({ message: "ok" })),
     sendStream: vi.fn(async (opts: { onFrame: (f: { kind: string; text?: string }) => void }) => {
       await opts.onFrame({ kind: "token", text: "explore" });
+      return { done: Promise.resolve(), cancel: () => {} };
     }),
     getMemory: vi.fn(async () => [{ topic: "t", rules: ["r"] }]),
     forgetMemory: vi.fn(async () => {}),
@@ -122,7 +135,65 @@ describe("handleSet / handleConfig", () => {
   });
 });
 
-describe("handleSpinner / handleThink", () => {
+describe("handleSet approval", () => {
+  const setDeps = (prompts: { question: ReturnType<typeof vi.fn> }) => ({
+    connection: fakeConn(),
+    prompts: prompts as never,
+    handleSetModel: vi.fn(),
+  });
+
+  it("parses /set approval auto and persistable modes (normal)", async () => {
+    const { updateConfig } = await import(
+      "../../../../packages/client/src/config/index.js"
+    );
+    const { getApprovalMode } = await import(
+      "../../../../packages/client/src/ui/bridge/allowlist.js"
+    );
+    await handleSet("approval", "auto", setDeps({ question: vi.fn() }));
+    expect(updateConfig).toHaveBeenCalledWith({ approvalMode: "auto" });
+    expect(getApprovalMode()).toBe("auto");
+
+    await handleSet(
+      "approval",
+      "accept-edits",
+      setDeps({ question: vi.fn() }),
+    );
+    expect(updateConfig).toHaveBeenCalledWith({
+      approvalMode: "accept_edits",
+    });
+  });
+
+  it("requires typing bypass to confirm and does not persist it (boundary)", async () => {
+    const { updateConfig } = await import(
+      "../../../../packages/client/src/config/index.js"
+    );
+    const { getApprovalMode, setSessionApprovalMode } = await import(
+      "../../../../packages/client/src/ui/bridge/allowlist.js"
+    );
+    setSessionApprovalMode("default");
+    const question = vi.fn(async () => "nope");
+    await handleSet("approval", "bypass", setDeps({ question }));
+    expect(question).toHaveBeenCalled();
+    expect(getApprovalMode()).toBe("default");
+    expect(updateConfig).not.toHaveBeenCalledWith({ approvalMode: "bypass" });
+
+    const confirm = vi.fn(async () => "bypass");
+    await handleSet("approval", "bypass", setDeps({ question: confirm }));
+    expect(getApprovalMode()).toBe("bypass");
+    expect(updateConfig).not.toHaveBeenCalledWith({ approvalMode: "bypass" });
+    setSessionApprovalMode("default");
+  });
+
+  it("rejects unknown approval modes (error)", async () => {
+    const { printError } = await import(
+      "../../../../packages/client/src/renderer.js"
+    );
+    await handleSet("approval", "nope", setDeps({ question: vi.fn() }));
+    expect(printError).toHaveBeenCalled();
+  });
+});
+
+describe("handleSpinner / handleThink / handleNotify", () => {
   it("toggles spinner setting", () => {
     handleSpinner("off", "");
     expect(configState.ui.showSpinner).toBe(false);
@@ -135,6 +206,13 @@ describe("handleSpinner / handleThink", () => {
     expect(configState.showThinkOutput).toBe(false);
     handleThink("on", "");
     expect(configState.showThinkOutput).toBe(true);
+  });
+
+  it("toggles notifications setting (normal)", () => {
+    handleNotify("on", "");
+    expect(configState.ui.notifications).toBe(true);
+    handleNotify("off", "");
+    expect(configState.ui.notifications).toBe(false);
   });
 });
 
@@ -200,7 +278,7 @@ describe("handleSkills", () => {
 
 describe("workspace handlers", () => {
   it("handleCwd prints proxy cwd", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopy-cwd-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-cwd-"));
   try {
       const proxy = new LocalFileProxy(dir);
       handleCwd(proxy);
@@ -210,7 +288,7 @@ describe("workspace handlers", () => {
   });
 
   it("handleWorkspace set updates proxy root", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopy-ws-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-ws-"));
     try {
       const proxy = new LocalFileProxy(dir);
       const onPromptUpdate = vi.fn();
@@ -239,6 +317,11 @@ describe("CommandHandler", () => {
     expect(await handler.handle("plain task")).toBe(false);
   });
 
+  it("returns false for !ls so bang passthrough stays client-local (boundary)", async () => {
+    const handler = new CommandHandler({ conn: fakeConn(), prompts });
+    expect(await handler.handle("!ls")).toBe(false);
+  });
+
   it("routes /memory and /models", async () => {
     const conn = fakeConn();
     const handler = new CommandHandler({ conn, prompts });
@@ -253,5 +336,30 @@ describe("CommandHandler", () => {
     expect(await handler.handle("/agent cap 2")).toBe(true);
     expect(await handler.handle("/spinner off")).toBe(true);
     expect(configState.subagentCap).toBe(2);
+  });
+
+  it("routes /help to the help printer and returns true (normal)", async () => {
+    const { printHelp, printError } = await import(
+      "../../../../packages/client/src/renderer.js"
+    );
+    const handler = new CommandHandler({ conn: fakeConn(), prompts });
+    expect(await handler.handle("/help")).toBe(true);
+    expect(printHelp).toHaveBeenCalledOnce();
+    expect(printError).not.toHaveBeenCalled();
+  });
+
+  it("routes /clear to clearScreen and returns true (normal)", async () => {
+    const { clearScreen } = await import(
+      "../../../../packages/client/src/ui/uiBridge.js"
+    );
+    const handler = new CommandHandler({ conn: fakeConn(), prompts });
+    expect(await handler.handle("/clear")).toBe(true);
+    expect(clearScreen).toHaveBeenCalledOnce();
+  });
+
+  it("routes /notify on and returns true (normal)", async () => {
+    const handler = new CommandHandler({ conn: fakeConn(), prompts });
+    expect(await handler.handle("/notify on")).toBe(true);
+    expect(configState.ui.notifications).toBe(true);
   });
 });

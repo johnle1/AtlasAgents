@@ -1,5 +1,5 @@
 {
-  "name": "loopycode",
+  "name": "atlasagents",
   "version": "1.0.0",
   "description": "",
   "private": true,
@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @loopycode/shared && npm run build -w loopycode && npm run build -w loopycode-server",
+    "build": "npm run build -w @atlasagents/shared && npm run build -w atlasagents && npm run build -w atlasagents-server",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

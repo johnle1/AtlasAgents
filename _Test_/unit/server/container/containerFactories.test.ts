@@ -15,7 +15,7 @@ import { AgentOrchestrator } from "../../../../packages/server/src/orchestration
 const tempRoots: string[] = [];
 
 const makeRoot = async (): Promise<string> => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-container-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-container-"));
   tempRoots.push(root);
   return root;
 };

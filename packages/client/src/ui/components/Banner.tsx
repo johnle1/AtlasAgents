@@ -57,7 +57,7 @@ const BorderedBlank: React.FC<{ border: (s: string) => React.ReactNode }> = ({
  * Renders the terminal welcome banner displayed on startup.
  *
  * @remarks
- * Formats a premium visual display container that draws the LoopyCode logo, version,
+ * Formats a premium visual display container that draws the AtlasAgents logo, version,
  * and currently active models in the terminal.
  *
  * @example
@@ -81,7 +81,7 @@ export const Banner: React.FC<BannerProps> = ({
   const subagent = (subagentModel ?? "").trim() || "not set";
 
   // Compute borders based on the static banner inner width configuration.
-  const title = ` LoopyCode CLI v${version} `;
+  const title = ` AtlasAgents CLI v${version} `;
   const titleDashes = "─".repeat(Math.max(0, BANNER_INNER - 6 - title.length));
 
   // Decorates frame components with the defined border color schema.

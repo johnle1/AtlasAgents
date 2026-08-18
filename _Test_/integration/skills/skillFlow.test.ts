@@ -33,7 +33,7 @@ import type {
 } from "../../../packages/server/src/routing/types.js";
 import { buildRouter } from "../../../packages/server/src/routing/routerBuilder.js";
 import { ConfigManager } from "../../../packages/server/src/config/index.js";
-import { lockCipher } from "@loopycode/shared";
+import { lockCipher } from "@atlasagents/shared";
 import { OllamaClient } from "../../../packages/server/src/ollama/client.js";
 import { ProviderRegistry } from "../../../packages/server/src/providers/providerRegistry.js";
 import { SkillManager } from "../../../packages/server/src/skills/skillManager.js";
@@ -53,7 +53,7 @@ afterEach(async () => {
 const SESSION: Session = { userId: "user_1", requesterId: "req_1" };
 
 const makeRoot = async (): Promise<string> => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-skill-flow-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-skill-flow-"));
   tempRoots.push(root);
   return root;
 };

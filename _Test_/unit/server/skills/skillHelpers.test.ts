@@ -22,7 +22,7 @@ import {
 const tempRoots: string[] = [];
 
 const makeSkillsDir = (): string => {
-  const root = fsSync.mkdtempSync(path.join(os.tmpdir(), "loopy-skill-helpers-"));
+  const root = fsSync.mkdtempSync(path.join(os.tmpdir(), "atlas-skill-helpers-"));
   tempRoots.push(root);
   return root;
 };

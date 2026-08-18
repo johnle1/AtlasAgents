@@ -59,7 +59,7 @@ describe("streamRequest", () => {
         frames.push(frame.kind);
       },
       (token) => tokens.push(token),
-    );
+    ).done;
 
     expect(tokens).toEqual(["hi"]);
     expect(frames).toEqual(["token", "done"]);
@@ -70,7 +70,7 @@ describe("streamRequest", () => {
       onError(new Error("stream failed"));
     });
     await expect(
-      streamRequest(rsocket, { kind: "explore" }, meta, () => {}),
+      streamRequest(rsocket, { kind: "explore" }, meta, () => {}).done,
     ).rejects.toThrow("stream failed");
   });
 });
@@ -114,13 +114,42 @@ describe("sendTask", () => {
       () => {},
       undefined,
       2,
-    );
+    ).done;
 
     expect(capturedBody).toMatchObject({
       kind: "task",
       text: "do work",
       maxSubagents: 2,
       subagentModel: "m1",
+    });
+  });
+
+  it("includes approvalMode on the task payload when provided (normal)", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    const rsocket = {
+      requestStream: (payload: Payload, _n: number, callbacks: {
+        onComplete: () => void;
+      }) => {
+        capturedBody = JSON.parse(payload.data!.toString("utf8"));
+        callbacks.onComplete();
+        return { request: vi.fn() };
+      },
+    } as unknown as RSocket;
+
+    await sendTask(
+      "do work",
+      minimalConfig,
+      meta,
+      rsocket,
+      () => {},
+      undefined,
+      2,
+      "plan",
+    ).done;
+
+    expect(capturedBody).toMatchObject({
+      kind: "task",
+      approvalMode: "plan",
     });
   });
 });
@@ -144,7 +173,7 @@ describe("sendStream", () => {
       },
       meta,
       rsocket,
-    );
+    ).done;
     expect(capturedBody).toEqual({ kind: "models.pull", name: "gemma:4b" });
   });
 
@@ -162,7 +191,7 @@ describe("sendStream", () => {
       { kind: "explore", onFrame: () => {} },
       meta,
       rsocket,
-    );
+    ).done;
     expect(capturedBody).toEqual({ kind: "explore" });
   });
 });

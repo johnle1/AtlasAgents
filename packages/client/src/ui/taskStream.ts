@@ -9,6 +9,7 @@
 
 import type { Connection } from "../connection/index.js";
 import type { SubagentStatusSource, TaskFrame } from "../types/frames.js";
+import { clampUsage } from "@atlasagents/shared";
 import { loadConfig } from "../config/index.js";
 import { formatAgentThinkForDisplay } from "../renderer.js";
 import { thinkDisplayThreshold } from "./thinkDisplay.js";
@@ -24,6 +25,7 @@ import {
   endLiveThink,
   requestApproval,
   requestPrompt,
+  setActiveTaskCancel,
   setSubagentBoards,
   setSubagentStatus,
   setBusy,
@@ -32,7 +34,10 @@ import {
   setTaskActive,
   startLiveThink,
   updateAgentActivity,
+  setContextUsage,
 } from "./uiBridge.js";
+import { notifyUser } from "./notify.js";
+import { getApprovalMode } from "./bridge/allowlist.js";
 import { spinnerForStatusFrame } from "./spinnerSync.js";
 import type { PlanDecision } from "./types.js";
 
@@ -382,10 +387,14 @@ export const runTaskStream = async (
     });
   };
 
+  let cancelledByUser = false;
+  let completedSuccessfully = false;
+
   try {
-    await connection.sendTask({
+    const { done, cancel } = await connection.sendTask({
       task,
       maxSubagents,
+      approvalMode: getApprovalMode(),
       onToken: (token) => {
         // Clear initial thinking spinner once real token output begins
         setSpinner(null);
@@ -409,11 +418,33 @@ export const runTaskStream = async (
           handleErrorFrame(taskFrame);
         } else if (taskFrame.kind === "warning") {
           handleWarningFrame(taskFrame);
+        } else if (taskFrame.kind === "usage") {
+          const clamped = clampUsage(
+            taskFrame.usedTokens,
+            taskFrame.contextWindow,
+          );
+          if (clamped) {
+            setContextUsage(clamped);
+          }
         }
       },
     });
+    setActiveTaskCancel(() => {
+      cancelledByUser = true;
+      cancel();
+    });
+    await done;
     // Commit any remaining streaming buffer after stream completes normally
     appendStreamTail();
+    if (cancelledByUser) {
+      appendHistory({
+        kind: "text",
+        text: "Task cancelled by user",
+        variant: "warning",
+      });
+    } else if (!errorFrameShown) {
+      completedSuccessfully = true;
+    }
   } catch (streamError) {
     // Only throw if we haven't already shown an error frame from the server
     // This prevents double-displaying errors when stream fails after error
@@ -423,6 +454,10 @@ export const runTaskStream = async (
     // Commit buffer even on error to preserve partial output
     appendStreamTail();
   } finally {
+    setActiveTaskCancel(null);
+    if (completedSuccessfully) {
+      notifyUser("Task complete");
+    }
     // Cleanup UI state regardless of success or failure
     setStreamingText(null);
     // Safety net: commits any think stream still open at this point (e.g. a

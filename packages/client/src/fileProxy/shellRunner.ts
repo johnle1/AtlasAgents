@@ -7,7 +7,9 @@
  */
 
 import { spawn } from "node:child_process";
+
 import type { ShellResult } from "./types.js";
+import type { RunShellOptions } from "./sandbox/types.js";
 
 /**
  * Stderr token prepended when a command is killed for exceeding its timeout.
@@ -78,6 +80,7 @@ const formatAbortMessage = (signal: AbortSignal): string => {
  * @param cwd - Absolute working directory for the child.
  * @param timeoutMs - Kill deadline; default `120_000`.
  * @param signal - Optional session abort (e.g. RSocket disconnect).
+ * @param options - Optional sandbox wrap (auto-mode cautious commands).
  * @returns {@link ShellResult} when the process closes or is cancelled.
  * @throws {@link Error} When the child emits `error` before a successful settle.
  *
@@ -92,6 +95,7 @@ export const runShell = (
   cwd: string,
   timeoutMs = 120_000,
   signal?: AbortSignal,
+  options?: RunShellOptions,
 ): Promise<ShellResult> =>
   new Promise((resolve, reject) => {
     // ===== STEP 1: Detect platform =====
@@ -105,20 +109,24 @@ export const runShell = (
     //         /s = Strip first and last quotes from command string
     //         /c = Execute the command and exit
     // Step 2b: On Unix: use /bin/sh with -c flag to execute command string
-    // Step 2c: Configure stdio:
+    // Step 2c: When a sandbox provider is present, spawn its argv as-is
+    //         (argv array — no string-interpolation quoting)
+    // Step 2d: Configure stdio:
     //         - stdin: "ignore" (no interactive input allowed)
     //         - stdout: "pipe" (capture output from command)
     //         - stderr: "pipe" (capture errors separately from stdout)
-    // Step 2d: Set working directory (cwd) so command runs in correct location
-    const spawnedProcess = isWindowsPlatform
-      ? spawn("cmd.exe", ["/d", "/s", "/c", command], {
-          cwd,
-          stdio: ["ignore", "pipe", "pipe"],
-        })
-      : spawn("/bin/sh", ["-c", command], {
-          cwd,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
+    // Step 2e: Set working directory (cwd) so command runs in correct location
+    const sandboxArgv = options?.sandbox?.wrapCommand(command, { cwd }).argv;
+    const spawnSpec = sandboxArgv
+      ? { bin: sandboxArgv[0] ?? "/bin/sh", args: sandboxArgv.slice(1) }
+      : isWindowsPlatform
+        ? { bin: "cmd.exe", args: ["/d", "/s", "/c", command] }
+        : { bin: "/bin/sh", args: ["-c", command] };
+
+    const spawnedProcess = spawn(spawnSpec.bin, spawnSpec.args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
     // ===== STEP 3: Initialize output buffers =====
     // Step 3a: Create arrays to accumulate stdout data chunks

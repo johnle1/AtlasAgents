@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { lockCipher } from "@loopycode/shared";
+import { lockCipher } from "@atlasagents/shared";
 import {
   loadStartupSecrets,
   saveStartupSecrets,
@@ -28,7 +28,7 @@ const tempRoots: string[] = [];
 
 const makeRoot = async (): Promise<string> => {
   const root = await fs.mkdtemp(
-    path.join(os.tmpdir(), "loopy-server-repair-"),
+    path.join(os.tmpdir(), "atlas-server-repair-"),
   );
   tempRoots.push(root);
   return root;

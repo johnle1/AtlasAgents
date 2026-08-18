@@ -2,7 +2,7 @@
  * Task stream frames from the server.
  *
  * @remarks
- * This module re-exports shared type definitions from @loopycode/shared that
+ * This module re-exports shared type definitions from @atlasagents/shared that
  * define the structure of frames sent by the server during task execution. These
  * types are used throughout the client to decode and handle server responses.
  *
@@ -21,7 +21,7 @@
  * Structure of an installed model on the server.
  *
  * @remarks
- * Alias of `@loopycode/shared`'s `ModelSummary` — the same wire shape the
+ * Alias of `@atlasagents/shared`'s `ModelSummary` — the same wire shape the
  * server's `OllamaModelSummary` aliases, since `models.list` round-trips it
  * as-is with no transformation.
  *
@@ -43,9 +43,9 @@
  * };
  * ```
  */
-export type { ModelSummary as InstalledModel } from "@loopycode/shared";
+export type { ModelSummary as InstalledModel } from "@atlasagents/shared";
 
-// Re-export shared types from @loopycode/shared for use in the client
+// Re-export shared types from @atlasagents/shared for use in the client
 export type {
   SubagentBoardSnapshot,
   SubagentPlan,
@@ -59,7 +59,7 @@ export type {
   StatusIcon,
   TaskFrame,
   TaskLifecycleState,
-} from "@loopycode/shared";
+} from "@atlasagents/shared";
 
-// Re-export frame decoder function from @loopycode/shared
-export { decodeFrame } from "@loopycode/shared";
+// Re-export frame decoder function from @atlasagents/shared
+export { decodeFrame } from "@atlasagents/shared";

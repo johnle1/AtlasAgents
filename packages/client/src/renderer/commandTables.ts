@@ -11,7 +11,21 @@ import type { MemoryEntry } from "../connection/index.js";
 import { getTheme } from "../theme/themeManager.js";
 import { THEMES } from "../theme/themes.js";
 import { appendStyledLines } from "./sink.js";
-import type { ModelGroup, FlatModelEntry } from "./types.js";
+import type { ModelGroup, FlatModelEntry, CurrentModelSelection } from "./types.js";
+import type { CommandEntry } from "../ui/commandCatalog.js";
+import { COMMAND_CATALOG } from "../ui/commandCatalog.js";
+
+/**
+ * Whether two Ollama model tags refer to the same model, tolerating the
+ * common bare-name-vs-`:latest` mismatch (e.g. `"gemma3"` and
+ * `"gemma3:latest"`), mirroring {@link matchRunningModel}'s normalization.
+ */
+const modelTagsMatch = (tagA: string, tagB: string): boolean => {
+  if (tagA === tagB) return true;
+  const withLatest = (tag: string): string =>
+    tag.includes(":") ? tag : `${tag}:latest`;
+  return withLatest(tagA) === withLatest(tagB);
+};
 
 /**
  * Masks a secret for config display (password / tokens).
@@ -73,6 +87,7 @@ export const buildConfigLines = (config: Config): string[] => {
     `  ${theme.textAccent}ui.theme${theme.reset}       ${resolvedThemeName} (${config.ui.theme})`,
     `  ${theme.textAccent}show think${theme.reset}     ${config.showThinkOutput ? "on" : "off"} (/think on|off)`,
     `  ${theme.textAccent}show spinner${theme.reset}   ${spinnerState}`,
+    `  ${theme.textAccent}approval mode${theme.reset}  ${config.approvalMode} (/set approval; Shift+Tab cycles default/accept_edits/plan)`,
   ];
 };
 
@@ -114,11 +129,14 @@ const buildModelsLines = (models: string[], label: string): string[] => {
  *
  * @param groups - Per-provider model lists from `providers.listModels`.
  * @param label - Role label in the header (`"agent"` / `"subagent"`).
+ * @param current - Currently-configured agent/subagent (provider, model), if
+ *   known, so matching rows can be marked in the list.
  * @returns Styled lines plus the flat (provider, model) list indexed 0..N-1.
  */
 export const buildGroupedModelsLines = (
   groups: ModelGroup[],
   label: string,
+  current?: CurrentModelSelection,
 ): { lines: string[]; entries: FlatModelEntry[] } => {
   const theme = getTheme();
   const lines = [
@@ -133,8 +151,28 @@ export const buildGroupedModelsLines = (
     lines.push(`  ${theme.textAccent}${group.provider}${theme.reset}`);
     for (const model of group.models) {
       entries.push({ provider: group.provider, model });
+
+      const marks: string[] = [];
+      const isAgent =
+        current?.agent?.provider === group.provider &&
+        modelTagsMatch(current.agent.model, model);
+      const isSubagent =
+        current?.subagent?.provider === group.provider &&
+        modelTagsMatch(current.subagent.model, model);
+      if (isAgent && isSubagent) {
+        marks.push("current agent + subagent");
+      } else if (isAgent) {
+        marks.push("current agent");
+      } else if (isSubagent) {
+        marks.push("current subagent");
+      }
+      const marker =
+        marks.length > 0
+          ? `  ${theme.success}← ${marks.join(", ")}${theme.reset}`
+          : "";
+
       lines.push(
-        `  ${theme.warning}${String(entries.length).padStart(3)}${theme.reset}  ${model}`,
+        `  ${theme.warning}${String(entries.length).padStart(3)}${theme.reset}  ${model}${marker}`,
       );
     }
   }
@@ -148,14 +186,18 @@ export const buildGroupedModelsLines = (
  *
  * @param groups - Per-provider model lists from `providers.listModels`.
  * @param label - Role label in the header.
+ * @param current - Currently-configured agent/subagent (provider, model), if
+ *   known, so matching rows show `← current agent`, `← current subagent`, or
+ *   `← current agent + subagent` when the same model serves both roles.
  * @returns Flat (provider, model) entries in display order, for mapping a
  *   chosen number back to a selection.
  */
 export const printGroupedModels = (
   groups: ModelGroup[],
   label: string,
+  current?: CurrentModelSelection,
 ): FlatModelEntry[] => {
-  const { lines, entries } = buildGroupedModelsLines(groups, label);
+  const { lines, entries } = buildGroupedModelsLines(groups, label, current);
   appendStyledLines(lines, { leadingBlank: true, trailingBlank: true });
   return entries;
 };
@@ -334,6 +376,144 @@ export const printSkills = (names: string[]): void => {
  */
 export const printMemory = (entries: MemoryEntry[]): void => {
   appendStyledLines(buildMemoryLines(entries), {
+    leadingBlank: true,
+    trailingBlank: true,
+  });
+};
+
+/**
+ * Section order for `/help`. Commands that do not match a rule fall through
+ * to `"Other"` so a new catalog entry cannot silently vanish from the screen.
+ */
+const HELP_GROUP_ORDER = [
+  "Connection",
+  "Models",
+  "Providers",
+  "Agent",
+  "Config",
+  "Skills",
+  "Memory",
+  "Workspace",
+  "UI",
+  "Session",
+  "Other",
+] as const;
+
+/**
+ * Maps a catalog command to a `/help` section.
+ *
+ * @param command - Catalog `command` field (e.g. `"/models pull"`).
+ * @returns A section title from {@link HELP_GROUP_ORDER}.
+ */
+const helpGroupFor = (command: string): (typeof HELP_GROUP_ORDER)[number] => {
+  if (
+    command.startsWith("/set password") ||
+    command.startsWith("/set server") ||
+    command.startsWith("/set port")
+  ) {
+    return "Connection";
+  }
+  if (
+    command.startsWith("/set agent") ||
+    command.startsWith("/set subagent") ||
+    command.startsWith("/models")
+  ) {
+    return "Models";
+  }
+  if (command.startsWith("/providers")) return "Providers";
+  if (command.startsWith("/agent")) return "Agent";
+  if (command === "/config" || command.startsWith("/set approval")) return "Config";
+  if (command.startsWith("/skills")) return "Skills";
+  if (command.startsWith("/memory")) return "Memory";
+  if (command.startsWith("/workspace") || command === "/cwd") return "Workspace";
+  if (
+    command.startsWith("/theme") ||
+    command.startsWith("/debug") ||
+    command.startsWith("/think") ||
+    command.startsWith("/spinner") ||
+    command.startsWith("/notify")
+  ) {
+    return "UI";
+  }
+  if (
+    command === "/new" ||
+    command === "/explore" ||
+    command === "/help" ||
+    command === "/clear" ||
+    command === "/exit"
+  ) {
+    return "Session";
+  }
+  return "Other";
+};
+
+/**
+ * Builds themed `/help` lines from a command catalog.
+ *
+ * @remarks
+ * Every catalog entry appears exactly once, grouped under section headers
+ * (Models, Providers, Session, UI, …). Using the catalog as input — rather
+ * than a hard-coded string — keeps `/help` in lockstep with autocomplete.
+ *
+ * @param catalog - Command entries to render (normally {@link COMMAND_CATALOG}).
+ * @returns Styled lines: header, group titles, and one row per command.
+ *
+ * @example
+ * ```ts
+ * const lines = buildHelpLines(COMMAND_CATALOG);
+ * ```
+ */
+export const buildHelpLines = (catalog: CommandEntry[]): string[] => {
+  const theme = getTheme();
+  const grouped = new Map<string, CommandEntry[]>();
+
+  for (const entry of catalog) {
+    const group = helpGroupFor(entry.command);
+    const existing = grouped.get(group);
+    if (existing) {
+      existing.push(entry);
+    } else {
+      grouped.set(group, [entry]);
+    }
+  }
+
+  const displayOf = (entry: CommandEntry): string =>
+    entry.label ?? entry.command;
+  const columnWidth = catalog.reduce(
+    (width, entry) => Math.max(width, displayOf(entry).length),
+    0,
+  );
+
+  const lines = [
+    `${theme.textBold}  Commands${theme.reset}`,
+    `${theme.textSecondary}  ${"─".repeat(34)}${theme.reset}`,
+  ];
+
+  for (const title of HELP_GROUP_ORDER) {
+    const entries = grouped.get(title);
+    if (!entries || entries.length === 0) continue;
+
+    lines.push("");
+    lines.push(`  ${theme.textAccent}${title}${theme.reset}`);
+    for (const entry of entries) {
+      const display = displayOf(entry).padEnd(columnWidth);
+      lines.push(
+        `  ${theme.textBold}${display}${theme.reset}  ${theme.textSecondary}${entry.description}${theme.reset}`,
+      );
+    }
+  }
+
+  return lines;
+};
+
+/**
+ * Prints the full slash-command help screen to scrollback.
+ *
+ * @remarks
+ * Invoked by `/help`. Renders {@link COMMAND_CATALOG} via {@link buildHelpLines}.
+ */
+export const printHelp = (): void => {
+  appendStyledLines(buildHelpLines(COMMAND_CATALOG), {
     leadingBlank: true,
     trailingBlank: true,
   });

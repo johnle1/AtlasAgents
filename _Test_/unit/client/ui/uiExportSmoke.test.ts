@@ -37,7 +37,7 @@ vi.mock("../../../../packages/client/src/config/index.js", () => ({
     ui: { theme: "default", showSpinner: true },
   }),
   updateConfig: vi.fn(),
-  HISTORY_FILE: "/tmp/loopy-history-test",
+  HISTORY_FILE: "/tmp/atlas-history-test",
 }));
 
 vi.mock("../../../../packages/client/src/theme/themeManager.js", () => ({

@@ -7,7 +7,7 @@
  */
 
 import * as path from "node:path";
-import type { ClientOpResponse, ClientRoute } from "@loopycode/shared";
+import type { ClientOpResponse, ClientRoute } from "@atlasagents/shared";
 import {
   isTaskActive,
   startThinking,
@@ -301,12 +301,13 @@ export class LocalFileProxy {
       this.onCwdChanged?.(absolutePath);
     },
     classifyCommand: this.classifyCommand,
-    runShell: (command: string) =>
+    runShell: (command: string, options) =>
       runShell(
         command,
         this.currentDir,
         loadConfig().shellTimeoutMs,
         this.sessionAbortSignal?.(),
+        options,
       ),
     listStructure: this.listStructure,
     onCwdChanged: this.onCwdChanged,

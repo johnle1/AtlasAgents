@@ -22,7 +22,7 @@ import {
   recommendNumCtx,
 } from "../../../../packages/server/src/hardware/vramProbe.js";
 import { ConfigManager } from "../../../../packages/server/src/config/index.js";
-import { initializeCipher, lockCipher } from "@loopycode/shared";
+import { initializeCipher, lockCipher } from "@atlasagents/shared";
 
 // ConfigManager encrypts the `providers` field at rest; --write triggers a
 // save, which requires the cipher unlocked first. Unrelated to what this
@@ -147,7 +147,7 @@ describe("runDetectHardwareCli --write", () => {
     // detects for real, derives the expected numCtx the same way the CLI
     // does, and asserts the write matches that (rather than any specific
     // vendor/tier), keeping the test honest across environments.
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-detect-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-detect-"));
     tempRoots.push(root);
 
     // Stub fetch defensively so no real network calls happen from the
@@ -192,7 +192,7 @@ describe("runDetectHardwareCli --write", () => {
     // it depends on: writing the same provider name twice never clobbers a
     // pre-existing entry when the write is skipped, matching the "skip if
     // present" contract described in the plan.
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-detect-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-detect-"));
     tempRoots.push(root);
     const manager = new ConfigManager({ rootDir: root });
 
@@ -218,7 +218,7 @@ describe("runDetectHardwareCli --write", () => {
   });
 
   it("does not overwrite a numCtx the user already configured by hand", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-detect-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-detect-"));
     tempRoots.push(root);
     vi.stubGlobal(
       "fetch",
@@ -237,7 +237,7 @@ describe("runDetectHardwareCli --write", () => {
   });
 
   it("writes numCtx in a fresh process that never unlocked the cipher (regression guard)", async () => {
-    // The real `loopy-detect-hardware --write` invocation is a standalone,
+    // The real `atlas-detect-hardware --write` invocation is a standalone,
     // single-shot process. For a numCtx-only write (no encrypted providers on
     // disk yet, and no non-ollama provider to add), it must not require
     // unlockOrSetupProvidersCipher — _saveRaw skips the envelope when
@@ -250,7 +250,7 @@ describe("runDetectHardwareCli --write", () => {
     // so the test stays non-interactive either way.
     lockCipher();
     try {
-      const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-detect-"));
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-detect-"));
       tempRoots.push(root);
       vi.stubGlobal(
         "fetch",
@@ -278,14 +278,14 @@ describe("runDetectHardwareCli --write", () => {
   });
 
   it("unlocks an existing encrypted config before --write (regression for cipher-locked hosts)", async () => {
-    // Mirrors a machine that already ran `loopy-server start`: config.json
-    // has $providersSecrets, and a fresh `loopy-detect-hardware --write`
+    // Mirrors a machine that already ran `atlas-server start`: config.json
+    // has $providersSecrets, and a fresh `atlas-detect-hardware --write`
     // process starts with the cipher locked. Without unlocking first,
     // getAll() fails with ConfigCipherLockedError.
     const passphrase = "existing-server-config-passphrase";
     initializeCipher(passphrase);
 
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-detect-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-detect-"));
     tempRoots.push(root);
     const seed = new ConfigManager({ rootDir: root });
     await seed.addProvider("seed-provider", {

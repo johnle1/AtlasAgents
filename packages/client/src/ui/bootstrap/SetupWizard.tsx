@@ -1,5 +1,5 @@
 /**
- * First-run setup wizard for LoopyCode server connection settings.
+ * First-run setup wizard for AtlasAgents server connection settings.
  *
  * @remarks
  * Shown when no config file exists ({@link BootstrapApp} with
@@ -58,7 +58,7 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
    * @remarks
    * Builds on {@link loadConfig} rather than the defaults so the wizard only
    * ever writes `server`, `port`, and `password`. The wizard is no longer
-   * reached solely on a truly fresh install — `loopy --reset` clears the
+   * reached solely on a truly fresh install — `atlas --reset` clears the
    * connection settings and lands here too — so starting from defaults would
    * silently discard the user's theme, model choices, and workspace.
    *
@@ -105,8 +105,8 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
 
   return (
     <Box flexDirection="column" paddingY={1}>
-      <Text bold>Welcome to LoopyCode</Text>
-      <Text dimColor>First-time setup — connect to your LoopyCode server.</Text>
+      <Text bold>Welcome to AtlasAgents</Text>
+      <Text dimColor>First-time setup — connect to your AtlasAgents server.</Text>
       <Box marginTop={1} flexDirection="column">
         <Box>
           <Text>Server address: </Text>

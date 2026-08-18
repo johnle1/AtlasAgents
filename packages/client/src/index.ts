@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Entry point for the LoopyCode CLI application.
+ * Entry point for the AtlasAgents CLI application.
  *
  * @remarks
  * This is the minimal entry point that handles only:

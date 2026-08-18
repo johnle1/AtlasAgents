@@ -1,5 +1,5 @@
 /**
- * Theme contract and built-in palette registry for the LoopyCode CLI.
+ * Theme contract and built-in palette registry for the AtlasAgents CLI.
  *
  * @remarks
  * Each {@link Theme} is a bag of ANSI CSI strings (not CSS). Custom palettes

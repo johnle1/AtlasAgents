@@ -1,5 +1,5 @@
 /**
- * ANSI string builder for the LoopyCode CLI startup banner.
+ * ANSI string builder for the AtlasAgents CLI startup banner.
  *
  * @remarks
  * Produces one fully styled terminal line per array entry — including box-drawing
@@ -98,7 +98,7 @@ const borderedBlank = (borderColor: string, resetCode: string): string =>
  * Does not throw; missing models degrade to placeholders.
  *
  * @param configuration - App config providing current agent and subagent model names.
- * @param version - Semver (or build) string shown after `LoopyCode CLI v`.
+ * @param version - Semver (or build) string shown after `AtlasAgents CLI v`.
  * @returns Ordered ANSI-styled lines ready to print with `console.log` or similar.
  *
  * @example
@@ -153,7 +153,7 @@ export const buildBannerLines = (
 
   // Title sits after a fixed "╭──────" run; remaining inner width is filled with
   // ─ so the closing ╮ stays flush to BANNER_INNER regardless of version length.
-  const titleText = ` LoopyCode CLI v${version} `;
+  const titleText = ` AtlasAgents CLI v${version} `;
   const titleDashes = "─".repeat(
     Math.max(0, BANNER_INNER - 6 - titleText.length),
   );

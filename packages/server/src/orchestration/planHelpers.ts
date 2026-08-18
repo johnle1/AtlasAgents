@@ -1,4 +1,4 @@
-import type { SubagentPlan as SharedSubagentPlan, PlanExecution } from "@loopycode/shared";
+import type { SubagentPlan as SharedSubagentPlan, PlanExecution } from "@atlasagents/shared";
 import type { MaxSubagentsParam } from "./maxSubagents.js";
 import type { SubagentPlan, PlannedSubtask } from "./types.js";
 

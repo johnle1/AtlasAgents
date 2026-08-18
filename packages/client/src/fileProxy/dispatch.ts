@@ -7,7 +7,7 @@
  * `{ ok: false, error }`.
  */
 
-import type { ClientRoute } from "@loopycode/shared";
+import type { ClientRoute } from "@atlasagents/shared";
 import type { DispatchContext } from "./types.js";
 import {
   handleFileCd,

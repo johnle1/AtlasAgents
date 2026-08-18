@@ -32,7 +32,7 @@ export const handleExplore = async (conn: Connection): Promise<void> => {
     printLine("  Exploring codebase...");
     let explorationBuffer = "";
 
-    await conn.sendStream({
+    const { done } = await conn.sendStream({
       kind: "explore",
       payload: {},
       onFrame: async (frame) => {
@@ -45,6 +45,7 @@ export const handleExplore = async (conn: Connection): Promise<void> => {
         }
       },
     });
+    await done;
 
     // Clear live stream; history gets the full text once (if any).
     setStreamingText(null);

@@ -9,7 +9,7 @@ vi.hoisted(() => {
   const os = require("node:os") as typeof import("node:os");
   const path = require("node:path") as typeof import("node:path");
   process.env.HOME = fs.mkdtempSync(
-    path.join(os.tmpdir(), "loopy-client-static-exports-"),
+    path.join(os.tmpdir(), "atlas-client-static-exports-"),
   );
 });
 

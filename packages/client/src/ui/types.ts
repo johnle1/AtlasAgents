@@ -195,6 +195,7 @@ export type ApprovalRequest =
 export type ApprovalResult =
   | boolean
   | PlanDecision
+  | "always"
   | {
       type: "plan";
       decision: PlanDecision;

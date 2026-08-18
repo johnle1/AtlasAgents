@@ -8,10 +8,10 @@
 
 import type { PlanReviewResponse } from "../orchestration/types.js";
 import type { PlanReviewTransport } from "../workspace/review/planReviewBroker.js";
-import type { TaskFrame } from "@loopycode/shared";
+import type { TaskFrame } from "@atlasagents/shared";
 
 // Re-export shared types
-export type { TaskFrame } from "@loopycode/shared";
+export type { TaskFrame } from "@atlasagents/shared";
 export type {
   PlanReviewEnvelope,
   PlanReviewTransport,

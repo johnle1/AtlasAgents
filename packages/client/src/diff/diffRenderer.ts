@@ -2,7 +2,7 @@
  * Terminal ANSI rendering for file diffs (chunks or plain text).
  *
  * @remarks
- * Consumes {@link DiffChunk} / display lines from `@loopycode/shared`, detects
+ * Consumes {@link DiffChunk} / display lines from `@atlasagents/shared`, detects
  * language via {@link detectLang}, highlights with {@link highlightLine}, and
  * paints add/remove backgrounds from the active UI theme. Used by
  * `printWrite` in the renderer and any confirm UI that shows a change preview.
@@ -11,8 +11,8 @@
  * the right edge (not just through the text length).
  */
 
-import type { DiffChunk, DiffDisplayLine } from "@loopycode/shared";
-import { getDiffDisplayLines } from "@loopycode/shared";
+import type { DiffChunk, DiffDisplayLine } from "@atlasagents/shared";
+import { getDiffDisplayLines } from "@atlasagents/shared";
 import { getTheme } from "../theme/themeManager.js";
 import { detectLang } from "./langDetector.js";
 import { highlightLine } from "./shikiHighlighter.js";
@@ -112,7 +112,7 @@ const parseLineNum = (value: string): number => {
 };
 
 /**
- * Parses one LoopyCode plain-diff display row into a {@link DiffDisplayLine}.
+ * Parses one AtlasAgents plain-diff display row into a {@link DiffDisplayLine}.
  *
  * @remarks
  * Matches the textual layout produced by shared diff formatting (line number,
@@ -258,7 +258,7 @@ const fallbackPlainLine = (line: string): string => {
  * `printWrite` history card. Each line is highlighted asynchronously.
  *
  * @param filePath - Path used only for language detection / theming context.
- * @param chunks - Diff chunks from `@loopycode/shared` (`computeDiff`, etc.).
+ * @param chunks - Diff chunks from `@atlasagents/shared` (`computeDiff`, etc.).
  * @returns Newline-joined ANSI body (no trailing requirement).
  *
  * @example

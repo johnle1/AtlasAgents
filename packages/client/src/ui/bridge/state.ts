@@ -20,6 +20,7 @@ type BridgeState = {
   pendingApproval: PendingApproval | null;
   pendingPrompt: PendingPrompt | null;
   streamingTokenHandler: ((token: string) => void) | null;
+  activeTaskCancel: (() => void) | null;
 };
 
 const bridgeGlobalState: BridgeState = {
@@ -29,6 +30,7 @@ const bridgeGlobalState: BridgeState = {
   pendingApproval: null,
   pendingPrompt: null,
   streamingTokenHandler: null,
+  activeTaskCancel: null,
 };
 
 /**
@@ -135,3 +137,22 @@ export const setStreamingTokenHandler = (
 ): void => {
   bridgeGlobalState.streamingTokenHandler = tokenHandler;
 };
+
+/**
+ * Stores the cancel callback for the in-flight task stream, or `null` when idle.
+ *
+ * @param cancel - Function that aborts the current RSocket task stream.
+ */
+export const setActiveTaskCancelValue = (
+  cancel: (() => void) | null,
+): void => {
+  bridgeGlobalState.activeTaskCancel = cancel;
+};
+
+/**
+ * Returns the cancel callback for the in-flight task stream, if any.
+ *
+ * @returns The cancel function, or `null` when no task is running.
+ */
+export const getActiveTaskCancelValue = (): (() => void) | null =>
+  bridgeGlobalState.activeTaskCancel;

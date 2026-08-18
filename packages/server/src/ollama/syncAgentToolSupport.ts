@@ -2,7 +2,7 @@
  * Probes Ollama model capabilities and persists whether each model supports native tool calling.
  *
  * @remarks
- * At startup and when switching models, LoopyCode needs to know whether a model
+ * At startup and when switching models, AtlasAgents needs to know whether a model
  * supports native tool calling (function calling). This module provides three
  * high-level functions that:
  * 1. Query Ollama's `/api/show/<model>` endpoint for the model's capabilities

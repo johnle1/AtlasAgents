@@ -6,18 +6,28 @@
  * (value `"edit"`) being treated as a truthy boolean by naive
  * `(await requestApproval(...)) as boolean` casts. These tests pin down
  * that every decision resolves to a safe `{ approved, feedback? }` shape.
+ *
+ * Mode / allowlist short-circuits live in `approvalBridge.test.ts`.
+ * Esc dismiss defaults live in `approvalKeymap.test.ts`.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockRequestApproval, mockRequestPrompt } = vi.hoisted(() => ({
-  mockRequestApproval: vi.fn(),
-  mockRequestPrompt: vi.fn(),
-}));
+const { mockRequestApproval, mockRequestPrompt, mockNotifyUser } = vi.hoisted(
+  () => ({
+    mockRequestApproval: vi.fn(),
+    mockRequestPrompt: vi.fn(),
+    mockNotifyUser: vi.fn(),
+  }),
+);
 
 vi.mock("../../../../packages/client/src/ui/uiBridge.js", () => ({
   requestApproval: mockRequestApproval,
   requestPrompt: mockRequestPrompt,
+}));
+
+vi.mock("../../../../packages/client/src/ui/notify.js", () => ({
+  notifyUser: mockNotifyUser,
 }));
 
 import { requestApprovalWithFeedback } from "../../../../packages/client/src/ui/approvalFlow.js";
@@ -46,12 +56,18 @@ describe("requestApprovalWithFeedback", () => {
   it("prompts for free text and returns it as feedback when the user picks Revise", async () => {
     mockRequestApproval.mockResolvedValue("edit");
     mockRequestPrompt.mockResolvedValue("use pnpm instead of npm");
-    const outcome = await requestApprovalWithFeedback(request, "What should change?");
+    const outcome = await requestApprovalWithFeedback(
+      request,
+      "What should change?",
+    );
     expect(mockRequestPrompt).toHaveBeenCalledWith({
       type: "line",
       prompt: "What should change?",
     });
-    expect(outcome).toEqual({ approved: false, feedback: "use pnpm instead of npm" });
+    expect(outcome).toEqual({
+      approved: false,
+      feedback: "use pnpm instead of npm",
+    });
   });
 
   it("trims whitespace from the feedback text", async () => {

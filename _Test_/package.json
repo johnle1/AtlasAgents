@@ -1,7 +1,7 @@
 {
-  "name": "loopycode-tests",
+  "name": "atlasagents-tests",
   "version": "1.0.0",
-  "description": "Unit, integration, and system tests for the LoopyCode monorepo",
+  "description": "Unit, integration, and system tests for the AtlasAgents monorepo",
   "private": true,
   "type": "module",
   "scripts": {

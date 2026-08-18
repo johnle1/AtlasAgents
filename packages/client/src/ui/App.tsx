@@ -6,7 +6,7 @@
  * → UI traffic flows through {@link useBridgeSetup}; keyboard and submit
  * logic live in dedicated hooks so this file stays focused on composition.
  */
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useApp, useInput } from "ink";
 import { Box, Static, Text } from "ink";
 
@@ -19,9 +19,12 @@ import {
 import { StatusSpinner } from "./components/Spinner.js";
 import { ConnectionStatusLine } from "./components/ConnectionStatusLine.js";
 import { InputBox } from "./components/InputBox.js";
+import { QueuedMessageRow } from "./components/QueuedMessageRow.js";
+import { FooterBar } from "./components/FooterBar.js";
 import { ApprovalMenu } from "./components/ApprovalMenu.js";
 import { PromptOverlay } from "./components/PromptOverlay.js";
 import { SubagentTaskBoard } from "./components/SubagentTaskBoard.js";
+import { ShortcutsHelp } from "./components/ShortcutsHelp.js";
 import type { AppProps } from "./types.js";
 import {
   commandRequiresArgs,
@@ -35,6 +38,12 @@ import { useConnectionStatus } from "./hooks/useConnectionStatus.js";
 import { useConnectionDisconnectCleanup } from "./hooks/useConnectionDisconnectCleanup.js";
 import { useKeyboardInput } from "./hooks/useKeyboardInput.js";
 import { useSubmitLine } from "./hooks/useSubmitLine.js";
+import { cancelActiveTask, clearScreen } from "./uiBridge.js";
+import { requestNewline } from "./multiline/newlineHandle.js";
+import {
+  clearSessionQueue,
+  enqueueSessionMessage,
+} from "./queue/messageQueue.js";
 
 /**
  * Root component mounted by {@link BootstrapApp} once the server is connected.
@@ -99,6 +108,12 @@ const AppContent: React.FC = () => {
     promptReq,
     subagentBoards,
     sigintBusy,
+    showShortcuts,
+    setShowShortcuts,
+    markdownRaw,
+    setMarkdownRaw,
+    approvalMode,
+    setApprovalMode,
     setActiveIndex,
     setScrollOffset,
     setHandleSubmit,
@@ -115,6 +130,7 @@ const AppContent: React.FC = () => {
     setSubagentStatuses,
     setSubagentBoards,
     setSigintBusy,
+    setContextUsage,
     inputHistory,
     setInputHistory,
     histIdx,
@@ -125,6 +141,8 @@ const AppContent: React.FC = () => {
     connection,
     commandHandler,
     onInputHistoryRef,
+    queuedMessages,
+    setQueuedMessages,
   } = useAppContext();
 
   // Track the RSocket connection state for display in the status line.
@@ -145,6 +163,21 @@ const AppContent: React.FC = () => {
   });
 
   const { exit } = useApp();
+
+  // Bumping this remounts Ink `<Static>`. Clearing `history` alone does not
+  // drop already-committed Static rows — the key + ANSI clears (in the
+  // bridge hook) are both required for Ctrl+L / `/clear`.
+  const [staticEpoch, setStaticEpoch] = useState(0);
+  const [mentionNames, setMentionNames] = useState<string[]>([]);
+  const onAfterClearScreen = useCallback(() => {
+    setStaticEpoch((epoch) => epoch + 1);
+  }, []);
+
+  // `<Static>` does not repaint committed rows. Remount when the raw-markdown
+  // toggle flips so history re-renders from the stored source.
+  useEffect(() => {
+    setStaticEpoch((epoch) => epoch + 1);
+  }, [markdownRaw]);
 
   // New typing resets autocomplete selection and scroll window.
   // This ensures that when the user types a new character, we start from
@@ -178,6 +211,9 @@ const AppContent: React.FC = () => {
     setBannerEntries,
     setSubagentStatuses,
     setSubagentBoards,
+    onAfterClearScreen,
+    setContextUsage,
+    setApprovalMode,
   });
 
   const { submit } = useSubmitLine({
@@ -194,6 +230,8 @@ const AppContent: React.FC = () => {
     setSigintBusy,
     connection,
     commandHandler,
+    fileProxy,
+    setQueuedMessages,
   });
 
   /**
@@ -247,6 +285,20 @@ const AppContent: React.FC = () => {
     [activeIndex, submit, setInput],
   );
 
+  const enqueueQueuedLine = useCallback(
+    (line: string) => {
+      const next = enqueueSessionMessage(line);
+      setQueuedMessages(next.items);
+    },
+    [setQueuedMessages],
+  );
+
+  const cancelTaskAndQueue = useCallback(() => {
+    cancelActiveTask();
+    const cleared = clearSessionQueue();
+    setQueuedMessages(cleared.items);
+  }, [setQueuedMessages]);
+
   // Register the submit callback with the context so InputBox can invoke it.
   // We use useCallback to memoize the handler and only update it when dependencies
   // change, preventing unnecessary re-renders of InputBox.
@@ -268,6 +320,7 @@ const AppContent: React.FC = () => {
       input,
       activeIndex,
       scrollOffset,
+      sigintBusy,
       setSigintBusy,
       onSaveHistory,
       fileProxy,
@@ -276,11 +329,58 @@ const AppContent: React.FC = () => {
       setScrollOffset,
       setInput,
       setHistIdx,
+      showShortcuts,
+      setShowShortcuts,
+      markdownRaw,
+      setMarkdownRaw,
+      approvalMode,
+      setApprovalMode,
+      mentionNames,
     },
-    { exit },
+    {
+      exit,
+      cancelActiveTask: cancelTaskAndQueue,
+      clearScreen,
+      insertNewline: requestNewline,
+      enqueueMessage: enqueueQueuedLine,
+    },
   );
 
   useInput(keyboardInputHandler);
+
+  useEffect(() => {
+    if (!input.includes("@")) {
+      setMentionNames([]);
+      return;
+    }
+    let cancelled = false;
+    void fileProxy
+      .listDirectoryEntries(fileProxy.getCwd())
+      .then((entries) => {
+        if (!cancelled) {
+          setMentionNames(entries.map((entry) => entry.name));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setMentionNames([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [input, fileProxy]);
+
+  // `?` also reaches the prompt (Ink has no stopPropagation). Clear the
+  // buffer when the cheat-sheet opens so the `?` does not stay in the prompt.
+  useEffect(() => {
+    if (showShortcuts) setInput("");
+  }, [showShortcuts, setInput]);
+
+  // Auto-hide the cheat-sheet when a task starts or an overlay takes focus.
+  useEffect(() => {
+    if (busy || approval || promptReq) {
+      setShowShortcuts(false);
+    }
+  }, [busy, approval, promptReq, setShowShortcuts]);
 
   // Compute autocomplete suggestions for the current input. We only show
   // suggestions when there are matches, and we paginate the display to avoid
@@ -312,13 +412,17 @@ const AppContent: React.FC = () => {
   return (
     <Box flexDirection="column" height="100%">
       {/* Static region: fixed at top, contains banner and committed history */}
-      <Static items={staticEntries}>
+      <Static key={staticEpoch} items={staticEntries}>
         {(staticEntry) =>
           staticEntry.kind === "banner" ? (
             <Text key={staticEntry.key}>{staticEntry.line}</Text>
           ) : (
             <Box key={staticEntry.key} flexDirection="column">
-              {renderHistoryItem(staticEntry.item, staticEntry.key)}
+              {renderHistoryItem(
+                staticEntry.item,
+                staticEntry.key,
+                markdownRaw,
+              )}
             </Box>
           )
         }
@@ -343,11 +447,12 @@ const AppContent: React.FC = () => {
       {/* Approval menu: appears when server requests user confirmation */}
       {approval && <ApprovalMenu />}
 
-      {/* Prompt overlay: appears when server requests user input */}
       {promptReq && <PromptOverlay />}
 
-      {/* Input area: only shown when not in approval/prompt mode */}
-      {!approval && !promptReq && (
+      {showShortcuts && !busy && !approval && !promptReq && <ShortcutsHelp />}
+
+      {/* Input area: only shown when not in approval/prompt/shortcuts mode */}
+      {!approval && !promptReq && !showShortcuts && (
         <Box flexDirection="column">
           {shouldShowAutocomplete && (
             <Box flexDirection="column" borderStyle="round" paddingX={1}>
@@ -379,6 +484,7 @@ const AppContent: React.FC = () => {
           )}
 
           {/* Input box: the main text input field */}
+          <QueuedMessageRow items={queuedMessages} />
           <InputBox />
 
           {/* Connection status line: shows Connected/Connecting/Disconnected */}
@@ -388,8 +494,11 @@ const AppContent: React.FC = () => {
 
       {/* Double-Ctrl+C warning: shown when user presses Ctrl+C during a busy task */}
       {busy && sigintBusy === 1 && (
-        <Text dimColor>Press Ctrl+C again to exit</Text>
+        <Text dimColor>Press Ctrl+C again to force quit</Text>
       )}
+
+      {/* Persistent footer: visible during approvals, prompts, and shortcuts. */}
+      <FooterBar />
     </Box>
   );
 };

@@ -9,7 +9,7 @@ import type { OllamaClient } from "../ollama/client.js";
 import type { ProviderRegistry } from "../providers/providerRegistry.js";
 import type { IConfigManager } from "../orchestration/interfaces/configInterfaces.js";
 import type { MaxSubagentsParam } from "../orchestration/maxSubagents.js";
-import type { RouteId, StreamKind } from "@loopycode/shared";
+import type { RouteId, StreamKind, TaskApprovalMode } from "@atlasagents/shared";
 
 /**
  * Represents an authenticated TCP/RSocket session for routing and cleanup.
@@ -60,7 +60,7 @@ export interface Session {
  * `kind: "task"` stream payload shape.
  *
  * @remarks
- * Sourced from `@loopycode/shared` so the client can validate route/stream
+ * Sourced from `@atlasagents/shared` so the client can validate route/stream
  * names against the exact same union the server enforces, instead of
  * sending unchecked strings. See `packages/shared/src/protocol/serverProtocol.ts`.
  */
@@ -68,13 +68,13 @@ export type {
   RouteId,
   StreamKind,
   TaskStreamPayload,
-} from "@loopycode/shared";
+} from "@atlasagents/shared";
 export {
   ROUTE_IDS,
   isRouteId,
   STREAM_KINDS,
   isStreamKind,
-} from "@loopycode/shared";
+} from "@atlasagents/shared";
 
 /**
  * Async function signature for one command route implementation.
@@ -234,6 +234,7 @@ export interface IOrchestrator {
    * @param perConn - Optional per-connection state for resources.
    * @param modelOverrides - Optional model overrides for this task.
    * @param maxSubagents - Optional limits on concurrent subagent execution.
+   * @param approvalMode - Session mode: `"plan"` stops after confirm-plan.
    */
   runTask(
     session: SessionInfo,
@@ -243,6 +244,7 @@ export interface IOrchestrator {
     perConn?: PerConnection,
     modelOverrides?: TaskModelOverrides,
     maxSubagents?: MaxSubagentsParam,
+    approvalMode?: TaskApprovalMode,
   ): Promise<void>;
 }
 
@@ -315,6 +317,18 @@ export type RouterBuilderDeps = {
    * Registry of available model providers and their configurations.
    */
   providerRegistry: ProviderRegistry;
+
+  /**
+   * Base URL the `ollama` client was constructed with (e.g.
+   * `"http://localhost:11434"`), if known.
+   *
+   * @remarks
+   * Used only by `models.storage` to tell whether Ollama's model directory
+   * is readable from this server's own filesystem (host is localhost) or
+   * lives on a remote machine (any other host) — see `ollama/modelStorage.ts`.
+   * Omitted defaults to treating Ollama as local.
+   */
+  ollamaBaseUrl?: string;
 
   /**
    * Manager for application configuration and settings.

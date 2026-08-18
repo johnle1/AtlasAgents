@@ -1,8 +1,8 @@
 /**
- * RSocket TCP transport for the LoopyCode server.
+ * RSocket TCP transport for the AtlasAgents server.
  *
  * @remarks
- * This module is the network entry point for every LoopyCode CLI connection.
+ * This module is the network entry point for every AtlasAgents CLI connection.
  * It owns the raw RSocket/TCP socket, manages connection lifecycle, and
  * hands validated requests off to handlers for the actual work. It does
  * not implement any business logic itself — think of it as the door, not the
@@ -37,7 +37,7 @@ import type { ServerCertificate } from "../tls/certificateStore.js";
 import { logger } from "../../utils/logger.js";
 
 /**
- * An RSocket/TCP server that authenticates, routes, and cancels LoopyCode CLI
+ * An RSocket/TCP server that authenticates, routes, and cancels AtlasAgents CLI
  * traffic.
  *
  * @remarks

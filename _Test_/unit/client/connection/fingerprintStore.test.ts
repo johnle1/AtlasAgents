@@ -25,7 +25,7 @@ describe("fingerprintStore", () => {
 
   beforeAll(async () => {
     originalHome = process.env.HOME;
-    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "loopy-fingerprint-test-"));
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-fingerprint-test-"));
     process.env.HOME = tempHome;
 
     const fpMod = await import(

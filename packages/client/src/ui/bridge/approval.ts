@@ -10,6 +10,13 @@
 import type { ApprovalRequest, ApprovalResult } from "../types.js";
 import { getInkUIActive, getBridgeHooks } from "./state.js";
 import { getPendingApprovalEntry, setPendingApprovalEntry } from "./state.js";
+import { dismissValueFor } from "../components/approvalKeymap.js";
+import { notifyUser } from "../notify.js";
+import {
+  getApprovalMode,
+  ruleFromRequest,
+  sessionAllowlist,
+} from "./allowlist.js";
 
 /**
  * Retrieves the currently pending approval request from the state registry.
@@ -23,6 +30,16 @@ export const getPendingApproval = (): ApprovalRequest | null =>
  * Requests user approval for a task, returning a promise that resolves with the decision.
  *
  * @remarks
+ * Short-circuit order: session allowlist → `bypass` (all types) →
+ * `accept_edits` / `auto` keepUndo → `auto` planReview → UI.
+ * `accept_edits` covers file edits only; shell commands, plan reviews,
+ * and other risky actions still prompt. `auto` is the hands-off mode:
+ * file edits and plan reviews auto-approve here, and the command layer
+ * runs safe commands free and cautious ones sandboxed. The bridge must
+ * not short-circuit `runSkip` — the command layer only routes here when
+ * it already decided a prompt is warranted (e.g. dangerous commands).
+ * `planReview` resolves `"implement"` (a {@link PlanDecision}), never
+ * `true` — the server validates the decision token.
  * If the Ink interface is inactive, this function resolves immediately with a default fallback
  * (e.g. skip for plan reviews, false/deny for other prompts).
  *
@@ -33,12 +50,32 @@ export const getPendingApproval = (): ApprovalRequest | null =>
 export const requestApproval = (
   approvalRequest: ApprovalRequest,
 ): Promise<ApprovalResult> => {
+  if (sessionAllowlist.matches(approvalRequest)) {
+    return Promise.resolve(true);
+  }
+
+  const mode = getApprovalMode();
+
+  if (mode === "bypass") {
+    return Promise.resolve(
+      approvalRequest.type === "planReview" ? "implement" : true,
+    );
+  }
+
+  if (
+    (mode === "accept_edits" || mode === "auto") &&
+    approvalRequest.type === "keepUndo"
+  ) {
+    return Promise.resolve(true);
+  }
+
+  if (mode === "auto" && approvalRequest.type === "planReview") {
+    return Promise.resolve("implement");
+  }
+
   const isUIActive = getInkUIActive();
   if (!isUIActive) {
-    if (approvalRequest.type === "planReview") {
-      return Promise.resolve("skip" as const);
-    }
-    return Promise.resolve(false);
+    return Promise.resolve(dismissValueFor(approvalRequest.type));
   }
 
   const existingPendingApproval = getPendingApprovalEntry();
@@ -53,6 +90,7 @@ export const requestApproval = (
     });
 
     getBridgeHooks().onApprovalChange?.(approvalRequest);
+    notifyUser("Action required");
   });
 };
 
@@ -64,10 +102,19 @@ export const requestApproval = (
 export const resolveApproval = (approvalResult: ApprovalResult): void => {
   const currentPendingApproval = getPendingApprovalEntry();
 
+  if (approvalResult === "always" && currentPendingApproval) {
+    const rule = ruleFromRequest(currentPendingApproval.req);
+    if (rule) {
+      sessionAllowlist.add(rule);
+    }
+  }
+
   setPendingApprovalEntry(null);
   getBridgeHooks().onApprovalChange?.(null);
 
-  currentPendingApproval?.resolve(approvalResult);
+  const resolved: ApprovalResult =
+    approvalResult === "always" ? true : approvalResult;
+  currentPendingApproval?.resolve(resolved);
 };
 
 /**
@@ -83,10 +130,9 @@ export const cancelPendingApprovals = (): void => {
   setPendingApprovalEntry(null);
   getBridgeHooks().onApprovalChange?.(null);
 
-  const approvalResult: ApprovalResult =
-    currentPendingApproval.req.type === "planReview"
-      ? ("skip" as const)
-      : false;
+  const approvalResult: ApprovalResult = dismissValueFor(
+    currentPendingApproval.req.type,
+  );
   currentPendingApproval.resolve(approvalResult);
 };
 

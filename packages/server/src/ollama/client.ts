@@ -2,7 +2,7 @@
  * HTTP client for Ollama's chat and model administration APIs.
  *
  * @remarks
- * LoopyCode communicates with a local Ollama server to perform two categories of operations:
+ * AtlasAgents communicates with a local Ollama server to perform two categories of operations:
  *
  * **Chat operations** (for inference):
  * - `chat()` — Single-turn blocking inference (wait for full response)
@@ -85,7 +85,7 @@ const DEFAULT_TIMEOUT_MS = 600_000;
  *
  * @remarks
  * Some models (like reasoning models) support extended thinking via a `think` field.
- * This helper converts LoopyCode's ChatOptions format into Ollama's field names.
+ * This helper converts AtlasAgents's ChatOptions format into Ollama's field names.
  *
  * @param options - Chat options from the caller.
  * @returns Object with optional `think` field matching Ollama's schema.

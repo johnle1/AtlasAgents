@@ -38,6 +38,7 @@ const mockContext = {
   setInput: vi.fn(),
   handleSubmit: vi.fn(async () => {}),
   inputDisabled: false,
+  busy: false,
   approval: { type: "runSkip" as const, command: "echo hi" },
   approvalSelected: 0,
   setApprovalSelected: vi.fn(),
@@ -54,13 +55,14 @@ import { SetupWizard } from "../../../../packages/client/src/ui/bootstrap/SetupW
 import { ApprovalMenu } from "../../../../packages/client/src/ui/components/ApprovalMenu.js";
 import { InputBox } from "../../../../packages/client/src/ui/components/InputBox.js";
 import { PromptOverlay } from "../../../../packages/client/src/ui/components/PromptOverlay.js";
+import { QueuedMessageRow } from "../../../../packages/client/src/ui/components/QueuedMessageRow.js";
 
 describe("SetupWizard smoke", () => {
   it("renders welcome text", () => {
     const tree = render(
       React.createElement(SetupWizard, { onComplete: vi.fn() }),
     );
-    expect(stripAnsi(tree.lastFrame() ?? "")).toContain("Welcome to LoopyCode");
+    expect(stripAnsi(tree.lastFrame() ?? "")).toContain("Welcome to AtlasAgents");
     tree.unmount();
   });
 });
@@ -74,7 +76,20 @@ describe("context-backed components", () => {
 
   it("InputBox shows prompt", () => {
     const tree = render(React.createElement(InputBox));
-    expect(stripAnsi(tree.lastFrame() ?? "")).toContain(">");
+    const frame = stripAnsi(tree.lastFrame() ?? "");
+    expect(frame).toContain(">");
+    expect(frame).toMatch(/╭|┌/);
+    tree.unmount();
+  });
+
+  it("QueuedMessageRow draws a bordered preview (normal)", () => {
+    const tree = render(
+      React.createElement(QueuedMessageRow, { items: ["follow up"] }),
+    );
+    const frame = stripAnsi(tree.lastFrame() ?? "");
+    expect(frame).toContain("queued (1)");
+    expect(frame).toContain("follow up");
+    expect(frame).toMatch(/╭|┌/);
     tree.unmount();
   });
 

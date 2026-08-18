@@ -1,5 +1,5 @@
 /**
- * Slash-command router for the LoopyCode CLI REPL.
+ * Slash-command router for the AtlasAgents CLI REPL.
  *
  * @remarks
  * {@link CommandHandler} sits between user input and task submission: lines that
@@ -12,8 +12,8 @@
  * - Models: `/models`, `/providers`
  * - Skills / memory: `/skills`, `/memory`
  * - Workspace: `/workspace`, `/cwd`
- * - Display: `/spinner`, `/think`, `/theme`
- * - Session: `/explore`, `/new`, `/exit`
+ * - Display: `/spinner`, `/think`, `/theme`, `/clear`, `/notify`
+ * - Session: `/explore`, `/new`, `/exit`, `/help`
  * - TokenSave: `/tokensave`
  *
  * @example
@@ -46,10 +46,11 @@ import { handleProviders } from "./providerHandlers.js";
 import { handleSkills } from "./skillHandlers.js";
 import { handleMemory } from "./memoryHandlers.js";
 import { handleWorkspace, handleCwd } from "./workspaceHandlers.js";
-import { handleSpinner, handleThink } from "./displayHandlers.js";
+import { handleSpinner, handleThink, handleNotify } from "./displayHandlers.js";
 import { handleExplore, handleNew, handleExit } from "./sessionHandlers.js";
 import { handleTokenSave } from "./tokenSaveHandlers.js";
-import { printError } from "../renderer.js";
+import { printError, printHelp } from "../renderer.js";
+import { clearScreen } from "../ui/uiBridge.js";
 
 /**
  * Injected collaborators required to run slash commands.
@@ -117,9 +118,8 @@ export class CommandHandler {
    * @remarks
    * Parsing: strip leading `/`, split on whitespace into
    * `command` / `subcommand` / `argument` (argument may contain spaces).
-   * `/set agent|agent` delegates model picking via
-   * {@link handleSetModel}. `/help` is intentionally removed (points users to
-   * `/config`).
+   * `/set agent|subagent` delegates model picking via {@link handleSetModel}.
+   * `/help` prints the full catalog; `/clear` empties the Ink scrollback.
    *
    * @param input - Raw readline / prompt line from the user.
    * @returns `true` if the line started with `/` (handled or unknown command);
@@ -193,11 +193,17 @@ export class CommandHandler {
       case "spinner":
         handleSpinner(subcommand, argument);
         break;
+      case "notify":
+        handleNotify(subcommand, argument);
+        break;
       case "theme":
         await this.prompts.pickTheme();
         break;
       case "help":
-        printError("Help command removed. Use /config to see configuration.");
+        printHelp();
+        break;
+      case "clear":
+        clearScreen();
         break;
       case "exit":
         handleExit(this.onExit);

@@ -120,8 +120,19 @@ export const matchRunningModel = (
   );
 };
 
-/** Fraction of `gpuPercent` shown in a spill warning message, appended per-model. */
-const formatSpillMessage = (placement: ModelPlacement): string => {
+/**
+ * Formats the user-facing spill warning for one non-GPU-resident placement.
+ *
+ * @remarks
+ * Exported so callers that need a one-off warning outside
+ * {@link IModelPlacementReporter}'s per-connection dedup (e.g. an explicit
+ * `/set agent|subagent` selection) can reuse the exact wording without
+ * duplicating the CPU-vs-partial distinction.
+ *
+ * @param placement - A non-`"gpu"`, non-`"unknown"` placement result.
+ * @returns The `⚠ …` warning line.
+ */
+export const formatSpillMessage = (placement: ModelPlacement): string => {
   const percent = placement.gpuPercent ?? 0;
 
   // The two cases have genuinely different causes, so they get different
@@ -132,7 +143,7 @@ const formatSpillMessage = (placement: ModelPlacement): string => {
   if (placement.kind === "cpu") {
     const driverHint =
       process.platform === "darwin"
-        ? "On Apple Silicon, check iogpu.wired_limit_mb — run loopy-detect-hardware."
+        ? "On Apple Silicon, check iogpu.wired_limit_mb — run atlas-detect-hardware."
         : "Check that `nvidia-smi` runs and the GPU driver is loaded — 0% (rather than a partial split) usually means Ollama found no usable GPU, not that the model is too big. `journalctl -u ollama | grep -i cuda` shows which compute library it chose at startup.";
     return `⚠ ${placement.model} is running entirely on CPU (0% GPU) — expect roughly 10x slower responses. ${driverHint}`;
   }
@@ -143,7 +154,7 @@ const formatSpillMessage = (placement: ModelPlacement): string => {
     "more-quantized model.";
   const appleHint =
     process.platform === "darwin"
-      ? " On Apple Silicon also check iogpu.wired_limit_mb — run loopy-detect-hardware."
+      ? " On Apple Silicon also check iogpu.wired_limit_mb — run atlas-detect-hardware."
       : "";
 
   return `⚠ ${placement.model} is running ${percent}% on GPU / ${100 - percent}% on CPU — expect slower responses. ${remedy}${appleHint}`;
@@ -153,11 +164,20 @@ const formatSpillMessage = (placement: ModelPlacement): string => {
  * Reports GPU/CPU placement for a set of loaded models, once per connection.
  *
  * @remarks
- * A model that isn't currently loaded (subagent model not yet used this
- * task, or an older Ollama without `size_vram`) is silently skipped rather
- * than treated as a spill — see {@link describeModelPlacement}. This is
- * intentionally lossy: catching it on a later task, once the model has
- * actually loaded, is preferable to a false alarm from absent data.
+ * A model that isn't currently loaded (an older Ollama without `size_vram`,
+ * or a check that runs before that model has ever done inference) is
+ * silently skipped rather than treated as a spill — see
+ * {@link describeModelPlacement}. This is intentionally lossy: a false
+ * "not loaded" skip is preferable to a false alarm from absent data.
+ *
+ * `orchestratorPipeline.ts` calls `reportPlacement` twice per task for
+ * exactly this reason: once right after agent planning (the agent model has
+ * necessarily run inference by then, but the subagent has not yet, so a
+ * spilling subagent is invisible at this point) and again after the
+ * subagent pool finishes (by which point the subagent model has run too).
+ * Per-scope dedup (keyed by `${model}|${kind}`) means a model shared by both
+ * roles — or checked twice because it was already warned about — produces
+ * at most one message per distinct spill.
  */
 export interface IModelPlacementReporter {
   /**

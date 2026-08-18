@@ -10,7 +10,32 @@
 
 import * as path from "node:path";
 import * as os from "node:os";
-import type { SecretsEnvelope } from "@loopycode/shared";
+import type { SecretsEnvelope } from "@atlasagents/shared";
+import type { ApprovalMode, PersistedApprovalMode } from "./approvalMode.js";
+
+/**
+ * Footer / status presentation for a mode (icon + label + Ink color).
+ */
+export type ApprovalModeDisplay = {
+  /** Icon-prefixed label shown in the footer. */
+  label: string;
+  /** Ink `color` hex when the mode should stand out; omit for dim default. */
+  color?: string;
+  /** When true, render the label bold (bypass). */
+  bold?: boolean;
+};
+
+/**
+ * Footer presentation table for every {@link ApprovalMode}.
+ */
+export const APPROVAL_MODE_DISPLAY: Record<ApprovalMode, ApprovalModeDisplay> =
+  {
+    default: { label: "default" },
+    accept_edits: { label: "⏵ Accept Edits", color: "#FB923C" },
+    plan: { label: "⏸ Plan", color: "#60A5FA" },
+    auto: { label: "⏵⏵ Auto", color: "#A78BFA" },
+    bypass: { label: "⚠ BYPASS", color: "#FF5555", bold: true },
+  };
 
 /** The `Config` fields sensitive enough to encrypt at rest. */
 export type SecretConfigFields = Pick<Config, "password" | "server">;
@@ -111,13 +136,23 @@ export interface UiConfig {
    * inline with previous terminal content. Defaults to false.
    */
   useAlternateBuffer?: boolean;
+
+  /**
+   * Whether to raise a desktop / terminal notification on approval and
+   * task-complete edges.
+   *
+   * @remarks
+   * Off by default. Enable with `/notify on`. Uses OSC 9 where the terminal
+   * supports it (iTerm2, WezTerm, Ghostty, kitty) and BEL otherwise.
+   */
+  notifications?: boolean;
 }
 
 /**
- * Complete CLI configuration persisted to ~/.agent-cli/config.json.
+ * Complete CLI configuration persisted to ~/.atlasagents/config.json.
  *
  * @remarks
- * This interface defines all configuration values for the LoopyCode client,
+ * This interface defines all configuration values for the AtlasAgents client,
  * including server connection settings, model parameters, timeouts, and UI
  * preferences. The config is loaded on startup and can be modified via CLI
  * commands or by editing the JSON file directly.
@@ -305,6 +340,16 @@ export interface Config {
   ui: UiConfig;
 
   /**
+   * Session permission mode persisted across launches.
+   *
+   * @remarks
+   * `"default"` | `"accept_edits"` | `"plan"` | `"auto"`. `"bypass"` is
+   * session-only and is never stored here — a hand-edited `"bypass"` value
+   * is coerced to `"default"` on load.
+   */
+  approvalMode: PersistedApprovalMode;
+
+  /**
    * Pinned SHA-256 fingerprints of server TLS certificates, keyed by `"host:port"`.
    *
    * @remarks
@@ -325,7 +370,7 @@ export interface Config {
  * Default configuration applied on first run or when config.json is missing.
  *
  * @remarks
- * These values are chosen for the loopycode use case specifically. They serve
+ * These values are chosen for the atlas use case specifically. They serve
  * as the template when the config file is missing and as the base layer when
  * merging disk JSON with DEFAULT_CONFIG.
  */
@@ -371,14 +416,32 @@ export const DEFAULT_CONFIG: Config = {
   subagentCap: 3,
 
   // Default UI preferences
-  ui: { theme: "default", showSpinner: true, useAlternateBuffer: false },
+  ui: {
+    theme: "default",
+    showSpinner: true,
+    useAlternateBuffer: false,
+    notifications: false,
+  },
+
+  // Permission mode — Shift+Tab cycles default / accept_edits / plan
+  approvalMode: "default",
 
   // No servers trusted yet — populated on first connect to each host:port (TOFU)
   serverFingerprints: {},
 };
 
-/** Config directory path (~/.agent-cli) where config, history, and skills live. */
-export const CONFIG_DIR = path.join(os.homedir(), ".agent-cli");
+/** Config directory path (~/.atlasagents) where config, history, and skills live. */
+export const CONFIG_DIR = path.join(os.homedir(), ".atlasagents");
+
+/**
+ * Pre-rename config directory (`~/.agent-cli`).
+ *
+ * @remarks
+ * {@link ensureDirs} copies this into {@link CONFIG_DIR} once, when the new
+ * directory does not exist yet, so existing passphrase, pins, skills, and
+ * history survive the AtlasAgents rename.
+ */
+export const LEGACY_CONFIG_DIR = path.join(os.homedir(), ".agent-cli");
 
 /** Full path to the JSON config file that Connection and /config read from. */
 export const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");

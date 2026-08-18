@@ -4,11 +4,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { parseServerArgs } from "../../../../packages/server/src/cli/serverArgs.js";
+import { isServerLaunchCommand, parseServerArgs } from "../../../../packages/server/src/cli/serverArgs.js";
 
 const argv = (...flags: string[]): string[] => [
   "node",
-  "loopy-server",
+  "atlas-server",
   ...flags,
 ];
 
@@ -18,10 +18,10 @@ describe("parseServerArgs — start / help / regen-cert", () => {
     expect(result).toEqual({ help: false, regenCert: false, command: undefined });
   });
 
-  it("'start' positional: no repair", () => {
-    const result = parseServerArgs(argv("start"));
+  it("'run' positional: no repair", () => {
+    const result = parseServerArgs(argv("run"));
     expect(result.repair).toBeUndefined();
-    expect(result.command).toBe("start");
+    expect(result.command).toBe("run");
   });
 
   it("an unrecognized positional is passed through as `command`, not rejected here", () => {
@@ -66,6 +66,11 @@ describe("parseServerArgs — repair mode: --password", () => {
 
   it("--password start is fine — 'start' is not read as an inline value", () => {
     const result = parseServerArgs(argv("--password", "start"));
+    expect(result.repair).toEqual({ reset: false, password: true });
+  });
+
+  it("--password run is fine — 'run' is not read as an inline value", () => {
+    const result = parseServerArgs(argv("--password", "run"));
     expect(result.repair).toEqual({ reset: false, password: true });
   });
 
@@ -132,5 +137,19 @@ describe("parseServerArgs — combined repair flags", () => {
       argv("--reset", "--password", "--port", "8001"),
     );
     expect(result.repair).toEqual({ reset: true, password: true, port: 8001 });
+  });
+});
+
+describe("isServerLaunchCommand", () => {
+  it("accepts a missing command, start, and run", () => {
+    expect(isServerLaunchCommand(undefined)).toBe(true);
+    expect(isServerLaunchCommand("")).toBe(true);
+    expect(isServerLaunchCommand("start")).toBe(true);
+    expect(isServerLaunchCommand("run")).toBe(true);
+  });
+
+  it("rejects any other positional", () => {
+    expect(isServerLaunchCommand("bogus")).toBe(false);
+    expect(isServerLaunchCommand("help")).toBe(false);
   });
 });

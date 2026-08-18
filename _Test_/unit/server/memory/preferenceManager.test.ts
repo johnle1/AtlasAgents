@@ -44,7 +44,7 @@ const tempRoots: string[] = [];
 const makeStore = async (
   deps?: { ollama?: IOllamaClient; config?: IConfigManager },
 ): Promise<{ store: PreferenceStore; root: string }> => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-prefs-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-prefs-"));
   tempRoots.push(root);
   return { store: new PreferenceStore(root, deps), root };
 };

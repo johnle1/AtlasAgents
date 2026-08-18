@@ -38,7 +38,7 @@ describe("LocalFileProxy", () => {
   let proxy: LocalFileProxy;
 
   beforeEach(() => {
-    root = fs.mkdtempSync(path.join(os.tmpdir(), "loopy-proxy-"));
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-proxy-"));
     proxy = new LocalFileProxy(root);
     vi.clearAllMocks();
   });

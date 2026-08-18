@@ -438,6 +438,7 @@ export const createContainer = (
       ollama,
       providerRegistry,
       config,
+      ollamaBaseUrl: options.ollamaBaseUrl,
 
       // Memory and preferences
       skills,

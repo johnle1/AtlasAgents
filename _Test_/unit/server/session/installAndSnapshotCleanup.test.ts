@@ -20,7 +20,7 @@ afterEach(async () => {
 
 describe("installUserDataDefaults", () => {
   it("does not overwrite an existing language-hints file", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-install-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-install-"));
     tempRoots.push(root);
     const userData = path.join(root, "user-data");
     await fs.mkdir(userData, { recursive: true });
@@ -34,7 +34,7 @@ describe("installUserDataDefaults", () => {
   });
 
   it("is a no-op when source default is missing and destination absent", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-install-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-install-"));
     tempRoots.push(root);
     await installUserDataDefaults(root);
     const dest = path.join(root, "user-data", LANGUAGE_HINTS_FILENAME);
@@ -44,13 +44,13 @@ describe("installUserDataDefaults", () => {
 
 describe("cleanupOldSnapshots", () => {
   it("returns 0 when snapshots directory is missing", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-snap-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-snap-"));
     tempRoots.push(root);
     await expect(cleanupOldSnapshots(root)).resolves.toBe(0);
   });
 
   it("deletes snapshot files older than 24 hours", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-snap-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-snap-"));
     tempRoots.push(root);
     const dir = path.join(root, "user-data", "snapshots");
     await fs.mkdir(dir, { recursive: true });

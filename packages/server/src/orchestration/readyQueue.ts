@@ -13,7 +13,7 @@ import type {
   SubagentBoardSnapshot,
   SubagentTaskSnapshot,
   TaskLifecycleState,
-} from "@loopycode/shared";
+} from "@atlasagents/shared";
 import type { MaxSubagentsParam } from "./maxSubagents.js";
 import type {
   SubagentPlan,

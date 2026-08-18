@@ -42,6 +42,10 @@ export {
   refreshInkBanner,
   enterAlternateScreen,
   exitAlternateScreen,
+  setActiveTaskCancel,
+  cancelActiveTask,
+  clearScreen,
+  setContextUsage,
 } from "./bridge/display.js";
 
 export {

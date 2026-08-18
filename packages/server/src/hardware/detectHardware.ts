@@ -5,7 +5,7 @@
  *
  * @remarks
  * Run this ON the machine that will host `vllm serve` (or Ollama), not from
- * wherever the LoopyCode client normally runs. It has no way to see hardware
+ * wherever the AtlasAgents client normally runs. It has no way to see hardware
  * on a remote box over HTTP — detection only makes sense locally, at launch
  * time.
  *
@@ -32,7 +32,7 @@
  *
  * `--write` may prompt for the server config passphrase when
  * `user-data/config.json` already has encrypted `$providersSecrets` (after a
- * normal `loopy-server start`), or when adding a non-ollama provider that must
+ * normal `atlas-server start`), or when adding a non-ollama provider that must
  * be stored encrypted.
  */
 
@@ -406,7 +406,7 @@ const configHasEncryptedProviders = async (
  * When the on-disk config already encrypts providers, or when this run will
  * add a non-ollama provider, unlocks (or sets up) the shared config cipher
  * first — otherwise `getAll`/`set` fail with ConfigCipherLockedError on a
- * machine that has already run `loopy-server start`.
+ * machine that has already run `atlas-server start`.
  */
 export const runDetectHardwareCli = async (
   argv: string[],

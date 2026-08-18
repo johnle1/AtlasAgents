@@ -9,7 +9,7 @@
  */
 
 import { RSocketConnector, type RSocket } from "@rsocket/core";
-import type { RouteId } from "@loopycode/shared";
+import type { RouteId, TaskApprovalMode } from "@atlasagents/shared";
 import type { Config } from "../config/index.js";
 import { createTlsClientTransport } from "./tls/tlsClientTransport.js";
 import { checkAndPinFingerprint } from "./tls/fingerprintStore.js";
@@ -29,6 +29,7 @@ import { createFileResponder } from "./fileResponder.js";
 import {
   sendStream as sendStreamFn,
   sendTask as sendTaskFn,
+  type StreamHandle,
 } from "./streaming.js";
 import type {
   ConnectionStatus,
@@ -46,7 +47,7 @@ import { ConnectionLifecycle } from "./lifecycle.js";
 export type { PullProgress, TaskFrame } from "../types/frames.js";
 
 /**
- * Manages one persistent RSocket TCP connection to the LoopyCode server.
+ * Manages one persistent RSocket TCP connection to the AtlasAgents server.
  *
  * @remarks
  * Responsibilities:
@@ -70,12 +71,13 @@ export type { PullProgress, TaskFrame } from "../types/frames.js";
  * await connection.connect();
  *
  * const models = await connection.fetchModels();
- * await connection.sendTask({
+ * const { done } = await connection.sendTask({
  *   task: "Explain this code",
  *   maxSubagents: 2,
  *   onFrame: (frame) => console.log(frame.kind),
  *   onToken: (token) => process.stdout.write(token),
  * });
+ * await done;
  * ```
  */
 export class Connection {
@@ -629,28 +631,32 @@ export class Connection {
    * Uses models and temperatures from the current config. `onToken` enables
    * token-by-token CLI output; `onFrame` receives the full task event stream.
    *
-   * @param taskOptions - Task text, optional `maxSubagents`, and stream callbacks.
-   * @returns Resolves when the server completes the task stream.
+   * @param taskOptions - Task text, optional `maxSubagents` / `approvalMode`, and stream callbacks.
+   * @returns A {@link StreamHandle} whose `done` promise settles when the
+   *   server completes the task stream. Call `cancel()` to abort without
+   *   treating the abort as an error.
    * @throws {@link Error} On connect failure or mid-stream RSocket / handler errors.
    *
    * @example
    * ```ts
-   * await connection.sendTask({
+   * const { done, cancel } = await connection.sendTask({
    *   task: "Explain this code",
    *   maxSubagents: 2,
    *   onFrame: (frame) => console.log(frame.kind),
    *   onToken: (token) => process.stdout.write(token),
    * });
+   * await done;
    * ```
    */
   sendTask = async (taskOptions: {
     task: string;
     maxSubagents?: 1 | 2 | "max" | number;
+    approvalMode?: TaskApprovalMode;
     onFrame: (frame: TaskFrame) => void | Promise<void>;
     onToken?: (token: string) => void;
-  }): Promise<void> => {
+  }): Promise<StreamHandle> => {
     await this.waitUntilConnected();
-    await sendTaskFn(
+    return sendTaskFn(
       taskOptions.task,
       this.config,
       this.meta(),
@@ -658,6 +664,7 @@ export class Connection {
       taskOptions.onFrame,
       taskOptions.onToken,
       taskOptions.maxSubagents,
+      taskOptions.approvalMode,
     );
   };
 
@@ -665,16 +672,18 @@ export class Connection {
    * Streams long-running operations such as model pull or explore.
    *
    * @param streamOptions - Discriminated operation kind, payload, and `onFrame`.
-   * @returns Resolves when the server completes the stream.
+   * @returns A {@link StreamHandle} whose `done` promise settles when the
+   *   server completes the stream.
    * @throws {@link Error} On connect failure or stream errors.
    *
    * @example
    * ```ts
-   * await connection.sendStream({
+   * const { done } = await connection.sendStream({
    *   kind: "models.pull",
    *   payload: { name: "gemma3:27b" },
    *   onFrame: (frame) => console.log(frame),
    * });
+   * await done;
    * ```
    */
   sendStream = async (
@@ -689,9 +698,9 @@ export class Connection {
           payload?: Record<string, never>;
           onFrame: (frame: TaskFrame) => void | Promise<void>;
         },
-  ): Promise<void> => {
+  ): Promise<StreamHandle> => {
     await this.waitUntilConnected();
-    await sendStreamFn(streamOptions, this.meta(), this.socket());
+    return sendStreamFn(streamOptions, this.meta(), this.socket());
   };
 
   /**

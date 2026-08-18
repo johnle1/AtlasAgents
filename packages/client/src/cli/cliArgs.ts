@@ -1,8 +1,8 @@
 /**
- * CLI argument parsing for the LoopyCode client.
+ * CLI argument parsing for the AtlasAgents client.
  *
  * @remarks
- * This module handles command-line argument parsing for the LoopyCode client.
+ * This module handles command-line argument parsing for the AtlasAgents client.
  * It provides functionality to parse CLI flags, override configuration values,
  * and display help information.
  *
@@ -70,13 +70,13 @@ const parsePort = (raw: string): number | undefined => {
  * @example
  * printCliHelp();
  * // Output:
- * // Usage: loopycode [options] [start]
+ * // Usage: atlas [options] [start|run]
  * // ...
  */
 export const printCliHelp = (): void => {
-  console.log(`Usage: loopycode [options] [start]
+  console.log(`Usage: atlas [options] [start|run]
 
-Connect to the LoopyCode RSocket server (options override ~/.agent-cli/config.json for this run only).
+Connect to the AtlasAgents RSocket server (options override ~/.atlasagents/config.json for this run only).
 
 Options:
   -H, --host <host>       Server host (e.g. 0.0.0.0, localhost)
@@ -95,10 +95,11 @@ asks for your config passphrase first):
                           configured server (re-trust on next connect)
 
 Examples:
-  loopycode
-  loopycode start --host 0.0.0.0 --port 7000
-  loopycode --address 10.0.0.7 --port 8001 --password
-  loopycode --reset
+  atlas
+  atlas start --host 0.0.0.0 --port 7000
+  atlas run --host 0.0.0.0 --port 7000
+  atlas --address 10.0.0.7 --port 8001 --password
+  atlas --reset
 `);
 };
 
@@ -121,17 +122,20 @@ const readStringFlag = (value: unknown): string =>
  *
  * @remarks
  * `--password` is declared as a boolean, and `parseArgs` runs with
- * `strict: false` and `allowPositionals: true` — so `loopycode --password hunter2`
+ * `strict: false` and `allowPositionals: true` — so `atlas --password hunter2`
  * parses cleanly, ignores `hunter2`, and prompts anyway. The user's secret is
  * then sitting in shell history and `ps` output for nothing. Better to fail
  * loudly than to silently discard it.
  *
- * The documented `start` positional is excluded, so `loopycode --password start`
+ * The documented `start`/`run` positionals are excluded, so `atlas --password start`
  * is read as "prompt me, and start" rather than as a leaked secret.
  *
  * @param args - The argument list passed to `parseArgs` (argv minus node/script).
  * @returns true when a non-flag token directly follows `--password`.
  */
+const isLaunchPositional = (token: string): boolean =>
+  token === "start" || token === "run";
+
 const hasInlinePasswordValue = (args: string[]): boolean => {
   const passwordIndex = args.indexOf("--password");
   if (passwordIndex === -1) {
@@ -141,7 +145,7 @@ const hasInlinePasswordValue = (args: string[]): boolean => {
   return (
     nextToken !== undefined &&
     !nextToken.startsWith("-") &&
-    nextToken !== "start"
+    !isLaunchPositional(nextToken)
   );
 };
 
@@ -218,7 +222,7 @@ export const parseCliArgs = (argv: string[]): CliParseResult => {
   }
 
   // --address is the config-repair spelling of the host; --host/--server are
-  // accepted as aliases so `loopycode --reset --host x` does the obvious thing.
+  // accepted as aliases so `atlas --reset --host x` does the obvious thing.
   const address = readStringFlag(values.address);
   const host =
     address ||

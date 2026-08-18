@@ -110,3 +110,12 @@ describe("extractToolFromText", () => {
     expect(extractToolFromText("no tools here", registry)).toBeNull();
   });
 });
+
+describe("finishTool schema", () => {
+  it("invites markdown formatting in the summary description", () => {
+    const summary = finishTool.schema.function.parameters.properties.summary as {
+      description?: string;
+    };
+    expect(summary.description).toContain("Markdown welcome");
+  });
+});

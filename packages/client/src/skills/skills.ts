@@ -37,7 +37,7 @@ export const assertSafeSkillName = (name: string): void => {
  *
  * @remarks
  * This directory contains default skill templates shipped with the CLI package.
- * On first run, these are copied to ~/.agent-cli/skills/ to provide users with
+ * On first run, these are copied to ~/.atlasagents/skills/ to provide users with
  * starting examples.
  */
 const DEFAULT_SKILLS_PACKAGE_DIR = path.resolve(
@@ -50,7 +50,7 @@ const DEFAULT_SKILLS_PACKAGE_DIR = path.resolve(
  * Seeds the local skills directory with bundled defaults on first run.
  *
  * @remarks
- * Only runs if ~/.agent-cli/skills/ does not exist yet. Copies all .md files
+ * Only runs if ~/.atlasagents/skills/ does not exist yet. Copies all .md files
  * from the packaged default-skills directory to the user's skills directory.
  * If the default-skills directory is missing (e.g., in development), returns
  * silently without error.
@@ -98,7 +98,7 @@ export const ensureSkillsDir = (): void => {
  * Returns an array of skill file basenames from the local skills directory.
  *
  * @remarks
- * Reads ~/.agent-cli/skills/ and returns skill names without the .md extension.
+ * Reads ~/.atlasagents/skills/ and returns skill names without the .md extension.
  * Returns an empty array on any error (e.g., permission denied) to fail gracefully.
  *
  * @returns Array of skill names e.g., `["coding", "research"]`.
@@ -194,7 +194,7 @@ export const readSkill = (name: string): string => {
  * Reads all skill markdown files and returns them as skill payloads.
  *
  * @remarks
- * Loads all .md files from ~/.agent-cli/skills/ and returns them as
+ * Loads all .md files from ~/.atlasagents/skills/ and returns them as
  * { name, content } objects ready to sync to the server.
  *
  * @returns Array of { name, content } objects.
@@ -219,7 +219,7 @@ export const readAllSkills = (): SkillPayload[] => {
  *
  * @remarks
  * Used by `/skills sync <path>` to sync skills from a custom directory
- * instead of the default ~/.agent-cli/skills/ location. Unlike readAllSkills,
+ * instead of the default ~/.atlasagents/skills/ location. Unlike readAllSkills,
  * this does not seed defaults or fall back on error — an invalid path throws.
  *
  * @param dirPath - Absolute path to a directory containing skill .md files.
@@ -267,7 +267,7 @@ export class SkillManager {
    *
    * @remarks
    * Stores the connection for sync operations and runs first-run default
-   * skill seeding to populate ~/.agent-cli/skills/ if it doesn't exist.
+   * skill seeding to populate ~/.atlasagents/skills/ if it doesn't exist.
    *
    * @param conn - Live RSocket connection used by sync.
    */
@@ -276,7 +276,7 @@ export class SkillManager {
   }
 
   /**
-   * Lists skill basenames (no .md) under ~/.agent-cli/skills/.
+   * Lists skill basenames (no .md) under ~/.atlasagents/skills/.
    *
    * @returns Skill names.
    */
@@ -310,18 +310,18 @@ export class SkillManager {
    * Reads local skills and uploads them to the server.
    *
    * @remarks
-   * Reads from ~/.agent-cli/skills/ by default, or from `dirPath` when
+   * Reads from ~/.atlasagents/skills/ by default, or from `dirPath` when
    * given (via readSkillsFromDir), then uploads them via Connection.syncSkills.
    * Only ever runs when the user explicitly triggers it (e.g. `/skills sync`) —
    * there is no automatic sync on connect.
    *
    * @param dirPath - Optional directory to sync skills from instead of the
-   *   default ~/.agent-cli/skills/ location.
+   *   default ~/.atlasagents/skills/ location.
    * @returns Count of skills synced.
    *
    * @example
    * ```ts
-   * await manager.sync(); // Uploads ~/.agent-cli/skills/
+   * await manager.sync(); // Uploads ~/.atlasagents/skills/
    * await manager.sync("/Users/john/my-skills"); // Uploads from a custom path
    * ```
    */

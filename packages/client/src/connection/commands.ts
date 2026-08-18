@@ -9,7 +9,7 @@
  */
 
 import type { Payload, RSocket } from "@rsocket/core";
-import type { RouteId } from "@loopycode/shared";
+import type { RouteId } from "@atlasagents/shared";
 import type { InstalledModel } from "../types/frames.js";
 import type {
   MemoryEntry,
@@ -25,7 +25,7 @@ import type {
  * RSocket may deliver the body across multiple `onNext` frames; chunks are
  * concatenated. Both `onNext(..., isComplete=true)` and `onComplete` finalize
  * the Promise — a settlement guard prevents double resolve/reject. Empty
- * payloads are treated as errors because every LoopyCode command returns JSON.
+ * payloads are treated as errors because every AtlasAgents command returns JSON.
  *
  * @param rsocket - Live RSocket connection.
  * @param payload - Request `data` + `metadata` buffers.

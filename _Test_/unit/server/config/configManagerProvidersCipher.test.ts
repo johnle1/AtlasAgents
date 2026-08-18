@@ -10,8 +10,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ConfigManager } from "../../../../packages/server/src/config/index.js";
-import { ConfigDecryptionError, lockCipher } from "@loopycode/shared";
-import * as sharedCipher from "@loopycode/shared";
+import { ConfigDecryptionError, lockCipher } from "@atlasagents/shared";
+import * as sharedCipher from "@atlasagents/shared";
 
 const tempRoots: string[] = [];
 
@@ -20,7 +20,7 @@ const makeManager = async (): Promise<{
   root: string;
 }> => {
   const root = await fs.mkdtemp(
-    path.join(os.tmpdir(), "loopy-providers-cipher-"),
+    path.join(os.tmpdir(), "atlas-providers-cipher-"),
   );
   tempRoots.push(root);
   return { manager: new ConfigManager({ rootDir: root }), root };

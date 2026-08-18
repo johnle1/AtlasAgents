@@ -1,7 +1,7 @@
 {
-  "name": "@loopycode/shared",
+  "name": "@atlasagents/shared",
   "version": "1.0.0",
-  "description": "Shared utilities for LoopyCode client and server",
+  "description": "Shared utilities for AtlasAgents client and server",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [

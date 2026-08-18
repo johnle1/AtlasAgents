@@ -1,47 +1,16 @@
 import React, { useMemo } from "react";
 import { Box, Text, useInput } from "ink";
-import type { ApprovalRequest, PlanDecision } from "../types.js";
 import { resolveApproval } from "../uiBridge.js";
 import { useAppContext } from "../../state/DataContext.js";
-import type { ApprovalMenuOption as Option } from "./types.js";
-
-/**
- * Evaluates the request schema and generates the selectable menu items.
- *
- * @remarks
- * Maps the incoming `ApprovalRequest` type (e.g., `planReview`, `runSkip`) to the correct list of
- * available actions, colorizing high-stakes items to draw attention.
- *
- * @param request - The active verification or approval payload received from the agent.
- * @returns A list of configuration options detailing menu text, selection value, and styling.
- */
-const buildOptions = (
-  request: ApprovalRequest,
-): Option<boolean | PlanDecision>[] =>
-  request.type === "planReview"
-    ? [
-        { label: "Implement", value: "implement", color: "green" },
-        { label: "Skip task", value: "skip" },
-        { label: "Revise", value: "edit", color: "cyan" },
-      ]
-    : request.type === "runSkip"
-      ? [
-          { label: "Run", value: true, color: "green" },
-          { label: "Skip", value: false, color: "red" },
-          { label: "Revise", value: "edit", color: "cyan" },
-        ]
-      : [
-          { label: "Keep", value: true, color: "cyan" },
-          { label: "Undo", value: false },
-          { label: "Revise", value: "edit", color: "cyan" },
-        ];
+import { buildOptions, resolveApprovalKey } from "./approvalKeymap.js";
 
 /**
  * Renders an interactive decision form that blocks the main CLI loop until a choice is submitted.
  *
  * @remarks
  * Listens to active approval state in the application context and binds global key events (`useInput`).
- * Supports keyboard navigation via arrow keys and selection confirmation using the `return` key.
+ * Arrow keys move the highlight; Enter confirms; digits 1–3 jump+confirm; Esc dismisses with the
+ * same safe default as a disconnect ({@link dismissValueFor}).
  *
  * @example
  * ```tsx
@@ -63,27 +32,25 @@ export const ApprovalMenu: React.FC = () => {
   );
 
   // Binds standard keyboard listeners to intercept cursor controls and choices.
-  useInput((_input, key) => {
+  useInput((input, key) => {
     // Escape early when no prompt is actively displayed to avoid key hijacking.
     if (!approval) return;
 
-    // Navigate up option indices, keeping boundaries safe.
-    if (key.upArrow) {
-      setApprovalSelected((previousIndex) => Math.max(0, previousIndex - 1));
+    const action = resolveApprovalKey(
+      input,
+      key,
+      options,
+      approvalSelected,
+      approval.type,
+    );
+
+    if (action.type === "move") {
+      setApprovalSelected(action.index);
       return;
     }
 
-    // Navigate down option indices, capping at option counts.
-    if (key.downArrow) {
-      setApprovalSelected((previousIndex) =>
-        Math.min(options.length - 1, previousIndex + 1),
-      );
-      return;
-    }
-
-    // Submit selection value directly through the IPC channel bridge.
-    if (key.return) {
-      resolveApproval(options[approvalSelected]!.value);
+    if (action.type === "confirm" || action.type === "dismiss") {
+      resolveApproval(action.value);
     }
   });
 
@@ -128,7 +95,9 @@ export const ApprovalMenu: React.FC = () => {
       ))}
 
       {/* Helper tooltip to assist developers navigating keyboard interactions */}
-      <Text dimColor>↑↓ move · Enter to confirm</Text>
+      <Text dimColor>
+        ↑↓ move · Enter confirm · 1-{options.length} select · Esc dismiss
+      </Text>
     </Box>
   );
 };

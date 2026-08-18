@@ -7,7 +7,7 @@
  * ops call {@link beginBlockOutput} so the status bar yields to a history block.
  */
 
-import type { DiffChunk } from "@loopycode/shared";
+import type { DiffChunk } from "@atlasagents/shared";
 import { beginBlockOutput } from "../state/agentStatus.js";
 import { renderDiffFromChunks } from "../diff/diffRenderer.js";
 import { formatDisplayPath } from "../utils/pathDisplay.js";

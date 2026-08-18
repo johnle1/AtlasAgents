@@ -20,9 +20,9 @@ describe("skills disk helpers", () => {
 
   beforeAll(async () => {
     originalHome = process.env.HOME;
-    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "loopy-skills-test-"));
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-skills-test-"));
     process.env.HOME = tempHome;
-    skillsDir = path.join(tempHome, ".agent-cli", "skills");
+    skillsDir = path.join(tempHome, ".atlasagents", "skills");
 
     const mod = await import("../../../../packages/client/src/skills/skills.js");
     listSkills = mod.listSkills;
@@ -53,7 +53,7 @@ describe("skills disk helpers", () => {
   });
 
   it("readSkillsFromDir reads an arbitrary directory", () => {
-    const custom = fs.mkdtempSync(path.join(os.tmpdir(), "loopy-custom-skills-"));
+    const custom = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-custom-skills-"));
     try {
       fs.writeFileSync(path.join(custom, "a.md"), "body");
       expect(readSkillsFromDir(custom)).toEqual([

@@ -443,15 +443,27 @@ describe("orchestrator pipeline — model placement warning ordering (regression
     // onNext after onComplete on the underlying RSocket responder — which
     // the protocol doesn't allow. This proves the fix: the pipeline's own
     // promise does not settle until the placement check has too.
+    //
+    // The pipeline now calls reportPlacement a *second* time, directly
+    // awaited, right after the subagent pool finishes (to catch a spilling
+    // subagent model — see modelPlacement.ts). That second call is not the
+    // subject of this regression test, so it resolves immediately with no
+    // warnings; only the first (backgrounded, agent-check) call is deferred.
     const config = makeConfig();
     const { frames, emit } = collectFrames();
 
     let resolveReportPlacement!: (messages: string[]) => void;
+    let callCount = 0;
     const modelPlacementReporter = {
-      reportPlacement: () =>
-        new Promise<string[]>((resolve) => {
-          resolveReportPlacement = resolve;
-        }),
+      reportPlacement: () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return new Promise<string[]>((resolve) => {
+            resolveReportPlacement = resolve;
+          });
+        }
+        return Promise.resolve([]);
+      },
       forgetScope: () => {},
     };
 

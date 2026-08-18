@@ -16,11 +16,19 @@
     "skipLibCheck": true,
     "types": ["vitest/globals"],
     "paths": {
-      "@loopycode/shared": ["../packages/shared/src/index.ts"]
+      "@atlasagents/shared": ["../packages/shared/src/index.ts"]
     }
   },
+  /**
+   * Include package sources so relative `*.js` imports from tests resolve in
+   * the IDE (TS2307) as well as under `tsc` / Vitest.
+   */
   "include": [
-    "**/*.ts"
+    "**/*.ts",
+    "../packages/client/src/**/*.ts",
+    "../packages/client/src/**/*.tsx",
+    "../packages/shared/src/**/*.ts",
+    "../packages/server/src/**/*.ts"
   ],
   "exclude": [
     "node_modules"

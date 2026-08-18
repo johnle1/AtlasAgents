@@ -7,7 +7,7 @@
  * config when the server rejects the change.
  *
  * `config.js` is mocked because loadConfig/updateConfig write to the real
- * `~/.agent-cli/config.json` on disk — a real test run must never touch a
+ * `~/.atlasagents/config.json` on disk — a real test run must never touch a
  * developer's actual config file.
  */
 
@@ -16,6 +16,7 @@ import { handleSetModel } from "../../../../packages/client/src/commands/modelSe
 import type { Connection } from "../../../../packages/client/src/connection/index";
 import type { PromptPort } from "../../../../packages/client/src/ui/promptPort";
 import type { Config } from "../../../../packages/client/src/config/index";
+import type { CurrentModelSelection } from "../../../../packages/client/src/renderer.js";
 
 const baseConfig = (): Config =>
   ({
@@ -44,16 +45,47 @@ const updateConfigMock = vi.fn((patch: Partial<Config>) => {
   currentConfig = { ...currentConfig, ...patch };
   return currentConfig;
 });
+const printGroupedModelsMock = vi.fn(
+  (
+    groups: { provider: string; models: string[] }[],
+    _label: unknown,
+    _current?: CurrentModelSelection,
+  ) => {
+    const entries: { provider: string; model: string }[] = [];
+    for (const group of groups) {
+      for (const model of group.models) {
+        entries.push({ provider: group.provider, model });
+      }
+    }
+    return entries;
+  },
+);
 
 vi.mock("../../../../packages/client/src/config/index.js", () => ({
   loadConfig: () => loadConfigMock(),
   updateConfig: (patch: Partial<Config>) => updateConfigMock(patch),
 }));
 
+vi.mock("../../../../packages/client/src/renderer.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../../../packages/client/src/renderer.js")
+    >();
+  return {
+    ...actual,
+    printGroupedModels: (
+      groups: unknown,
+      label: unknown,
+      current?: CurrentModelSelection,
+    ) => printGroupedModelsMock(groups, label, current),
+  };
+});
+
 beforeEach(() => {
   currentConfig = baseConfig();
   loadConfigMock.mockClear();
   updateConfigMock.mockClear();
+  printGroupedModelsMock.mockClear();
 });
 
 const fakePrompts = (choice: number): PromptPort =>
@@ -118,6 +150,55 @@ describe("handleSetModel — selection", () => {
       subsubagentModel: "gemma3:27b",
       subagentProvider: "ollama",
     });
+  });
+});
+
+describe("handleSetModel — current selection markers", () => {
+  it("treats whitespace-only model fields as unset (no picker markers)", async () => {
+    currentConfig = {
+      ...baseConfig(),
+      subagentModel: "   ",
+      subsubagentModel: "\t",
+    };
+    const sendCommand = vi.fn().mockResolvedValueOnce(GROUPED_MODELS_RESPONSE);
+    const connection = {
+      sendCommand,
+      updateConfig: vi.fn(),
+    } as unknown as Connection;
+
+    await handleSetModel("agent", connection, fakePrompts(0));
+
+    expect(printGroupedModelsMock).toHaveBeenCalledWith(
+      GROUPED_MODELS_RESPONSE.groups,
+      "agent",
+      {},
+    );
+  });
+
+  it("trims padded model names before passing them as current markers", async () => {
+    currentConfig = {
+      ...baseConfig(),
+      subagentModel: "  gemma3:27b  ",
+      subsubagentModel: " Qwen2.5-7B-Instruct ",
+      agentProvider: "ollama",
+      subagentProvider: "vllm-gpu",
+    };
+    const sendCommand = vi.fn().mockResolvedValueOnce(GROUPED_MODELS_RESPONSE);
+    const connection = {
+      sendCommand,
+      updateConfig: vi.fn(),
+    } as unknown as Connection;
+
+    await handleSetModel("agent", connection, fakePrompts(0));
+
+    expect(printGroupedModelsMock).toHaveBeenCalledWith(
+      GROUPED_MODELS_RESPONSE.groups,
+      "agent",
+      {
+        agent: { provider: "ollama", model: "gemma3:27b" },
+        subagent: { provider: "vllm-gpu", model: "Qwen2.5-7B-Instruct" },
+      },
+    );
   });
 });
 

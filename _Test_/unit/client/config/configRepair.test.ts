@@ -31,7 +31,7 @@ describe("configRepair.ts — offline connection-settings repair", () => {
   let setConfig: typeof import("../../../../packages/client/src/config/index.js").setConfig;
   let isConnectionConfigured: typeof import("../../../../packages/client/src/config/index.js").isConnectionConfigured;
   let unlockOrSetupConfigCipher: typeof import("../../../../packages/client/src/config/index.js").unlockOrSetupConfigCipher;
-  let lockCipher: typeof import("@loopycode/shared").lockCipher;
+  let lockCipher: typeof import("@atlasagents/shared").lockCipher;
   let originalHome: string | undefined;
   let tempHome: string;
   let configFile: string;
@@ -76,9 +76,9 @@ describe("configRepair.ts — offline connection-settings repair", () => {
 
   beforeAll(async () => {
     originalHome = process.env.HOME;
-    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "loopy-config-repair-test-"));
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-config-repair-test-"));
     process.env.HOME = tempHome;
-    configFile = path.join(tempHome, ".agent-cli", "config.json");
+    configFile = path.join(tempHome, ".atlasagents", "config.json");
 
     const configMod = await import("../../../../packages/client/src/config/index.js");
     loadConfig = configMod.loadConfig;
@@ -89,7 +89,7 @@ describe("configRepair.ts — offline connection-settings repair", () => {
     const repairMod = await import("../../../../packages/client/src/cli/configRepair.js");
     runConfigRepair = repairMod.runConfigRepair;
 
-    const cipherMod = await import("@loopycode/shared");
+    const cipherMod = await import("@atlasagents/shared");
     lockCipher = cipherMod.lockCipher;
   });
 

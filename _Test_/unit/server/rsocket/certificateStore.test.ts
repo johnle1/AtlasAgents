@@ -17,7 +17,7 @@ import {
 const tempRoots: string[] = [];
 
 const makeTempRoot = async (): Promise<string> => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-cert-test-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-cert-test-"));
   tempRoots.push(root);
   return root;
 };

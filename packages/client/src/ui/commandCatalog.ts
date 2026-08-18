@@ -43,11 +43,15 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   },
   {
     command: "/set agent",
-    description: "Choose agent model (from any configured provider)",
+    description:
+      "Choose agent model (from any configured provider) — same model as subagent is fine",
   },
   {
-    command: "/set subagent",
-    description: "Choose subagent model (from any configured provider)",
+    command: "/set approval",
+    label: "/set approval [mode]",
+    description:
+      "Set permission mode (default / accept_edits / plan / auto / bypass)",
+    requiresArgs: true,
   },
   {
     command: "/providers list",
@@ -141,6 +145,10 @@ export const COMMAND_CATALOG: CommandEntry[] = [
     description: "List running models",
   },
   {
+    command: "/models storage",
+    description: "Show real on-disk usage — shared blobs, orphaned pull files",
+  },
+  {
     command: "/new",
     description: "Clear server session",
   },
@@ -173,6 +181,12 @@ export const COMMAND_CATALOG: CommandEntry[] = [
     requiresArgs: true,
   },
   {
+    command: "/notify",
+    label: "/notify on|off",
+    description: "Toggle desktop notifications (opt-in, default off)",
+    requiresArgs: true,
+  },
+  {
     command: "/explore",
     description: "Refresh codebase snapshot for this session",
   },
@@ -181,8 +195,12 @@ export const COMMAND_CATALOG: CommandEntry[] = [
     description: "Show command help",
   },
   {
+    command: "/clear",
+    description: "Clear the screen (Ctrl+L)",
+  },
+  {
     command: "/exit",
-    description: "Quit (Ctrl+C when idle; Ctrl+L when stuck)",
+    description: "Quit (Ctrl+C on empty input)",
   },
 ];
 

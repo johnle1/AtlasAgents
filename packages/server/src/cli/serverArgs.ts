@@ -1,5 +1,5 @@
 /**
- * CLI argument parsing for `loopy-server`.
+ * CLI argument parsing for `atlas-server`.
  *
  * @remarks
  * Mirrors the client's `cli/cliArgs.ts`: flags fall into two modes.
@@ -43,7 +43,7 @@ export type ServerRepairRequest = {
   port?: number | "prompt";
 };
 
-/** Result of parsing `process.argv` for `loopy-server`. */
+/** Result of parsing `process.argv` for `atlas-server`. */
 export type ServerCliParseResult = {
   help: boolean;
   regenCert: boolean;
@@ -73,9 +73,25 @@ const parsePort = (raw: string): number | undefined => {
 };
 
 /**
+ * True when `command` is absent or the documented launch verb (`start` / `run`).
+ *
+ * @remarks
+ * Bare `atlas-server` and `atlas-server start` are the same flow. `run` is
+ * accepted as an alias so operators who type that by habit are not rejected.
+ * Any other positional is an unknown command and must fail closed in `main`.
+ *
+ * @param command - First non-flag argument from {@link parseServerArgs}, if any.
+ */
+export const isServerLaunchCommand = (command: string | undefined): boolean =>
+  command === undefined ||
+  command === "" ||
+  command === "start" ||
+  command === "run";
+
+/**
  * Detects `--password <value>`, which would otherwise silently discard the
  * value: `--password` is declared boolean, and `parseArgs` runs with
- * `strict: false`, so `loopy-server --password hunter2` parses cleanly,
+ * `strict: false`, so `atlas-server --password hunter2` parses cleanly,
  * ignores `hunter2`, and prompts anyway — leaving the secret sitting in
  * shell history and `ps` output for nothing. Better to fail loudly.
  *
@@ -90,7 +106,8 @@ const hasInlinePasswordValue = (args: string[]): boolean => {
   return (
     nextToken !== undefined &&
     !nextToken.startsWith("-") &&
-    nextToken !== "start"
+    nextToken !== "start" &&
+    nextToken !== "run"
   );
 };
 
@@ -99,8 +116,8 @@ const hasInlinePasswordValue = (args: string[]): boolean => {
  */
 export const printServerHelp = (): string =>
   `Usage:
-  loopy-server [start]      Interactive startup, then listen for RSocket clients
-  loopy-server --regen-cert Rotate the TLS certificate (asks for confirmation)
+  atlas-server [start|run]  Interactive startup, then listen for RSocket clients
+  atlas-server --regen-cert Rotate the TLS certificate (asks for confirmation)
 
 Config repair (saves to user-data/startup.json and exits — no listening,
 asks for your server config passphrase first):
@@ -110,12 +127,13 @@ asks for your server config passphrase first):
                  leaves the passphrase and provider keys alone
 
 Examples:
-  loopy-server
-  loopy-server start
-  loopy-server --port 8001
-  loopy-server --password
-  loopy-server --reset --port 8001
-  loopy-server --regen-cert`;
+  atlas-server
+  atlas-server start
+  atlas-server run
+  atlas-server --port 8001
+  atlas-server --password
+  atlas-server --reset --port 8001
+  atlas-server --regen-cert`;
 
 /**
  * Parses `process.argv` into a start command, `--regen-cert`, or a

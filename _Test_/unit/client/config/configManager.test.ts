@@ -12,7 +12,7 @@ describe("config/manager", () => {
   let configFile: string;
 
   beforeEach(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loopy-cfg-mgr-"));
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-cfg-mgr-"));
     configFile = path.join(tmp, "config.json");
     vi.resetModules();
   });
@@ -35,6 +35,7 @@ describe("config/manager", () => {
         ...actual,
         CONFIG_DIR: configDir,
         CONFIG_FILE: configFile,
+        LEGACY_CONFIG_DIR: path.join(tmp, "no-legacy"),
       };
     });
 

@@ -96,7 +96,7 @@ describe("handleFileRead / handleFileGetCwd", () => {
   let context: DispatchContext;
 
   beforeEach(async () => {
-    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-fh-"));
+    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-fh-"));
     await fs.writeFile(path.join(workspace, "f.txt"), "hello");
     context = makeContext(workspace);
   });
@@ -123,7 +123,7 @@ describe("handleFileWrite and mutations with approval", () => {
   let context: DispatchContext;
 
   beforeEach(async () => {
-    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-fh-mut-"));
+    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-fh-mut-"));
     context = makeContext(workspace);
   });
 
@@ -180,7 +180,7 @@ describe("handleFileListDir and handleFileSearch", () => {
   let context: DispatchContext;
 
   beforeEach(async () => {
-    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-fh-search-"));
+    workspace = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-fh-search-"));
     await fs.writeFile(path.join(workspace, "match.ts"), "");
     context = makeContext(workspace);
   });

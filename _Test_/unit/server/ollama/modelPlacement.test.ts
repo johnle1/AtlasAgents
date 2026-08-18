@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createModelPlacementReporter,
   describeModelPlacement,
+  formatSpillMessage,
   matchRunningModel,
 } from "../../../../packages/server/src/ollama/modelPlacement.js";
 import type { RunningModel } from "../../../../packages/server/src/ollama/types.js";
@@ -107,6 +108,28 @@ describe("describeModelPlacement", () => {
       size_vram: 100,
     });
     expect(result.model).toBe("gemma3:27b-q4");
+  });
+});
+
+describe("formatSpillMessage — exported for one-off callers (e.g. /set agent|subagent)", () => {
+  it("gives the partial-spill remedy for a partial placement", () => {
+    const message = formatSpillMessage({
+      model: "qwen3:70b",
+      kind: "partial",
+      gpuPercent: 52,
+    });
+    expect(message).toContain("qwen3:70b");
+    expect(message).toContain("52% on GPU");
+    expect(message).toContain("Free VRAM");
+  });
+
+  it("gives the driver-hint remedy for a fully-cpu placement", () => {
+    const message = formatSpillMessage({
+      model: "llama3:8b",
+      kind: "cpu",
+      gpuPercent: 0,
+    });
+    expect(message).toContain("entirely on CPU");
   });
 });
 

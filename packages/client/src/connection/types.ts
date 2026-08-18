@@ -11,11 +11,11 @@
  * `../frames.js` and are re-exported here for convenience.
  */
 
-import type { RouteId } from "@loopycode/shared";
+import type { RouteId } from "@atlasagents/shared";
 
 export type { PullProgress, TaskFrame } from "../types/frames.js";
 export type { InstalledModel } from "../types/frames.js";
-export type { RouteId, TaskStreamPayload } from "@loopycode/shared";
+export type { RouteId, TaskStreamPayload } from "@atlasagents/shared";
 
 /**
  * One topic in the server-side user preference (“memory”) store.

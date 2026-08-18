@@ -42,7 +42,8 @@ export const finishTool: ToolHandler = {
         properties: {
           summary: {
             type: "string",
-            description: "What you accomplished",
+            description:
+              "What you accomplished. Markdown welcome: **bold** key results, `backticks` for file paths and commands, fenced blocks for code.",
           },
           keyFindings: {
             type: "array",
