@@ -30,6 +30,7 @@ _Test_/
 │   │   ├── configCipherClient.test.ts — client config cipher (AES-256-GCM envelope)
 │   │   ├── configCipherServer.test.ts — server config cipher (AES-256-GCM envelope)
 │   │   ├── configManagerProvidersCipher.test.ts — provider-secrets encryption, passphrase retry/reset
+│   │   ├── configPrecedence.test.ts   — CLI flag > disk > default precedence order
 │   │   ├── configProviders.test.ts    — ConfigManager provider extensions (add/remove/setProvider)
 │   │   ├── configUnlock.test.ts       — client unlockOrSetupConfigCipher (first-run, migration, retry)
 │   │   ├── configDirMigration.test.ts — copies leftover ~/.agent-cli into ~/.atlasagents
@@ -38,6 +39,7 @@ _Test_/
 │   │   └── routerSanitize.test.ts     — stripProviderSecrets (keeps API keys out of responses)
 │   │
 │   ├── providers / ollama
+│   │   ├── contractTests.test.ts      — cross-backend contract validation (Ollama/vLLM/MLX-LM)
 │   │   ├── messageTranslation.test.ts — server providers/messageTranslation.ts
 │   │   ├── modelCapabilities.test.ts  — syncAgentToolSupport / syncSubagentToolSupport
 │   │   ├── modelSelectionHandlers.test.ts — client commands/modelSelectionHandlers.ts
@@ -61,6 +63,7 @@ _Test_/
 │   │   ├── commandCatalog.test.ts     — getCommandSuggestions, requiresArgs, label, desc
 │   │   ├── connectionHealthCheck.test.ts — runHealthCheck timer cleanup (Bugbot fix)
 │   │   ├── historySanitize.test.ts    — sanitizeHistoryLine (pure fn, no mocks)
+│   │   ├── longStreamDegradation.test.ts — high load text wrapping & task board rendering
 │   │   ├── mcpBridge.test.ts          — callTokenSaveTool, formatToolContentAsString
 │   │   ├── mcpToolSchema.test.ts      — mcpToolToAtlasSchema mapping
 │   │   ├── spinnerSync.test.ts        — spinnerForStatusFrame (all AGENT_THINKING_STAGES)

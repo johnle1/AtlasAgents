@@ -384,4 +384,144 @@ describe("OpenAiCompatibleAdapter error handling", () => {
 
     await expect(generator.next()).rejects.toMatchObject({ name: "AbortError" });
   });
+
+  it.each([401, 403, 429, 502, 503])(
+    "preserves HTTP status code %i in ModelProviderError",
+    async (status) => {
+      const adapter = new OpenAiCompatibleAdapter("http://x/v1", "key", {
+        fetch: fakeFetch({ ok: false, status, text: async () => `error-${status}` }),
+      });
+
+      try {
+        await adapter.chat("m", USER_MESSAGES, { temperature: 0 });
+        expect.fail("expected rejection");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ModelProviderError);
+        expect((error as InstanceType<typeof ModelProviderError>).status).toBe(status);
+        expect((error as InstanceType<typeof ModelProviderError>).message).toContain(
+          `error-${status}`,
+        );
+      }
+    },
+  );
+
+  it("handles mid-stream connection reset by wrapping in ModelProviderError", async () => {
+    const encoder = new TextEncoder();
+    let readCount = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (readCount === 0) {
+          readCount++;
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ choices: [{ delta: { content: "part1" } }] })}\n\n`,
+            ),
+          );
+        } else {
+          controller.error(new Error("ECONNRESET"));
+        }
+      },
+    });
+
+    const adapter = new OpenAiCompatibleAdapter("http://x/v1", "key", {
+      fetch: fakeFetch({ ok: true, status: 200, body }),
+    });
+
+    const tokens: string[] = [];
+    const stream = adapter.chatStream("m", USER_MESSAGES, { temperature: 0 });
+
+    await expect(async () => {
+      for await (const token of stream) {
+        tokens.push(token);
+      }
+    }).rejects.toThrow(ModelProviderError);
+
+    expect(tokens).toEqual(["part1"]);
+  });
+});
+
+describe("OpenAiCompatibleAdapter SSE protocol edge cases", () => {
+  it("reassembles SSE chunks split across arbitrary byte boundaries (TCP fragmentation)", async () => {
+    const frames = [
+      JSON.stringify({ choices: [{ delta: { content: "Alpha" } }] }),
+      JSON.stringify({ choices: [{ delta: { content: "Beta" } }] }),
+      JSON.stringify({ choices: [{ delta: { content: "Gamma" } }] }),
+    ];
+
+    const encoder = new TextEncoder();
+    const fullText = frames.map((f) => `data: ${f}\n\n`).join("") + "data: [DONE]\n\n";
+    const rawBytes = encoder.encode(fullText);
+
+    // Fragment into 5-byte chunks
+    const splitSize = 5;
+    const splitBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let offset = 0; offset < rawBytes.length; offset += splitSize) {
+          controller.enqueue(
+            rawBytes.subarray(offset, Math.min(offset + splitSize, rawBytes.length)),
+          );
+        }
+        controller.close();
+      },
+    });
+
+    const adapter = new OpenAiCompatibleAdapter("http://x/v1", "key", {
+      fetch: fakeFetch({ ok: true, status: 200, body: splitBody }),
+    });
+
+    const tokens: string[] = [];
+    for await (const token of adapter.chatStream("m", USER_MESSAGES, { temperature: 0 })) {
+      tokens.push(token);
+    }
+
+    expect(tokens.join("")).toBe("AlphaBetaGamma");
+  });
+
+  it("handles stream ending cleanly on EOF without explicit [DONE] marker", async () => {
+    const frames = [
+      JSON.stringify({ choices: [{ delta: { content: "Hello" } }] }),
+      JSON.stringify({ choices: [{ delta: { content: " without DONE" } }] }),
+    ];
+
+    const encoder = new TextEncoder();
+    // Intentionally no [DONE] marker
+    const fullText = frames.map((f) => `data: ${f}\n\n`).join("");
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(fullText));
+        controller.close();
+      },
+    });
+
+    const adapter = new OpenAiCompatibleAdapter("http://x/v1", "key", {
+      fetch: fakeFetch({ ok: true, status: 200, body }),
+    });
+
+    const tokens: string[] = [];
+    for await (const token of adapter.chatStream("m", USER_MESSAGES, { temperature: 0 })) {
+      tokens.push(token);
+    }
+
+    expect(tokens.join("")).toBe("Hello without DONE");
+  });
+
+  it("ignores empty deltas and non-content fields cleanly", async () => {
+    const frames = [
+      JSON.stringify({ choices: [{ delta: {} }] }),
+      JSON.stringify({ choices: [{ delta: { content: "" } }] }),
+      JSON.stringify({ choices: [{ delta: { content: "Real content" } }] }),
+      JSON.stringify({ choices: [{ delta: {} }] }),
+    ];
+
+    const adapter = new OpenAiCompatibleAdapter("http://x/v1", "key", {
+      fetch: fakeFetch({ ok: true, status: 200, body: sseBody(frames) }),
+    });
+
+    const tokens: string[] = [];
+    for await (const token of adapter.chatStream("m", USER_MESSAGES, { temperature: 0 })) {
+      tokens.push(token);
+    }
+
+    expect(tokens.join("")).toBe("Real content");
+  });
 });
