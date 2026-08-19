@@ -214,4 +214,50 @@ describe("OllamaClient.ingestChunk (via chatWithTools)", () => {
       client.chat("m", [{ role: "user", content: "x" }], { temperature: 0 }),
     ).rejects.toBeInstanceOf(OllamaError);
   });
+
+  it.each([400, 404, 500, 503])(
+    "preserves HTTP status %i in OllamaError",
+    async (status) => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status,
+        body: undefined,
+        text: async () => `ollama error ${status}`,
+        json: async () => ({ error: `ollama error ${status}` }),
+      });
+
+      const client = new OllamaClient();
+      try {
+        await client.chat("m", [{ role: "user", content: "x" }], { temperature: 0 });
+        expect.fail("expected rejection");
+      } catch (error) {
+        expect(error).toBeInstanceOf(OllamaError);
+        expect((error as InstanceType<typeof OllamaError>).status).toBe(status);
+      }
+    },
+  );
+
+  it("handles NDJSON lines fragmented across arbitrary chunk boundaries", async () => {
+    // Split `{"message":{"content":"hello"}}\n` into multiple byte slices
+    const fullLine = `${JSON.stringify({ message: { content: "hello" } })}\n${JSON.stringify({ message: { content: " world" } })}\n`;
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(fullLine);
+    const splitChunks: string[] = [];
+    const chunkSize = 7;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      splitChunks.push(new TextDecoder().decode(bytes.subarray(i, i + chunkSize)));
+    }
+
+    mockFetch.mockResolvedValue(okNdjsonResponse(splitChunks));
+
+    const client = new OllamaClient();
+    const tokens: string[] = [];
+    for await (const token of client.chatStream("m", [{ role: "user", content: "x" }], {
+      temperature: 0,
+    })) {
+      tokens.push(token);
+    }
+
+    expect(tokens.join("")).toBe("hello world");
+  });
 });

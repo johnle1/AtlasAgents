@@ -32,6 +32,19 @@ describe("mergeConfigFromDisk", () => {
     expect(merged.showThinkOutput).toBe(DEFAULT_CONFIG.showThinkOutput);
   });
 
+  it("rejects negative and non-integer subagentCap", () => {
+    expect(mergeConfigFromDisk({ subagentCap: -5 }).subagentCap).toBe(DEFAULT_CONFIG.subagentCap);
+    expect(mergeConfigFromDisk({ subagentCap: 3.14 }).subagentCap).toBe(DEFAULT_CONFIG.subagentCap);
+    expect(mergeConfigFromDisk({ subagentCap: Number.NaN }).subagentCap).toBe(
+      DEFAULT_CONFIG.subagentCap,
+    );
+  });
+
+  it("accepts valid positive integer subagentCap", () => {
+    expect(mergeConfigFromDisk({ subagentCap: 1 }).subagentCap).toBe(1);
+    expect(mergeConfigFromDisk({ subagentCap: 8 }).subagentCap).toBe(8);
+  });
+
   it("merges ui partially", () => {
     const merged = mergeConfigFromDisk({
       ui: { theme: "ocean" },

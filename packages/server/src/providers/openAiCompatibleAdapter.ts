@@ -569,8 +569,18 @@ export class OpenAiCompatibleAdapter implements IOllamaClient {
       while (true) {
         // Check if the caller has canceled the request.
         throwIfAborted(options.signal);
-        // Read the next chunk from the stream.
-        const { done, value } = await reader.read();
+        // Read the next chunk from the stream. Wrap read errors in context.
+        let done: boolean;
+        let value: Uint8Array | undefined;
+        try {
+          const result = await reader.read();
+          done = result.done;
+          value = result.value;
+        } catch (readError) {
+          // If the request was aborted while awaiting `read()`, preserve cancellation semantics.
+          throwIfAborted(options.signal);
+          throw this.wrapNetworkError(operation, model, readError);
+        }
         // If there's no more data, we're done streaming.
         if (done) {
           break;
