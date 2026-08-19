@@ -577,6 +577,8 @@ export class OpenAiCompatibleAdapter implements IOllamaClient {
           done = result.done;
           value = result.value;
         } catch (readError) {
+          // If the request was aborted while awaiting `read()`, preserve cancellation semantics.
+          throwIfAborted(options.signal);
           throw this.wrapNetworkError(operation, model, readError);
         }
         // If there's no more data, we're done streaming.
