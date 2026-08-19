@@ -20,7 +20,7 @@ Detect local hardware (GPU/CPU capabilities used for model recommendations):
 atlas-detect-hardware
 ```
 
-See the [project README](https://github.com/johnle1/LoopyCode#readme) for the full client/server architecture.
+See the [project README](https://github.com/johnle1/AtlasAgents#readme) for the full client/server architecture.
 
 ## License
 

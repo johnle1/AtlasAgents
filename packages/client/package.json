@@ -21,7 +21,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/johnle1/LoopyCode.git",
+    "url": "git+https://github.com/johnle1/AtlasAgents.git",
     "directory": "packages/client"
   },
   "type": "module",

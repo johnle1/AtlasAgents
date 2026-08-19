@@ -14,7 +14,7 @@ npm install -g atlasagents
 atlas
 ```
 
-On first run, `atlas` prompts for the server address and walks through initial setup. See the [project README](https://github.com/johnle1/LoopyCode#readme) for the full client/server architecture.
+On first run, `atlas` prompts for the server address and walks through initial setup. See the [project README](https://github.com/johnle1/AtlasAgents#readme) for the full client/server architecture.
 
 ## License
 
