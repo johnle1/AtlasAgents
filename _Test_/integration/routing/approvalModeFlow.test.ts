@@ -1,14 +1,18 @@
 /**
- * Integration tests — approvalMode on the orchestrator pipeline.
+ * Integration tests — approvalMode on the orchestrator pipeline (unified
+ * agent-turn loop).
  *
- * `plan` mode stops after confirm-plan (no subagent pool). `accept_edits` is
- * a client-side keepUndo short-circuit (covered in approvalFlow unit tests);
- * this file asserts the server honors `plan`.
+ * `plan` mode no longer runs a separate up-front planning phase — instead it
+ * restricts which tools the model is offered (no write_file/edit_file/
+ * run_command/run_steps_parallel) until an `update_plan` proposal is
+ * approved via the plan-review broker. Other modes never restrict the
+ * toolset; the broker is never consulted.
  *
  * Category checklist:
- * - Happy path: default mode still runs the subagent pool
- * - Contract: plan mode never calls the subagent client
- * - State: plan mode still returns ok: true with the plan
+ * - Contract: plan mode withholds mutating tools until update_plan is approved
+ * - Contract: plan mode ends cleanly (ok: true) when the user skips the plan
+ * - Contract: plan mode's revise decision re-gates the next proposal
+ * - Happy path: default/accept_edits never restrict the toolset
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -20,63 +24,17 @@ import type {
 } from "../../../packages/server/src/orchestration/interfaces.js";
 import { fakeExperienceRecorder } from "../../helpers/fakeExperienceRecorder.js";
 import type { IOllamaClient } from "../../../packages/server/src/orchestration/interfaces/ollamaInterfaces.js";
+import type { ToolSchema } from "../../../packages/server/src/orchestration/tools/types.js";
 import type { IProviderRegistry } from "../../../packages/server/src/providers/providerRegistry.js";
 import type { PerConnection } from "../../../packages/server/src/container/types.js";
 import type { Agent } from "../../../packages/server/src/orchestration/agent/agent.js";
 import { runOrchestratorPipeline } from "../../../packages/server/src/orchestration/orchestrator/orchestratorPipeline.js";
 import type { OrchestratorPipelineDeps } from "../../../packages/server/src/orchestration/orchestrator/orchestratorPipelineTypes.js";
 
-const AGENT_THINK_BLOCK = `<agent-think>
-COMPLEXITY: simple
-  reasoning: single trivial subtask
-
-UNDERSTAND:
-  literal: do the thing
-  actual: do the thing
-  implicit: none
-
-EXPLORATION:
-  need explore? no
-  if no: no exploration needed
-
-PLAN:
-  agent count: 1
-  execution: sequential
-
-  Agent 1 — implementation:
-    1. do the thing
-
-SELF-CHECK:
-  issues? none
-  file conflicts? none
-  wave assumptions? none
-
-COMMAND PLAN:
-  setup commands: none
-  verify commands: none
-</agent-think>`;
-
-const SUBAGENT_THINK_BLOCK = `<redacted_thinking>
-Setup commands: none
-Verify commands: none
-Off-limits (run-project): none
-Proceeding straight to finish.
-</redacted_thinking>`;
-
-const ONE_SUBTASK_PLAN_ARGS = {
-  subtasks: [
-    {
-      id: 1,
-      text: "do the thing",
-      dependsOn: [],
-      agentId: 1,
-      agentLabel: "implementation",
-    },
-  ],
-  execution: "sequential" as const,
-  agentCount: 1,
-  risks: [] as string[],
+const UPDATE_PLAN_ARGS = {
+  steps: [{ id: 1, text: "do the thing", status: "in_progress" }],
 };
+const FINISH_ARGS = { summary: "did it", keyFindings: [] as string[] };
 
 const makeConfig = (): IConfigManager =>
   ({
@@ -85,6 +43,7 @@ const makeConfig = (): IConfigManager =>
     getAgentTemperature: async () => 0.1,
     getSubagentTemperature: async () => 0.4,
     getAgentModelSupportsTools: async () => true,
+    getAgentModelSupportsThinking: async () => true,
     getSubagentModelSupportsTools: async () => true,
     getMaxRetries: async () => 3,
     getMaxContextBudget: async () => 0.2,
@@ -102,7 +61,7 @@ const makeContextBuilder = (): IContextBuilder => ({
 
 const makeDeps = (
   agentClient: IOllamaClient,
-  subagentClient: IOllamaClient,
+  subagentClient: IOllamaClient = agentClient,
 ): OrchestratorPipelineDeps => ({
   contextBuilder: makeContextBuilder(),
   skillManager: { selectForTask: async () => [] } as unknown as ISkillManager,
@@ -122,111 +81,149 @@ const makeDeps = (
   config: makeConfig(),
 });
 
-const makePerConnection = (): PerConnection =>
+const makePerConnection = (
+  planDecision: () => Promise<{ decision: string; feedback?: string }>,
+): PerConnection =>
   ({
-    planBroker: { request: async () => ({ decision: "implement" }) },
+    planBroker: { request: planDecision },
     resolvePlan: () => {},
     rebindStreamEmit: () => {},
     workspace: { listStructure: async () => "" },
     terminal: {},
   }) as unknown as PerConnection;
 
-describe("approvalMode — plan stops at confirm-plan", () => {
-  it("does not call the subagent client when approvalMode is plan (contract)", async () => {
-    const subagentChat = vi.fn();
-    const agentClient = {
-      chatWithTools: async () => ({
-        content: AGENT_THINK_BLOCK,
-        toolCalls: [{ name: "submit_plan", args: ONE_SUBTASK_PLAN_ARGS }],
-      }),
-      chat: async () => "unused",
-    } as unknown as IOllamaClient;
-    const subagentClient = {
-      chatWithTools: subagentChat,
-    } as unknown as IOllamaClient;
+/** Extracts the tool names offered to the model on one `chatWithTools` call. */
+const toolNamesFromCall = (mock: ReturnType<typeof vi.fn>, callIndex: number): string[] => {
+  const tools = mock.mock.calls[callIndex]?.[2] as ToolSchema[] | undefined;
+  return (tools ?? []).map((t) => t.function.name);
+};
 
-    const outcome = await runOrchestratorPipeline(
-      makeDeps(agentClient, subagentClient),
-      {
-        session: { userId: "u1", requesterId: "r1" },
-        taskText: "do the thing",
-        emit: () => {},
-        signal: new AbortController().signal,
-        perConn: makePerConnection(),
-        approvalMode: "plan",
-      },
-    );
+describe("approvalMode — plan mode gates mutating tools", () => {
+  it("withholds write_file/run_command/run_steps_parallel until update_plan is approved", async () => {
+    let call = 0;
+    const agentChat = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return { content: "", toolCalls: [{ name: "update_plan", args: UPDATE_PLAN_ARGS }] };
+      }
+      return { content: "", toolCalls: [{ name: "finish", args: FINISH_ARGS }] };
+    });
+    const agentClient = { chatWithTools: agentChat, chat: async () => "" } as unknown as IOllamaClient;
+
+    const outcome = await runOrchestratorPipeline(makeDeps(agentClient), {
+      session: { userId: "u1", requesterId: "r1" },
+      taskText: "do the thing",
+      emit: () => {},
+      signal: new AbortController().signal,
+      perConn: makePerConnection(async () => ({ decision: "implement" })),
+      approvalMode: "plan",
+    });
 
     expect(outcome.ok).toBe(true);
-    expect(outcome.plan.subtasks).toHaveLength(1);
-    expect(subagentChat).not.toHaveBeenCalled();
+    expect(agentChat).toHaveBeenCalledTimes(2);
+    // Before approval: no mutating tools offered.
+    const beforeApproval = toolNamesFromCall(agentChat, 0);
+    expect(beforeApproval).toContain("update_plan");
+    expect(beforeApproval).not.toContain("write_file");
+    expect(beforeApproval).not.toContain("run_command");
+    expect(beforeApproval).not.toContain("run_steps_parallel");
+    // After approval: full toolset unlocked for the next call.
+    const afterApproval = toolNamesFromCall(agentChat, 1);
+    expect(afterApproval).toContain("write_file");
+    expect(afterApproval).toContain("run_command");
+  });
+
+  it("ends cleanly without calling a second turn when the user skips the plan", async () => {
+    const agentChat = vi.fn(async () => ({
+      content: "",
+      toolCalls: [{ name: "update_plan", args: UPDATE_PLAN_ARGS }],
+    }));
+    const agentClient = { chatWithTools: agentChat, chat: async () => "" } as unknown as IOllamaClient;
+
+    const outcome = await runOrchestratorPipeline(makeDeps(agentClient), {
+      session: { userId: "u1", requesterId: "r1" },
+      taskText: "do the thing",
+      emit: () => {},
+      signal: new AbortController().signal,
+      perConn: makePerConnection(async () => ({ decision: "skip" })),
+      approvalMode: "plan",
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(agentChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-gates the next proposal after a revise decision", async () => {
+    const planDecisions = vi.fn(async () => {
+      const calls = planDecisions.mock.calls.length;
+      return calls === 1 ? { decision: "edit", feedback: "add a test step" } : { decision: "implement" };
+    });
+    let call = 0;
+    const agentChat = vi.fn(async () => {
+      call += 1;
+      if (call === 3) {
+        return { content: "", toolCalls: [{ name: "finish", args: FINISH_ARGS }] };
+      }
+      return { content: "", toolCalls: [{ name: "update_plan", args: UPDATE_PLAN_ARGS }] };
+    });
+    const agentClient = { chatWithTools: agentChat, chat: async () => "" } as unknown as IOllamaClient;
+
+    const outcome = await runOrchestratorPipeline(makeDeps(agentClient), {
+      session: { userId: "u1", requesterId: "r1" },
+      taskText: "do the thing",
+      emit: () => {},
+      signal: new AbortController().signal,
+      perConn: makePerConnection(planDecisions),
+      approvalMode: "plan",
+    });
+
+    expect(outcome.ok).toBe(true);
+    // First update_plan -> revise, second update_plan -> re-reviewed and
+    // approved, third call unlocked and finishes.
+    expect(planDecisions).toHaveBeenCalledTimes(2);
+    expect(toolNamesFromCall(agentChat, 1)).not.toContain("write_file");
+    expect(toolNamesFromCall(agentChat, 2)).toContain("write_file");
   });
 });
 
-describe("approvalMode — default still runs the pool (happy path)", () => {
-  it("calls the subagent client when approvalMode is default", async () => {
-    const subagentChat = vi.fn(async () => ({
-      content: SUBAGENT_THINK_BLOCK,
-      toolCalls: [
-        { name: "finish", args: { summary: "did it", keyFindings: [] } },
-      ],
+describe("approvalMode — non-plan modes never restrict the toolset", () => {
+  it("offers the full toolset from the first call in default mode", async () => {
+    const agentChat = vi.fn(async () => ({
+      content: "",
+      toolCalls: [{ name: "finish", args: FINISH_ARGS }],
     }));
-    const agentClient = {
-      chatWithTools: async () => ({
-        content: AGENT_THINK_BLOCK,
-        toolCalls: [{ name: "submit_plan", args: ONE_SUBTASK_PLAN_ARGS }],
-      }),
-      chat: async () => "combined",
-    } as unknown as IOllamaClient;
+    const agentClient = { chatWithTools: agentChat, chat: async () => "" } as unknown as IOllamaClient;
 
-    const outcome = await runOrchestratorPipeline(
-      makeDeps(agentClient, { chatWithTools: subagentChat } as unknown as IOllamaClient),
-      {
-        session: { userId: "u1", requesterId: "r1" },
-        taskText: "do the thing",
-        emit: () => {},
-        signal: new AbortController().signal,
-        perConn: makePerConnection(),
-        approvalMode: "default",
-      },
-    );
+    const outcome = await runOrchestratorPipeline(makeDeps(agentClient), {
+      session: { userId: "u1", requesterId: "r1" },
+      taskText: "do the thing",
+      emit: () => {},
+      signal: new AbortController().signal,
+      perConn: makePerConnection(async () => ({ decision: "implement" })),
+      approvalMode: "default",
+    });
 
     expect(outcome.ok).toBe(true);
-    expect(subagentChat).toHaveBeenCalled();
+    expect(toolNamesFromCall(agentChat, 0)).toContain("write_file");
   });
-});
 
-describe("approvalMode — accept_edits and auto still run the pool (contract)", () => {
-  it("calls the subagent client when approvalMode is accept_edits", async () => {
-    const subagentChat = vi.fn(async () => ({
-      content: SUBAGENT_THINK_BLOCK,
-      toolCalls: [
-        { name: "finish", args: { summary: "did it", keyFindings: [] } },
-      ],
+  it("offers the full toolset from the first call in accept_edits mode", async () => {
+    const agentChat = vi.fn(async () => ({
+      content: "",
+      toolCalls: [{ name: "finish", args: FINISH_ARGS }],
     }));
-    const agentClient = {
-      chatWithTools: async () => ({
-        content: AGENT_THINK_BLOCK,
-        toolCalls: [{ name: "submit_plan", args: ONE_SUBTASK_PLAN_ARGS }],
-      }),
-      chat: async () => "combined",
-    } as unknown as IOllamaClient;
+    const agentClient = { chatWithTools: agentChat, chat: async () => "" } as unknown as IOllamaClient;
 
-    const outcome = await runOrchestratorPipeline(
-      makeDeps(agentClient, {
-        chatWithTools: subagentChat,
-      } as unknown as IOllamaClient),
-      {
-        session: { userId: "u1", requesterId: "r1" },
-        taskText: "do the thing",
-        emit: () => {},
-        signal: new AbortController().signal,
-        perConn: makePerConnection(),
-        approvalMode: "accept_edits",
-      },
-    );
+    const outcome = await runOrchestratorPipeline(makeDeps(agentClient), {
+      session: { userId: "u1", requesterId: "r1" },
+      taskText: "do the thing",
+      emit: () => {},
+      signal: new AbortController().signal,
+      perConn: makePerConnection(async () => ({ decision: "implement" })),
+      approvalMode: "accept_edits",
+    });
 
     expect(outcome.ok).toBe(true);
-    expect(subagentChat).toHaveBeenCalled();
+    expect(toolNamesFromCall(agentChat, 0)).toContain("write_file");
   });
 });

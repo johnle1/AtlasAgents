@@ -74,7 +74,11 @@ const runCliOnce = async (
       TMUX: "",
       TERM: "xterm-256color",
       CI: "false",
+      // os.homedir() reads HOME on POSIX but USERPROFILE on Windows — both
+      // must point at the isolated dir or the CLI falls back to the real
+      // profile there.
       HOME: testHome,
+      USERPROFILE: testHome,
     },
     stdin: "pipe",
     stdout: "pipe",

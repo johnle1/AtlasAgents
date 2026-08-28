@@ -1,25 +1,31 @@
 /**
- * Integration tests — ReadyQueue ↔ orchestrator agent-pool dispatch.
+ * Integration tests — ReadyQueue ↔ the hidden subagent pool behind
+ * `run_steps_parallel` (unified agent-turn loop; see `agentTurn.ts`).
  *
  * Testing pyramid layer : Integration
  * Runner                 : Vitest
- * Real modules wired     : runOrchestratorPipeline → runAgentPool driving the
+ * Real modules wired     : runOrchestratorPipeline → runAgentTurn →
+ *                          run_steps_parallel → runAgentPool driving the
  *                          REAL ReadyQueue (createReadyQueue/available/take/
- *                          complete/buildSubagentBoardSnapshots) with real
- *                          Agent/Subagent control flow — same boundary as
- *                          orchestratorPipelineFlow.test.ts.
+ *                          complete) with real Subagent control flow — same
+ *                          boundary as orchestratorPipelineFlow.test.ts.
  * Mocks                  : only the role-routed `IOllamaClient`s. The fake
- *                          agent client proposes a two-wave DAG plan; the fake
- *                          subagent client records the order subtasks reach
- *                          the model and finishes each on its first turn.
+ *                          agent client lays out a 3-step checklist (steps 1
+ *                          and 2 independent, step 3 depends on both), fans
+ *                          steps 1+2 out via `run_steps_parallel`, then
+ *                          finishes; the fake subagent client records the
+ *                          order steps reach the model and finishes each on
+ *                          its first turn.
  *
  * What this proves that readyQueue.test.ts (unit) cannot:
- * - The pool's take/complete/workSignal loop actually executes a multi-wave
- *   DAG in dependency order through the REAL pipeline, and the emitted
- *   status frames carry board snapshots whose lifecycle states track it.
- * - A failed subtask never unlocks its dependent through the real pool.
- * - An abort mid-queue stops dispatch and rejects, with dependent subtasks
- *   never reaching a model.
+ * - `run_steps_parallel` actually dispatches a real concurrent batch through
+ *   the REAL pool (take/complete/workSignal), not a mock.
+ * - The hidden pool never emits status/board frames — see
+ *   "readyQueueFlow — hidden from the UI" below, the actual regression this
+ *   file exists to guard now that subagent boards are no longer shown.
+ * - A failed step is reported back as tool feedback and reflected as
+ *   `"failed"` on the checklist, without throwing the whole turn.
+ * - An abort mid-batch stops dispatch and rejects the whole pipeline.
  */
 
 import { describe, expect, it } from "vitest";
@@ -40,42 +46,8 @@ import { runOrchestratorPipeline } from "../../../packages/server/src/orchestrat
 import type { OrchestratorPipelineDeps } from "../../../packages/server/src/orchestration/orchestrator/orchestratorPipelineTypes.js";
 
 // ---------------------------------------------------------------------------
-// Canned model turns (same shapes as orchestratorPipelineFlow.test.ts)
+// Canned model turns
 // ---------------------------------------------------------------------------
-
-const AGENT_THINK_BLOCK = `<agent-think>
-COMPLEXITY: moderate
-  reasoning: three subtasks in two waves
-
-UNDERSTAND:
-  literal: do the things
-  actual: do the things
-  implicit: none
-
-EXPLORATION:
-  need explore? no
-  if no: no exploration needed
-
-PLAN:
-  agent count: 2
-  execution: parallel
-
-  Agent 1 — implementation:
-    1. setup database
-    3. integrate components
-
-  Agent 2 — documentation:
-    2. write docs
-
-SELF-CHECK:
-  issues? none
-  file conflicts? none
-  wave assumptions? none
-
-COMMAND PLAN:
-  setup commands: none
-  verify commands: none
-</agent-think>`;
 
 const SUBAGENT_THINK_BLOCK = `<redacted_thinking>
 Setup commands: none
@@ -84,69 +56,64 @@ Off-limits (run-project): none
 Proceeding straight to finish — nothing to set up or verify for this trivial subtask.
 </redacted_thinking>`;
 
-/**
- * Two-wave DAG: subtasks 1 and 2 are independent (wave 0); subtask 3 needs
- * both (wave 1). Distinct, grep-able texts let the fake subagent client
- * record execution order from the messages it receives.
- */
-const TWO_WAVE_PLAN_ARGS = {
-  subtasks: [
-    { id: 1, text: "setup database", dependsOn: [], agentId: 1, agentLabel: "implementation" },
-    { id: 2, text: "write docs", dependsOn: [], agentId: 2, agentLabel: "documentation" },
-    { id: 3, text: "integrate components", dependsOn: [1, 2], agentId: 1, agentLabel: "implementation" },
+const UPDATE_PLAN_ARGS = {
+  steps: [
+    { id: 1, text: "setup database", status: "pending" },
+    { id: 2, text: "write docs", status: "pending" },
+    { id: 3, text: "integrate components", status: "pending", dependsOn: [1, 2] },
   ],
-  execution: "parallel" as const,
-  agentCount: 2,
-  risks: [] as string[],
+};
+const RUN_PARALLEL_ARGS = { stepIds: [1, 2] };
+const FINISH_INTEGRATE_ARGS = { summary: "integrated", keyFindings: [] as string[] };
+
+/** Fake top-level agent client: lays out the checklist, fans wave 0 out, then finishes. */
+const makeAgentClient = (): IOllamaClient => {
+  let call = 0;
+  return {
+    chatWithTools: async () => {
+      call += 1;
+      if (call === 1) {
+        return { content: "", toolCalls: [{ name: "update_plan", args: UPDATE_PLAN_ARGS }] };
+      }
+      if (call === 2) {
+        return { content: "", toolCalls: [{ name: "run_steps_parallel", args: RUN_PARALLEL_ARGS }] };
+      }
+      return { content: "", toolCalls: [{ name: "finish", args: FINISH_INTEGRATE_ARGS }] };
+    },
+    // Escalation guidance for a subtask dispatched by run_steps_parallel
+    // still asks the lead Agent, which uses this client's `chat`.
+    chat: async () => "try a different approach",
+  } as unknown as IOllamaClient;
 };
 
-/** Fake agent client: proposes the two-wave plan, streams a combine answer. */
-const makeAgentPlanningClient = (): IOllamaClient =>
-  ({
-    chatWithTools: async () => ({
-      content: AGENT_THINK_BLOCK,
-      toolCalls: [{ name: "submit_plan", args: TWO_WAVE_PLAN_ARGS }],
-    }),
-    chatStream: async function* (): AsyncGenerator<string> {
-      yield "combined result: all done";
-    },
-    // Escalation advice and any other whole-response agent calls land here.
-    chat: async () => "advice: keep going",
-  }) as unknown as IOllamaClient;
-
 /**
- * Fake subagent client: records which subtask text each call carries (the
+ * Fake subagent client: records which step text each call carries (the
  * order of this array IS the dispatch order through the real queue), then
- * finishes — except subtasks listed in `failOn`, which escalate.
+ * finishes — except steps listed in `failOn`, which escalate until the
+ * escalation budget (config.getMaxRetries) is exhausted.
  */
 const makeSubagentClient = (opts: {
   calls: string[];
   failOn?: string[];
-  onCall?: (subtaskText: string) => void;
+  onCall?: (stepText: string) => void;
 }): IOllamaClient =>
   ({
     chatWithTools: async (_model: string, messages: Message[]) => {
       const payload = JSON.stringify(messages);
-      // Subtask 3's prompt carries the completed wave-0 summaries as session
-      // context (buildSessionContext), so those texts appear in its messages
-      // too — match the dependent first, or its call would be misrecorded
-      // as one of its dependencies.
-      const subtaskText = ["integrate components", "setup database", "write docs"].find(
-        (text) => payload.includes(text),
-      );
-      if (subtaskText) {
-        opts.calls.push(subtaskText);
-        opts.onCall?.(subtaskText);
+      const stepText = ["setup database", "write docs"].find((text) => payload.includes(text));
+      if (stepText) {
+        opts.calls.push(stepText);
+        opts.onCall?.(stepText);
       }
-      if (subtaskText && opts.failOn?.includes(subtaskText)) {
+      if (stepText && opts.failOn?.includes(stepText)) {
         return {
           content: SUBAGENT_THINK_BLOCK,
-          toolCalls: [{ name: "escalate", args: { reason: `${subtaskText} failed` } }],
+          toolCalls: [{ name: "escalate", args: { reason: `${stepText} failed` } }],
         };
       }
       return {
         content: SUBAGENT_THINK_BLOCK,
-        toolCalls: [{ name: "finish", args: { summary: `done: ${subtaskText ?? "unknown"}`, keyFindings: [] } }],
+        toolCalls: [{ name: "finish", args: { summary: `done: ${stepText ?? "unknown"}`, keyFindings: [] } }],
       };
     },
   }) as unknown as IOllamaClient;
@@ -162,6 +129,7 @@ const makeConfig = (): IConfigManager =>
     getAgentTemperature: async () => 0.1,
     getSubagentTemperature: async () => 0.4,
     getAgentModelSupportsTools: async () => true,
+    getAgentModelSupportsThinking: async () => true,
     getSubagentModelSupportsTools: async () => true,
     getMaxRetries: async () => 3,
     getMaxContextBudget: async () => 0.2,
@@ -205,7 +173,7 @@ const makeDeps = (subagentClient: IOllamaClient): OrchestratorPipelineDeps => ({
   agent: {} as unknown as Agent, // unused — reconstructed from providerRegistry
   providerRegistry: {
     getRoleClient: (role: "agent" | "subagent") =>
-      role === "agent" ? makeAgentPlanningClient() : subagentClient,
+      role === "agent" ? makeAgentClient() : subagentClient,
   } as unknown as IProviderRegistry,
   config: makeConfig(),
 });
@@ -228,117 +196,99 @@ const runPipeline = (opts: {
 // ---------------------------------------------------------------------------
 
 type StatusFrame = Extract<TaskFrame, { kind: "status" }>;
+type PlanUpdateFrame = Extract<TaskFrame, { kind: "plan-update" }>;
 
 const statusFrames = (frames: TaskFrame[]): StatusFrame[] =>
   frames.filter((frame): frame is StatusFrame => frame.kind === "status");
 
-/** All board snapshots in emission order, flattened to per-task states. */
-const boardStates = (frames: TaskFrame[]) =>
-  statusFrames(frames)
-    .filter((frame) => frame.source === "agent" && frame.subagentBoards)
-    .map((frame) =>
-      frame.subagentBoards!.flatMap((board) =>
-        board.tasks.map((task) => ({ id: task.id, state: task.state })),
-      ),
-    );
+const planUpdateFrames = (frames: TaskFrame[]): PlanUpdateFrame[] =>
+  frames.filter((frame): frame is PlanUpdateFrame => frame.kind === "plan-update");
 
 // ---------------------------------------------------------------------------
-// Multi-wave dispatch
+// Wave-0 concurrent dispatch
 // ---------------------------------------------------------------------------
 
-describe("readyQueue ↔ agent pool — two-wave DAG dispatch", () => {
-  it("runs wave 0 subtasks before their dependent, with ok: true", async () => {
+describe("readyQueue ↔ hidden pool — run_steps_parallel dispatches a real concurrent batch", () => {
+  it("runs both independent steps and reports the pipeline ok: true", async () => {
     const calls: string[] = [];
     const outcome = await runPipeline({
       subagentClient: makeSubagentClient({ calls }),
     });
 
     expect(outcome.ok).toBe(true);
-    expect(outcome.results).toHaveLength(3);
-
-    // All three subtasks ran exactly once…
-    expect([...calls].sort()).toEqual(
-      ["integrate components", "setup database", "write docs"].sort(),
-    );
-    // …and the dependent ran strictly after BOTH of its dependencies.
-    // (Wave-0 order between "setup database" and "write docs" is
-    // intentionally unconstrained — they run on parallel workers.)
-    const integrateIndex = calls.indexOf("integrate components");
-    expect(integrateIndex).toBeGreaterThan(calls.indexOf("setup database"));
-    expect(integrateIndex).toBeGreaterThan(calls.indexOf("write docs"));
+    expect([...calls].sort()).toEqual(["setup database", "write docs"].sort());
   });
 
-  it("emits board snapshots that track blocked → complete lifecycle", async () => {
+  it("marks the batch's steps done on the checklist once the pool finishes", async () => {
     const frames: TaskFrame[] = [];
     await runPipeline({
       subagentClient: makeSubagentClient({ calls: [] }),
       emit: (frame) => frames.push(frame),
     });
 
-    const snapshots = boardStates(frames);
-    expect(snapshots.length).toBeGreaterThan(0);
-
-    // Early snapshot: the dependent subtask is visibly blocked…
-    const early = snapshots[0];
-    expect(early).toContainEqual({ id: 3, state: "blocked" });
-
-    // …and the last snapshot shows every subtask complete. (Board order is
-    // by agent group, not subtask id — sort before comparing.)
-    const last = [...snapshots[snapshots.length - 1]].sort(
-      (taskA, taskB) => taskA.id - taskB.id,
-    );
-    expect(last).toEqual([
-      { id: 1, state: "complete" },
-      { id: 2, state: "complete" },
-      { id: 3, state: "complete" },
-    ]);
+    const updates = planUpdateFrames(frames);
+    expect(updates.length).toBeGreaterThan(0);
+    const last = updates[updates.length - 1]!;
+    const byId = new Map(last.steps.map((step) => [step.id, step.status]));
+    expect(byId.get(1)).toBe("done");
+    expect(byId.get(2)).toBe("done");
   });
+});
 
-  it("emits an unlock message when a completion frees the dependent", async () => {
+describe("readyQueueFlow — hidden from the UI", () => {
+  it("never emits a subagentBoards snapshot for the hidden pool", async () => {
     const frames: TaskFrame[] = [];
     await runPipeline({
       subagentClient: makeSubagentClient({ calls: [] }),
       emit: (frame) => frames.push(frame),
     });
 
-    const messages = statusFrames(frames).map((frame) => frame.message);
-    expect(messages.some((message) => /unlocked/i.test(message))).toBe(true);
+    const boardFrames = statusFrames(frames).filter(
+      (frame) => "subagentBoards" in frame && frame.subagentBoards !== undefined,
+    );
+    expect(boardFrames).toHaveLength(0);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Failure — dependents never unlock
+// Failure — reported back, not thrown
 // ---------------------------------------------------------------------------
 
-describe("readyQueue ↔ agent pool — failure blocks the dependent wave", () => {
-  it("rejects on the failed subtask and never runs its dependent", async () => {
+describe("readyQueue ↔ hidden pool — a failed step is reported, not thrown", () => {
+  it("marks the failed step on the checklist and lets the top-level turn continue", async () => {
     const calls: string[] = [];
+    const frames: TaskFrame[] = [];
 
-    await expect(
-      runPipeline({
-        subagentClient: makeSubagentClient({ calls, failOn: ["setup database"] }),
-      }),
-    ).rejects.toThrow(/subtask 1 failed/i);
+    const outcome = await runPipeline({
+      subagentClient: makeSubagentClient({ calls, failOn: ["setup database"] }),
+      emit: (frame) => frames.push(frame),
+    });
 
-    // The dependent must never reach a model — a failed dependency unlocks
-    // nothing. (Wave-0 sibling "write docs" may or may not have started on
-    // its own worker before the failure propagated; that is unconstrained.)
-    expect(calls).not.toContain("integrate components");
+    // The top-level agent's third call still fires (it saw failure feedback
+    // and chose to finish anyway in this fixture) — the pipeline does not
+    // reject just because one parallel step failed.
+    expect(outcome.ok).toBe(true);
+
+    const updates = planUpdateFrames(frames);
+    const last = updates[updates.length - 1]!;
+    const byId = new Map(last.steps.map((step) => [step.id, step.status]));
+    expect(byId.get(1)).toBe("failed");
+    expect(byId.get(2)).toBe("done");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Abort mid-queue
+// Abort mid-batch
 // ---------------------------------------------------------------------------
 
-describe("readyQueue ↔ agent pool — abort mid-queue leaves consistent state", () => {
-  it("rejects with an abort error and never dispatches the dependent wave", async () => {
+describe("readyQueue ↔ hidden pool — abort mid-batch leaves consistent state", () => {
+  it("rejects with an abort error and never reaches the finish call", async () => {
     const controller = new AbortController();
     const calls: string[] = [];
 
     await expect(
       runPipeline({
-        // Abort as soon as the first subtask reaches the model — the pool's
+        // Abort as soon as the first step reaches the model — the pool's
         // next loop iteration sees the signal and stops dispatching.
         subagentClient: makeSubagentClient({
           calls,
@@ -347,7 +297,5 @@ describe("readyQueue ↔ agent pool — abort mid-queue leaves consistent state"
         signal: controller.signal,
       }),
     ).rejects.toThrow(/abort/i);
-
-    expect(calls).not.toContain("integrate components");
   });
 });

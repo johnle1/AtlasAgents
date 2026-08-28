@@ -18,6 +18,8 @@ import { runCommandTool } from "./runCommandHandler.js";
 import { createEscalateTool } from "./escalateHandler.js";
 import { finishTool } from "./finishHandler.js";
 import { createTokenSaveToolHandlers } from "./tokenSaveToolHandler.js";
+import { updatePlanTool } from "./updatePlanHandler.js";
+import { runStepsParallelTool } from "./runStepsParallelHandler.js";
 
 /**
  * Builds the ordered list of tools available to a subagent for one run.
@@ -62,6 +64,37 @@ export const createToolRegistry = (
  */
 export const getToolSchemas = (registry: ToolHandler[]): ToolSchema[] =>
   registry.map((tool) => tool.schema);
+
+/**
+ * Builds the ordered list of tools available to the unified top-level agent
+ * turn (see `agentTurn.ts`) for one task.
+ *
+ * @remarks
+ * Distinct from {@link createToolRegistry} in two ways: it omits `escalate`
+ * (there is no separate lead agent to escalate to — this loop IS the lead),
+ * and it adds `update_plan` / `run_steps_parallel`, the two tools that let
+ * the agent express a checklist and hand independent steps to the hidden
+ * subagent pool. `finish` is still included — it's what lets a multi-step
+ * turn end explicitly (with its existing verify-before-finish gate), while a
+ * simple conversational turn just ends when the model returns plain text
+ * with no tool call at all.
+ *
+ * @param extraTools - Optional TokenSave (MCP) tool schemas to include for this run.
+ * @returns The full list of handlers the unified agent turn can call.
+ */
+export const createAgentTurnToolRegistry = (
+  extraTools: ToolSchema[] = [],
+): ToolHandler[] => [
+  readFileTool,
+  writeFileTool,
+  editFileTool,
+  runCommandTool,
+  updatePlanTool,
+  runStepsParallelTool,
+  finishTool,
+  ...createTokenSaveToolHandlers(extraTools),
+];
+
 
 /**
  * Indexes a tool registry by tool name for O(1) lookup during execution.

@@ -16,7 +16,7 @@
 import type { TaskFrame } from "../transport/frames.js";
 
 // ===== ORCHESTRATION TYPE IMPORTS =====
-import type { PlanReviewResponse } from "../orchestration/types.js";
+import type { PlanReviewResponse, PlanStep } from "../orchestration/types.js";
 import type { Agent } from "../orchestration/agent/agent.js";
 import type { IModelPlacementReporter } from "../ollama/modelPlacement.js";
 import type { AgentOrchestrator } from "../orchestration/orchestrator/orchestrator.js";
@@ -154,6 +154,15 @@ export type PerConnection = {
    * client supports TokenSave tools.
    */
   tokenSaveTools?: ToolSchema[];
+
+  /**
+   * The agent's live checklist for this connection, as last reported via
+   * `update_plan`. Survives across tasks on the same connection so a task
+   * started under one model can be resumed by another after a model switch
+   * (see `agentTurn.ts`'s resume-block prompt injection). Cleared by
+   * `session.clear` (`/new`).
+   */
+  activePlan?: PlanStep[];
 };
 
 /**

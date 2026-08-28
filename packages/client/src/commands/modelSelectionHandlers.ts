@@ -10,10 +10,51 @@
 import { updateConfig, loadConfig } from "../config/index.js";
 import type { Connection } from "../connection/index.js";
 import type { PromptPort } from "../ui/promptPort.js";
-import { refreshInkBanner } from "../ui/uiBridge.js";
+import { refreshInkBanner, getActivePlan } from "../ui/uiBridge.js";
 import { printGroupedModels, printError, printSuccess, printLine } from "../renderer.js";
 import type { ModelGroup, CurrentModelSelection } from "../renderer.js";
+import type { PlanStepState } from "../ui/types.js";
 import { formatErrorMessage } from "./utils.js";
+
+/**
+ * Builds the post-switch confirmation line reporting a carried-over
+ * checklist, or `null` when there's nothing to report (no active plan, or
+ * every step already done).
+ *
+ * @remarks
+ * The plan itself lives server-side (`PerConnection.activePlan`) and
+ * survives a model switch untouched — `agentTurn.ts` picks it up on the
+ * new model's very next turn via its resume-block prompt injection. This
+ * message is purely informational: it tells the user their progress is
+ * still there, using the client's own mirrored copy of the last
+ * `plan-update` frame (see `getActivePlan`) so nothing extra needs to be
+ * fetched from the server.
+ *
+ * @param steps - The current checklist, as last reported via `update_plan`.
+ * @returns A one-line confirmation, or `null` if there's nothing unfinished.
+ *
+ * @example
+ * ```ts
+ * buildPlanCarriedOverMessage([
+ *   { id: 1, text: "read the config parser", status: "done" },
+ *   { id: 2, text: "wire the flag into routerBuilder", status: "in_progress" },
+ * ]);
+ * // "Plan carried over — 1/2 done. Next: wire the flag into routerBuilder."
+ * ```
+ */
+export const buildPlanCarriedOverMessage = (
+  steps: PlanStepState[],
+): string | null => {
+  if (steps.length === 0 || steps.every((step) => step.status === "done")) {
+    return null;
+  }
+  const done = steps.filter((step) => step.status === "done").length;
+  const next = steps.find(
+    (step) => step.status !== "done" && step.status !== "failed",
+  );
+  const nextClause = next ? ` Next: ${next.text}.` : "";
+  return `Plan carried over — ${done}/${steps.length} done.${nextClause}`;
+};
 
 /**
  * Lets the user pick the agent or subagent model (from any configured
@@ -137,6 +178,7 @@ export const handleSetModel = async (
     const response = await connection.sendCommand<{
       ok: boolean;
       supportsTools?: boolean;
+      supportsThinking?: boolean;
       placementWarning?: string;
     }>("config.setModel", {
       role: modelRole,
@@ -159,8 +201,26 @@ export const handleSetModel = async (
       );
     }
 
+    if (typeof response.supportsThinking === "boolean") {
+      printLine(
+        response.supportsThinking
+          ? "  extended thinking: enabled"
+          : "  extended thinking: disabled (model does not support it)",
+      );
+    }
+
     if (response.placementWarning) {
       printLine(response.placementWarning);
+    }
+
+    // Only the agent role's switch can carry a checklist forward — it's the
+    // agent turn that maintains one, not the subagent (which only ever
+    // executes steps handed to it via run_steps_parallel).
+    if (modelRole === "agent") {
+      const carriedOver = buildPlanCarriedOverMessage(getActivePlan());
+      if (carriedOver) {
+        printLine(carriedOver);
+      }
     }
   } catch (error) {
     // Local disk config moved ahead of server — undo so disk matches the live session.

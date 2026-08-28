@@ -41,6 +41,7 @@ import {
   syncAgentToolSupport,
   syncSubagentToolSupport,
 } from "../ollama/syncAgentToolSupport.js";
+import { syncAgentThinkingSupport } from "../ollama/syncAgentThinkingSupport.js";
 import { cleanupOldSnapshots } from "../workspace/cleanup/snapshotCleanup.js";
 import { logger } from "../utils/logger.js";
 
@@ -241,6 +242,7 @@ const main = async (): Promise<void> => {
     const agentProvider = await app.config.getAgentProvider();
     const agentAdmin = await app.providerRegistry.getAdmin(agentProvider);
     await syncAgentToolSupport(agentAdmin, app.config, agentModel);
+    await syncAgentThinkingSupport(agentAdmin, app.config, agentModel);
   } catch (error) {
     if (error instanceof ConfigError) {
       logger.warn(

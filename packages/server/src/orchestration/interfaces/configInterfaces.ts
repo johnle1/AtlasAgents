@@ -73,6 +73,18 @@ export interface IConfigManager {
   getSubagentModelSupportsTools(): Promise<boolean>;
 
   /**
+   * Returns whether the agent model supports Ollama's extended `think` mode.
+   *
+   * @remarks
+   * Ollama rejects `think: true` with an HTTP 400 for models that don't
+   * advertise the `"thinking"` capability, so callers must check this
+   * before requesting it rather than assuming every model supports it.
+   *
+   * @returns `true` if the agent model supports extended thinking; `false` otherwise.
+   */
+  getAgentModelSupportsThinking(): Promise<boolean>;
+
+  /**
    * Returns the sampling temperature for the agent (planning) role.
    *
    * @remarks

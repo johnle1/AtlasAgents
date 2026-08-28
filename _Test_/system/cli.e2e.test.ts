@@ -145,7 +145,10 @@ async function runCli(
       TERM: "xterm-256color",
       CI: "false",
       // Isolated config dir — never touch the developer's real ~/.atlasagents/.
+      // os.homedir() reads HOME on POSIX but USERPROFILE on Windows — both
+      // must point here or the CLI falls back to the real profile there.
       HOME: testHome,
+      USERPROFILE: testHome,
       ...env,
     },
     // Prevent the process from inheriting an actual TTY — we want raw I/O

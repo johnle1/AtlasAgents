@@ -156,3 +156,10 @@ Deploy/
 # AI Assistant
 .claude/
 .cursor/
+
+# atlas-server runtime data (self-signed TLS key/cert + encrypted
+# password/session data), generated wherever atlas-server is launched from.
+# Anchored to packages/ specifically so this can never match the tracked
+# source directory packages/server/src/server/tls/.
+/packages/tls/
+/packages/user-data/

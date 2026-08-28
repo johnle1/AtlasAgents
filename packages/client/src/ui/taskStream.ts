@@ -26,6 +26,7 @@ import {
   requestApproval,
   requestPrompt,
   setActiveTaskCancel,
+  setActivePlan,
   setSubagentBoards,
   setSubagentStatus,
   setBusy,
@@ -426,6 +427,8 @@ export const runTaskStream = async (
           if (clamped) {
             setContextUsage(clamped);
           }
+        } else if (taskFrame.kind === "plan-update") {
+          setActivePlan(taskFrame.steps);
         }
       },
     });

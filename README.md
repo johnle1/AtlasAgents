@@ -6,7 +6,8 @@ AtlasAgents is a self-hosted, client/server AI coding agent. You run **`atlas-se
 
 - **Self-hosted** — your code and prompts never leave a machine you control; the LLM can be fully local (Ollama) or point at any OpenAI-compatible backend (vLLM, etc.).
 - **Encrypted client/server** — TLS with trust-on-first-use certificate pinning, plus password authentication.
-- **Task orchestration** — a lead agent plans a task, then a pool of subagents execute subtasks (read/edit files, run commands), escalating back to the lead agent when stuck.
+- **One unified agent loop** — the agent answers directly when it can, calls a tool (read a file, run a command) when the answer depends on your workspace, and only writes a checklist for genuinely multi-step work. There's no separate "planning phase" for every message — a greeting gets a greeting back, not a project plan.
+- **Hidden parallel execution** — for independent steps in a checklist, the agent can fan work out to a pool of background workers and fold the results back in; this never shows up as separate UI, just checklist items completing together.
 - **Persistent memory** — session continuity, learned preferences, and reusable patterns are extracted from past tasks and consolidated over time.
 - **Skills** — markdown instruction files that the client syncs to the server; the server picks the most relevant one per task.
 - **Hardware-aware provider setup** — `atlas-detect-hardware` inspects the host (NVIDIA GPU / AWS Trainium / GCP TPU / CPU) and suggests a `vllm serve` configuration.
@@ -242,8 +243,11 @@ shows `—`.
 
 Approval modes (Shift+Tab): `default` asks every time; `accept_edits`
 automatically accepts file edits — shell commands and other risky actions
-still prompt; `plan` stops after the plan review and does not run subagents.
-`/set approval auto` approves a much broader set of actions so the agent runs
+still prompt; `plan` withholds file edits, shell commands, and parallel
+execution until the agent's proposed checklist is reviewed and approved —
+it can still read files and search freely to investigate first. Once
+approved, the same agent turn continues (no separate re-plan-from-scratch
+step). `/set approval auto` approves a much broader set of actions so the agent runs
 with much less interruption: the plan review is auto-implemented, file edits
 are accepted, safe shell commands run free, and cautious commands run inside a
 sandbox when one is available (macOS Seatbelt this release; otherwise those
@@ -280,7 +284,7 @@ refused). A line starting with `!` runs the rest as a local shell command
 | `atlasagents-server`  | `packages/server` | The `atlas-server` agent runtime: task orchestration, memory, skills, provider routing, TLS/auth. |
 | `@atlasagents/shared` | `packages/shared` | Shared diff/type utilities used by both.                                                          |
 
-- **Orchestration** (`packages/server/src/orchestration`): a lead agent breaks a task into a plan, then a pool of subagents execute subtasks (read/edit files, run commands), escalating back to the lead agent when stuck.
+- **Orchestration** (`packages/server/src/orchestration`): a single unified agent loop (`agent/agentTurn.ts`) handles every task — it answers directly, calls a tool (`read_file`, `run_command`, ...), or, for genuinely multi-step work, maintains a live checklist via an `update_plan` tool call. Independent checklist steps can be fanned out to a hidden pool of background workers via `run_steps_parallel`, which escalate back to the lead agent when stuck — this pool is an implementation detail the agent chooses to use, not something the UI exposes. An in-progress checklist survives a mid-session model switch (`/set agent`), so a newly selected model picks up where the last one left off.
 - **Memory** (`packages/server/src/memory`): session continuity, learned preferences, and reusable patterns are extracted from past tasks and consolidated periodically, so the agent improves within a given `atlas-server` data directory over time.
 - **Skills** (`user-data/skills/` server-side, `~/.atlasagents/skills/` client-side): markdown instruction files the client syncs to the server; the server picks the most relevant one per task.
 - **Providers**: any role (agent/subagent) can be pointed at `ollama` or at a named OpenAI-compatible backend. `atlas-detect-hardware` inspects the host (NVIDIA GPU / AWS Trainium / GCP TPU / CPU) and suggests a `vllm serve` provider configuration.

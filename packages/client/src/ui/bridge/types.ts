@@ -10,6 +10,7 @@ import type { Config } from "../../config/index.js";
 import type {
   SubagentBoardState,
   SubagentStatusState,
+  PlanStepState,
   ApprovalRequest,
   ApprovalResult,
   HistoryItem,
@@ -47,6 +48,8 @@ export type BridgeHooks = {
   onSubagentBoards?: (
     boardUpdater: (previousBoards: SubagentBoardState[]) => SubagentBoardState[],
   ) => void;
+  /** Callback invoked with the full current checklist on a `plan-update` frame. */
+  onActivePlan?: (steps: PlanStepState[]) => void;
   /** Callback invoked when an approval request changes. */
   onApprovalChange?: (approvalRequest: ApprovalRequest | null) => void;
   /** Callback invoked when a prompt request changes. */

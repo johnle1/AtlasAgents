@@ -9,7 +9,12 @@ import type { OllamaClient } from "../ollama/client.js";
 import type { ProviderRegistry } from "../providers/providerRegistry.js";
 import type { IConfigManager } from "../orchestration/interfaces/configInterfaces.js";
 import type { MaxSubagentsParam } from "../orchestration/maxSubagents.js";
-import type { RouteId, StreamKind, TaskApprovalMode } from "@atlasagents/shared";
+import type {
+  RouteId,
+  StreamKind,
+  TaskApprovalMode,
+  ClientEnvPayload,
+} from "@atlasagents/shared";
 
 /**
  * Represents an authenticated TCP/RSocket session for routing and cleanup.
@@ -235,6 +240,8 @@ export interface IOrchestrator {
    * @param modelOverrides - Optional model overrides for this task.
    * @param maxSubagents - Optional limits on concurrent subagent execution.
    * @param approvalMode - Session mode: `"plan"` stops after confirm-plan.
+   * @param clientEnv - Client platform info, so `run_command` guidance in the
+   *   agent's prompt matches the shell it actually executes on.
    */
   runTask(
     session: SessionInfo,
@@ -245,6 +252,7 @@ export interface IOrchestrator {
     modelOverrides?: TaskModelOverrides,
     maxSubagents?: MaxSubagentsParam,
     approvalMode?: TaskApprovalMode,
+    clientEnv?: ClientEnvPayload,
   ): Promise<void>;
 }
 

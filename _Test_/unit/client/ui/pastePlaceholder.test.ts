@@ -58,6 +58,16 @@ describe("collapsePaste", () => {
     expect(result.fullText).toBe(pasted);
   });
 
+  it("does not collapse text exactly at the threshold (boundary)", () => {
+    const pasted = "x".repeat(PASTE_CHAR_THRESHOLD);
+
+    expect(collapsePaste(pasted, PASTE_CHAR_THRESHOLD, 4)).toEqual({
+      display: pasted,
+      placeholder: pasted,
+      fullText: pasted,
+    });
+  });
+
   it("uses a singular 'line' label for a one-line paste above threshold (boundary)", () => {
     const pasted = "x".repeat(PASTE_CHAR_THRESHOLD + 1);
     const result = collapsePaste(pasted, PASTE_CHAR_THRESHOLD, 2);
@@ -83,6 +93,18 @@ describe("expandPlaceholders — round-trip", () => {
       { placeholder: collapsed.placeholder, fullText: collapsed.fullText },
     ]);
     expect(submitted).toBe(`prefix ${pasted} suffix`);
+  });
+
+  it("expands every occurrence of a repeated placeholder (boundary)", () => {
+    const pasted = "z".repeat(PASTE_CHAR_THRESHOLD + 1);
+    const collapsed = collapsePaste(pasted, PASTE_CHAR_THRESHOLD, 5);
+    const display = `${collapsed.placeholder} + ${collapsed.placeholder}`;
+
+    expect(
+      expandPlaceholders(display, [
+        { placeholder: collapsed.placeholder, fullText: collapsed.fullText },
+      ]),
+    ).toBe(`${pasted} + ${pasted}`);
   });
 
   it("returns the display unchanged when no placeholder matches (error)", () => {
@@ -121,5 +143,23 @@ describe("placeholderRangeAt — atomic delete", () => {
   it("returns null when the cursor is not on a placeholder (boundary)", () => {
     const token = "[Pasted text #1: 4 lines]";
     expect(placeholderRangeAt(`go ${token}`, 1, [token])).toBeNull();
+  });
+
+  it("does not select a placeholder when the caret is immediately before it (boundary)", () => {
+    const token = "[Pasted text #1: 4 lines]";
+
+    expect(placeholderRangeAt(token, 0, [token])).toBeNull();
+  });
+
+  it("finds the correct occurrence when a placeholder is repeated (boundary)", () => {
+    const token = "[Pasted text #1: 4 lines]";
+    const display = `${token} + ${token}`;
+    const secondStart = token.length + 3;
+
+    expect(placeholderRangeAt(display, display.length, [token])).toEqual({
+      start: secondStart,
+      end: secondStart + token.length,
+      placeholder: token,
+    });
   });
 });

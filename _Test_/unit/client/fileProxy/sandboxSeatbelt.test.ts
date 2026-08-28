@@ -9,7 +9,7 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildSeatbeltProfile,
   SEATBELT_DENIAL_PATTERN,
@@ -51,6 +51,29 @@ describe("buildSeatbeltProfile", () => {
     const profile = buildSeatbeltProfile({ cwd: '/tmp/weird"dir' });
     expect(profile).toContain('\\"');
     expect(profile).not.toMatch(/subpath "\/tmp\/weird"dir"/);
+  });
+
+  describe("TMPDIR", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("also allows writes under $TMPDIR when it differs from os.tmpdir() (boundary)", () => {
+      vi.stubEnv("TMPDIR", "/custom/tmp");
+      const profile = buildSeatbeltProfile({ cwd: "/proj" });
+      expect(profile).toContain(
+        `(allow file-write* (subpath "${path.resolve("/custom/tmp")}"))`,
+      );
+    });
+
+    it("does not add a TMPDIR write rule when TMPDIR is unset (boundary)", () => {
+      vi.stubEnv("TMPDIR", "");
+      const profile = buildSeatbeltProfile({ cwd: "/proj" });
+      const writeRuleCount = (
+        profile.match(/\(allow file-write\*/g) ?? []
+      ).length;
+      expect(writeRuleCount).toBe(2); // cwd + os.tmpdir() only
+    });
   });
 });
 

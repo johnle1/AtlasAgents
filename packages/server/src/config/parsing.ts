@@ -413,6 +413,10 @@ export const mergeConfig = (storedConfig: Record<string, unknown>): ServerConfig
       storedConfig.subagentModelSupportsTools,
       SERVER_DEFAULTS.subagentModelSupportsTools,
     ),
+    agentModelSupportsThinking: asBoolean(
+      storedConfig.agentModelSupportsThinking,
+      SERVER_DEFAULTS.agentModelSupportsThinking,
+    ),
 
     // Temperature settings: extracted via asNumber() to ensure finite values with defaults
     agentTemp: asNumber(storedConfig.agentTemp, SERVER_DEFAULTS.agentTemp),
@@ -493,6 +497,7 @@ export const WRITABLE_CONFIG_KEYS = [
   "subagentTemp",
   "agentModelSupportsTools",
   "subagentModelSupportsTools",
+  "agentModelSupportsThinking",
   "retries",
   "timeout",
   "maxContextBudget",

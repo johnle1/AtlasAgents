@@ -652,6 +652,22 @@ export class ConfigManager implements IConfigManager {
   };
 
   /**
+   * Get whether the agent model supports Ollama's extended `think` mode.
+   *
+   * @remarks
+   * Probed via `syncAgentThinkingSupport` at startup and whenever the agent
+   * model changes, then cached here. Ollama rejects `think: true` outright
+   * for models that don't advertise the `"thinking"` capability, so the
+   * agent must check this before requesting it.
+   *
+   * @returns True if the agent model supports Ollama's `think` mode.
+   */
+  getAgentModelSupportsThinking = async (): Promise<boolean> => {
+    const config = await this._loadRaw();
+    return config.agentModelSupportsThinking;
+  };
+
+  /**
    * Get the temperature setting for the agent (planning) model.
    *
    * **Purpose:** Returns the temperature used when calling the agent model.

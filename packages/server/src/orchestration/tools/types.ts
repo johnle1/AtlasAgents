@@ -108,7 +108,45 @@ export type ToolHandlerContext = {
   thinkText: string | null;
   /** The parent task's setup/verify/off-limits command breakdown. */
   commandPlan: CommandPlan;
+  /**
+   * Present only in the top-level agent turn (never for a dispatched
+   * subagent) — backs the `update_plan` and `run_steps_parallel` tools.
+   * Absent from a subagent's context, since neither tool is offered there.
+   */
+  planTools?: {
+    /**
+     * Persists/emits the checklist and, in plan-review mode, blocks on user
+     * approval. Returns the decision so `update_plan`'s handler can report
+     * it back to the model (continue, stop, or revise with feedback).
+     */
+    updatePlan: (
+      steps: PlanStepInput[],
+      note?: string,
+    ) => Promise<PlanToolDecision>;
+    /**
+     * Runs a batch of independent step ids through the hidden subagent pool
+     * and marks them done/failed on the live checklist.
+     */
+    runStepsParallel: (stepIds: number[]) => Promise<{
+      ok: boolean;
+      summary: string;
+    }>;
+  };
 };
+
+/** Input shape for one `update_plan` step, before status defaults are applied. */
+export type PlanStepInput = {
+  id: number;
+  text: string;
+  status?: "pending" | "in_progress" | "done" | "failed";
+  dependsOn?: number[];
+};
+
+/** Outcome of an `update_plan` call once `planTools.updatePlan` resolves. */
+export type PlanToolDecision =
+  | { decision: "continue" }
+  | { decision: "stop" }
+  | { decision: "revise"; feedback: string };
 
 /**
  * Outcome of one tool execution, fed back into the agent loop.

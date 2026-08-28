@@ -52,6 +52,32 @@ describe("handleBang", () => {
     expect(entries.some((entry) => entry.text.includes("hi"))).toBe(true);
   });
 
+  it("strips a trailing CRLF from stdout/stderr (boundary — Windows cmd.exe line endings)", async () => {
+    const runShell = vi.fn(async () => ({
+      stdout: "hi\r\n",
+      stderr: "warn\r\n",
+      exitCode: 1,
+    }));
+    const entries = await handleBang({
+      command: "echo hi",
+      runShell,
+      cwd: "/tmp",
+      timeoutMs: 5_000,
+      classifyCommand: () => "safe",
+      requestApproval: vi.fn(async () => true),
+    });
+    expect(entries[0]).toEqual({
+      kind: "text",
+      text: "hi",
+      variant: "secondary",
+    });
+    expect(entries[1]).toEqual({
+      kind: "text",
+      text: "warn",
+      variant: "warning",
+    });
+  });
+
   it("returns a usage hint when the command is empty (boundary)", async () => {
     const runShell = vi.fn();
     const entries = await handleBang({
@@ -106,15 +132,56 @@ describe("handleBang", () => {
 
   it("does not run the shell when approval is declined (error)", async () => {
     const runShell = vi.fn();
+    const requestApproval = vi.fn(async () => false);
     const entries = await handleBang({
       command: "rm -rf build",
       runShell,
       cwd: "/tmp",
       timeoutMs: 5_000,
       classifyCommand: () => "dangerous",
-      requestApproval: vi.fn(async () => false),
+      requestApproval,
     });
+    expect(requestApproval).toHaveBeenCalledWith("rm -rf build");
     expect(runShell).not.toHaveBeenCalled();
     expect(entries.some((entry) => /skip/i.test(entry.text))).toBe(true);
+  });
+
+  it("runs the shell after a non-safe command is approved (normal)", async () => {
+    const runShell = vi.fn(async () => ({
+      stdout: "removed\n",
+      stderr: "",
+      exitCode: 0,
+    }));
+    const requestApproval = vi.fn(async () => true);
+    const entries = await handleBang({
+      command: "rm -rf build",
+      runShell,
+      cwd: "/tmp",
+      timeoutMs: 5_000,
+      classifyCommand: () => "dangerous",
+      requestApproval,
+    });
+    expect(requestApproval).toHaveBeenCalledWith("rm -rf build");
+    expect(runShell).toHaveBeenCalledWith("rm -rf build", "/tmp", 5_000);
+    expect(entries.some((entry) => entry.text.includes("removed"))).toBe(true);
+  });
+
+  it("reports '(no output)' when stdout/stderr are empty and exit is 0 (boundary)", async () => {
+    const runShell = vi.fn(async () => ({
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+    }));
+    const entries = await handleBang({
+      command: "touch file.txt",
+      runShell,
+      cwd: "/tmp",
+      timeoutMs: 5_000,
+      classifyCommand: () => "safe",
+      requestApproval: vi.fn(async () => true),
+    });
+    expect(entries).toEqual([
+      { kind: "text", text: "(no output)", variant: "secondary" },
+    ]);
   });
 });

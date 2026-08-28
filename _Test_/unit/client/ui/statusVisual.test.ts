@@ -4,8 +4,6 @@
  * Tests every exported resolver in the status visual module:
  *   - isWorkingStage          — pure boolean predicate
  *   - resolveWorkerVisual     — maps stage + icon → glyph/color/animate
- *   - resolveQueueVisual      — maps blocked flag → glyph/dim
- *   - resolveTaskLifecycleVisual — maps TaskLifecycleState → glyph/color/animate
  *
  * Testing pyramid layer : Unit
  * Runner                 : Vitest
@@ -66,8 +64,6 @@ import {
   getWorkingFrameMs,
   getWorkingFrames,
   isWorkingStage,
-  resolveQueueVisual,
-  resolveTaskLifecycleVisual,
   resolveWorkerVisual,
   WORKING_FRAMES,
 } from "../../../../packages/client/src/ui/statusVisual";
@@ -205,69 +201,6 @@ describe("resolveWorkerVisual — agent (isAgent = false)", () => {
     // and is not done/waiting/escalating → falls through to the default dimmed return
     const visual = resolveWorkerVisual("retrying", "◌", 0, false);
     expect(visual).toEqual({ glyph: "◌", dim: true });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// resolveQueueVisual
-// ---------------------------------------------------------------------------
-
-describe("resolveQueueVisual", () => {
-  it("returns dimmed □ when blocked = true (normal — task blocked)", () => {
-    expect(resolveQueueVisual(true)).toEqual({ glyph: "□", dim: true });
-  });
-
-  it("returns cyan ○ when blocked = false (normal — queued but runnable)", () => {
-    expect(resolveQueueVisual(false)).toEqual({ glyph: "○", color: "cyan" });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// resolveTaskLifecycleVisual
-// ---------------------------------------------------------------------------
-
-describe("resolveTaskLifecycleVisual", () => {
-  it("returns green ✓ for 'complete' state (normal)", () => {
-    expect(resolveTaskLifecycleVisual("complete", 0)).toEqual({
-      glyph: "✓",
-      color: "green",
-    });
-  });
-
-  it("returns cyan ○ for 'waiting' state (normal)", () => {
-    // 'waiting' in lifecycle = queued but not yet assigned, shown as a plain circle
-    expect(resolveTaskLifecycleVisual("waiting", 0)).toEqual({
-      glyph: "○",
-      color: "cyan",
-    });
-  });
-
-  it("returns dimmed □ for 'blocked' state (normal)", () => {
-    expect(resolveTaskLifecycleVisual("blocked", 0)).toEqual({
-      glyph: "□",
-      dim: true,
-    });
-  });
-
-  it("returns red ✗ for 'failed' state (normal)", () => {
-    expect(resolveTaskLifecycleVisual("failed", 0)).toEqual({
-      glyph: "✗",
-      color: "red",
-    });
-  });
-
-  it("returns animated cyan frame for 'running' state at pulse 0 (normal)", () => {
-    const visual = resolveTaskLifecycleVisual("running", 0);
-    expect(visual).toEqual({
-      glyph: WORKING_FRAMES[0],
-      color: "cyan",
-      animate: true,
-    });
-  });
-
-  it("cycles to the correct frame for 'running' at pulse 3 (boundary — frame wrap)", () => {
-    const visual = resolveTaskLifecycleVisual("running", 3);
-    expect(visual.glyph).toBe(WORKING_FRAMES[3 % WORKING_FRAMES.length]);
   });
 });
 

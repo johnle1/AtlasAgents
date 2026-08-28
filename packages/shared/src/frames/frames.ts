@@ -69,6 +69,21 @@ export type SubagentBoardSnapshot = {
   tasks: SubagentTaskSnapshot[];
 };
 
+/** Live-progress status for one step in the agent's `update_plan` checklist. */
+export type PlanStepStatus = "pending" | "in_progress" | "done" | "failed";
+
+/**
+ * One step in the agent's live checklist, mirrored client-side as a flat
+ * `[ ] / [#] / ~~done~~` list (see `PlanChecklist.tsx`) — `"in_progress"` and
+ * `"done"` both render `[#]`; only `"done"` also strikes the text through.
+ */
+export type PlanStep = {
+  id: number;
+  text: string;
+  status: PlanStepStatus;
+  dependsOn?: number[];
+};
+
 export type TaskFrame =
   | { kind: "token"; text: string }
   | { kind: "think-start"; id: string; agent?: boolean; source?: SubagentStatusSource }
@@ -100,6 +115,7 @@ export type TaskFrame =
   | { kind: "error"; message: string }
   | { kind: "warning"; message: string }
   | { kind: "usage"; usedTokens: number; contextWindow: number }
+  | { kind: "plan-update"; steps: PlanStep[]; note?: string }
   | { kind: "done" };
 
 export const encodeFrame = (frame: TaskFrame): Buffer =>

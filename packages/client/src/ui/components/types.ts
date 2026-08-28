@@ -7,20 +7,16 @@
  */
 import type { ConnectionStatus } from "../../connection/index.js";
 import type {
-  SubagentBoardState,
-  SubagentStatusState,
+  PlanStepState,
   ApprovalRequest,
   PlanDecision,
   SpinnerState,
 } from "../types.js";
 
-/** Props for {@link SubagentStatusBox}; one status row per agent or subagent. */
-export type SubagentStatusBoxProps = SubagentStatusState;
-
-/** Props for {@link SubagentTaskBoard}. */
-export type SubagentTaskBoardProps = {
-  /** The board model representing an agent and its checklist of tasks. */
-  board: SubagentBoardState;
+/** Props for {@link PlanChecklist}. */
+export type PlanChecklistProps = {
+  /** The agent's current checklist, as last reported via `update_plan`. */
+  steps: PlanStepState[];
 };
 
 /**

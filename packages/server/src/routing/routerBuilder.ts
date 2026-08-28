@@ -35,6 +35,7 @@ import {
   syncAgentToolSupport,
   syncSubagentToolSupport,
 } from "../ollama/syncAgentToolSupport.js";
+import { syncAgentThinkingSupport } from "../ollama/syncAgentThinkingSupport.js";
 import {
   describeModelPlacement,
   matchRunningModel,
@@ -243,7 +244,12 @@ function createSetConfigHandler(
         config,
         name,
       );
-      return { ok: true, agentModelSupportsTools };
+      const agentModelSupportsThinking = await syncAgentThinkingSupport(
+        ollama,
+        config,
+        name,
+      );
+      return { ok: true, agentModelSupportsTools, agentModelSupportsThinking };
     } else if (configKey === "subagentModel") {
       const name = String(configValue ?? "");
       await config.setModel("subagent", name);
@@ -318,13 +324,20 @@ function createSetModelHandler(
       role === "agent"
         ? await syncAgentToolSupport(admin, config, modelName)
         : await syncSubagentToolSupport(admin, config, modelName);
+    // Only the agent role ever requests Ollama's `think` mode (see the
+    // includeThinking comment in subagent.ts) — leave this undefined for
+    // subagent rather than probing a capability nothing reads.
+    const supportsThinking =
+      role === "agent"
+        ? await syncAgentThinkingSupport(admin, config, modelName)
+        : undefined;
 
     const placementWarning =
       providerName === OLLAMA_PROVIDER_NAME
         ? await checkSelectionPlacement(admin, modelName)
         : undefined;
 
-    return { ok: true, supportsTools, placementWarning };
+    return { ok: true, supportsTools, supportsThinking, placementWarning };
   };
 }
 
@@ -479,12 +492,22 @@ function createSessionExistsHandler(session: {
 
 /**
  * Creates a handler for clearing session.
+ *
+ * @remarks
+ * Also drops the connection's carried-over `activePlan` (see
+ * `PerConnection.activePlan`) — `/new` starting a fresh task should not
+ * resume a checklist from the conversation the user just cleared.
  */
-function createClearSessionHandler(session: {
-  clear: () => Promise<string>;
-}): CommandHandler {
-  return async () => {
+function createClearSessionHandler(
+  session: { clear: () => Promise<string> },
+  brokerByRequester: Map<string, PerConnection>,
+): CommandHandler {
+  return async (commandSession) => {
     const message = await session.clear();
+    const perConnection = brokerByRequester.get(commandSession.requesterId);
+    if (perConnection) {
+      perConnection.activePlan = undefined;
+    }
     return { message };
   };
 }
@@ -633,12 +656,21 @@ function createTaskStreamHandler(
       subagentTemp?: number;
       debug?: boolean;
       approvalMode?: unknown;
+      clientEnv?: { platform?: string; shell?: string; osRelease?: string };
     };
 
     const taskText = String(body.text ?? "");
     const maxSubagents = parseMaxSubagentsPayload(body.maxSubagents);
     const approvalMode = normalizeTaskApprovalMode(body.approvalMode);
     const modelOverrides = buildModelOverrides(body);
+    const clientEnv =
+      typeof body.clientEnv?.platform === "string"
+        ? {
+            platform: body.clientEnv.platform,
+            shell: body.clientEnv.shell,
+            osRelease: body.clientEnv.osRelease,
+          }
+        : undefined;
 
     let perConnection = brokerByRequester.get(session.requesterId);
     if (!perConnection) {
@@ -658,6 +690,7 @@ function createTaskStreamHandler(
         modelOverrides,
         maxSubagents,
         approvalMode,
+        clientEnv,
       );
       emit({ kind: "done" });
     } catch (error) {
@@ -778,7 +811,7 @@ export const buildRouter = (deps: RouterBuilderDeps): Router => {
     "memory.forget": createForgetMemoryHandler(prefs),
     "memory.clear": createClearMemoryHandler(prefs),
     "session.exists": createSessionExistsHandler(session),
-    "session.clear": createClearSessionHandler(session),
+    "session.clear": createClearSessionHandler(session, brokerByRequester),
     "mcp.tools.sync": createMcpToolsSyncHandler(
       brokerByRequester,
       createPerConnection,

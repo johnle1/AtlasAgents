@@ -66,6 +66,7 @@ export const createRequestStreamHandler =
       subagentTemp?: number;
       debug?: boolean;
       approvalMode?: string;
+      clientEnv?: { platform?: string; shell?: string; osRelease?: string };
     };
     try {
       const parsedBody: unknown = JSON.parse(
@@ -143,6 +144,20 @@ export const createRequestStreamHandler =
                   : undefined,
               debug: parsed.debug === true ? true : undefined,
               approvalMode: normalizeTaskApprovalMode(parsed.approvalMode),
+              clientEnv:
+                typeof parsed.clientEnv?.platform === "string"
+                  ? {
+                      platform: parsed.clientEnv.platform,
+                      shell:
+                        typeof parsed.clientEnv.shell === "string"
+                          ? parsed.clientEnv.shell
+                          : undefined,
+                      osRelease:
+                        typeof parsed.clientEnv.osRelease === "string"
+                          ? parsed.clientEnv.osRelease
+                          : undefined,
+                    }
+                  : undefined,
             };
 
     void (async () => {

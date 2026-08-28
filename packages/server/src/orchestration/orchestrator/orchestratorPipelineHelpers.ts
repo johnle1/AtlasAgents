@@ -2,22 +2,16 @@
  * Helper functions for the orchestrator pipeline.
  *
  * @remarks
- * Provides utility functions for orchestrator pipeline operations including
- * context preparation, planning with revisions, agent pool execution,
- * and result combination. All functions are extracted for better testability
- * and separation of concerns from the main pipeline orchestration.
+ * Provides utility functions for orchestrator pipeline operations: context
+ * preparation ahead of the unified agent turn, and the hidden worker-pool
+ * machinery `run_steps_parallel` dispatches through (`runAgentPool` and its
+ * supporting helpers). Extracted for better testability and separation of
+ * concerns from the main pipeline orchestration.
  */
 
-import type {
-  IContextBuilder,
-  IExperienceRecorder,
-  IConfigManager,
-  ISessionManager,
-  ISkillManager,
-} from "../interfaces.js";
+import type { IExperienceRecorder } from "../interfaces.js";
 import type {
   SubagentPlan,
-  PlannedSubtask,
   SubtaskResult,
   ToolResultSummary,
 } from "../types.js";
@@ -25,18 +19,13 @@ import { emptyCommandPlan } from "../types.js";
 import type { PerConnection } from "../../container/types.js";
 import type { MaxSubagentsParam } from "../maxSubagents.js";
 import type { TaskModelOverrides } from "../types.js";
-import type { Agent } from "../agent/agent.js";
 import type { Subagent } from "../subagent/subagent.js";
 import type { TaskFrame } from "../../transport/frames.js";
-import { TaskSkippedError, PlanRevisionRequestedError } from "../agent/agentErrors.js";
 import {
-  buildPlanRevisionTask,
   contextHasWorkspaceStructure,
   summarizeWorkspaceStackHint,
 } from "../agent/agentHelpers.js";
 import { exploreCodebase } from "../exploreCodebase.js";
-import { deriveSubagentPlans } from "../planHelpers.js";
-import { createThinkFrameEmitter } from "../thinkStream.js";
 import { AbortError, OrchestrationError } from "../../errors/index.js";
 import {
   available,
@@ -50,7 +39,6 @@ import {
 import type {
   OrchestratorPipelineDeps,
   PlanningContextResult,
-  PlanningResult,
 } from "./orchestratorPipelineTypes.js";
 
 /**
@@ -150,123 +138,6 @@ export const preparePlanningContext = async (
     .join("\n\n");
 
   return { contextHeader, skillBody };
-};
-
-/**
- * Runs agent planning, re-planning with folded-in feedback whenever the
- * user picks "Revise" at plan review, up to a defensive round cap.
- *
- * @remarks
- * A `TaskSkippedError` from `agent.plan` surfaces as `{ skipped: true }`
- * rather than being thrown — the caller decides how to finish the pipeline
- * for a skipped task (emit token, build the empty-plan outcome, return).
- * Any other error propagates.
- */
-export const runPlanningWithRevisions = async (
-  agent: Agent,
-  params: {
-    taskText: string;
-    contextHeader: string;
-    skillBody: string;
-    modelOverrides: TaskModelOverrides | undefined;
-    maxSubagents: MaxSubagentsParam;
-    modeLabel: string | null;
-    perConn: PerConnection;
-    sessionManager: ISessionManager;
-    emit: (frame: TaskFrame) => void;
-    signal: AbortSignal;
-  },
-): Promise<PlanningResult> => {
-  const {
-    taskText,
-    contextHeader,
-    skillBody,
-    modelOverrides,
-    maxSubagents,
-    modeLabel,
-    perConn,
-    sessionManager,
-    emit,
-    signal,
-  } = params;
-
-  let planningTaskText = taskText;
-  // Bounds revision rounds defensively; each round still requires the user
-  // to type feedback, so this guards against pathological loops, not cost.
-  const MAX_PLAN_REVISION_ROUNDS = 10;
-  // One emitter reused across revision rounds — `finish()` resets its
-  // internal id/streamed state after every iteration, so each planning
-  // iteration (including across a revision round) gets its own think stream.
-  const agentThinkFrames = createThinkFrameEmitter({
-    emit,
-    agent: true,
-  });
-  for (let revisionRound = 0; ; revisionRound += 1) {
-    try {
-      const plan = await agent.plan(
-        planningTaskText,
-        contextHeader,
-        skillBody,
-        modelOverrides,
-        {
-          onThinkDelta: (text: string) => agentThinkFrames.delta(text),
-          onThinkEnd: (finalText: string | null) =>
-            agentThinkFrames.finish(finalText),
-          reviewPlan: (agentPlan: SubagentPlan) =>
-            perConn.planBroker.request({
-              task: taskText,
-              steps: agentPlan.subtasks.map((s: PlannedSubtask) => s.text),
-              risks: agentPlan.risks,
-              agents: deriveSubagentPlans(agentPlan.subtasks),
-              agentCount: agentPlan.agentCount,
-              execution: agentPlan.execution,
-              modeLabel,
-            }),
-          searchTools: perConn.tokenSaveTools,
-          callSearchTool: (name, args) =>
-            perConn.workspace.callMcpTool(name, args),
-          exploreCodebase: async () => {
-            const explored = await exploreCodebase(
-              perConn.workspace,
-              emit,
-              signal,
-            );
-            await sessionManager.saveSnapshot(explored.snapshot);
-            return explored;
-          },
-        },
-        maxSubagents,
-        signal,
-      );
-      return { skipped: false, plan };
-    } catch (err) {
-      // TaskSkippedError is a valid outcome - let the caller build the
-      // success-with-empty-plan outcome and return from the pipeline.
-      if (err instanceof TaskSkippedError) {
-        return { skipped: true };
-      }
-      // User gave feedback at plan review — re-run planning with that
-      // feedback folded into the task text, instead of hand-editing the plan.
-      if (err instanceof PlanRevisionRequestedError) {
-        if (revisionRound >= MAX_PLAN_REVISION_ROUNDS) {
-          throw err;
-        }
-        planningTaskText = buildPlanRevisionTask(taskText, err.feedback);
-        continue;
-      }
-      throw err;
-    } finally {
-      // Safety net for the paths that never reach `plan()`'s own
-      // `onThinkEnd` — an abort mid-stream, an OrchestrationError from an
-      // auxiliary tool call, a provider error. Without it the emitter keeps
-      // this round's `id`/`streamed` state, and the next round's deltas
-      // stream under a stale id the client has already torn down, so the
-      // retried round's reasoning never renders. `finish()` is idempotent
-      // after a streamed close, so this is a no-op on the success path.
-      // `Subagent.runIteration` wraps its own emitter the same way.
-      agentThinkFrames.finish(null);
-    }
-  }
 };
 
 /**
@@ -582,54 +453,6 @@ export const runAgentPool = async (
   );
 
   return toOrderedResults(plan, resultMap);
-};
-
-/**
- * Emits the task's final output: the lone subtask's content directly for a
- * single-subtask plan, or a streamed agent-combined synthesis for a
- * multi-subtask plan.
- *
- * @remarks
- * Extracted from the "emit.single" / "agent.combine" phases of
- * {@link runOrchestratorPipeline} — the caller sets `phase` to the matching
- * value (based on the same `plan.subtasks.length === 1` check) before
- * calling this, so error reporting is unaffected.
- *
- * @throws {@link AbortError} When `signal` is aborted while streaming the combine.
- */
-export const emitFinalResult = async (
-  agent: Agent,
-  params: {
-    taskText: string;
-    plan: SubagentPlan;
-    ordered: SubtaskResult[];
-    modelOverrides: TaskModelOverrides | undefined;
-    emitToken: (text: string) => void;
-    emitStatus: (frame: Extract<TaskFrame, { kind: "status" }>) => void;
-    signal: AbortSignal;
-  },
-): Promise<void> => {
-  const { taskText, plan, ordered, modelOverrides, emitToken, emitStatus, signal } =
-    params;
-
-  if (plan.subtasks.length === 1) {
-    emitToken(ordered[0]?.content ?? "");
-    return;
-  }
-
-  emitStatus({
-    kind: "status",
-    source: "agent",
-    stage: "combining",
-    icon: "◌",
-    message: `Combining results from ${plan.agentCount} groups...`,
-  });
-  for await (const token of agent.combine(taskText, ordered, modelOverrides)) {
-    if (signal.aborted) {
-      throw new AbortError("Combine aborted");
-    }
-    emitToken(token);
-  }
 };
 
 /** Re-export emptyPlan for use in other modules. */

@@ -10,6 +10,7 @@ import {
   clearLiveThinks as clearBridgeLiveThinks,
   clearSubagentBoards,
   clearSubagentStatuses,
+  setActivePlan as setBridgeActivePlan,
   setBusy as setBridgeBusy,
   setSpinner as setBridgeSpinner,
   setStreamingText as setBridgeStreamingText,
@@ -41,6 +42,7 @@ const resetTaskUiState = (
   clearBridgeLiveThinks();
   clearSubagentStatuses();
   clearSubagentBoards();
+  setBridgeActivePlan([]);
 
   // Reset React context state (used by UI rendering)
   setters.setTaskActive(false);
@@ -50,6 +52,7 @@ const resetTaskUiState = (
   setters.setLiveThinks([]);
   setters.setSubagentStatuses(() => new Map());
   setters.setSubagentBoards([]);
+  setters.setActivePlan([]);
 };
 
 /**

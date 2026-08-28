@@ -8,6 +8,7 @@ export type {
   StreamKind,
   TaskStreamPayload,
   TaskApprovalMode,
+  ClientEnvPayload,
 } from "./protocol/serverProtocol.js";
 export {
   ROUTE_IDS,
@@ -30,6 +31,8 @@ export type {
   SubagentTaskSnapshot,
   AgentStage,
   PlanExecution,
+  PlanStep,
+  PlanStepStatus,
   PullProgress,
   QueuedTaskSnapshot,
   StatusIcon,

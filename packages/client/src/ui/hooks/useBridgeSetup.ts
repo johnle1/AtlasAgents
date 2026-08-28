@@ -80,6 +80,7 @@ export const useBridgeSetup = ({
   setBannerEntries,
   setSubagentStatuses,
   setSubagentBoards,
+  setActivePlan,
   onAfterClearScreen,
   setContextUsage,
   setApprovalMode,
@@ -134,6 +135,7 @@ export const useBridgeSetup = ({
         ),
       onSubagentStatuses: (statusUpdater) => setSubagentStatuses(statusUpdater),
       onSubagentBoards: (boardUpdater) => setSubagentBoards(boardUpdater),
+      onActivePlan: (steps) => setActivePlan(steps),
       onClearScreen: () => {
         setHistory([]);
         setStreamingText(null);
@@ -197,6 +199,7 @@ export const useBridgeSetup = ({
     setBannerEntries,
     setSubagentStatuses,
     setSubagentBoards,
+    setActivePlan,
     onAfterClearScreen,
     setContextUsage,
   ]);

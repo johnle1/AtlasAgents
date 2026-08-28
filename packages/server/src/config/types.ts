@@ -135,6 +135,23 @@ export const SERVER_DEFAULTS = {
   subagentModelSupportsTools: false,
 
   /**
+   * **agentModelSupportsThinking: false** — Does the agent model support Ollama's `think` mode?
+   *
+   * When true: the agent's planning call requests Ollama's extended reasoning
+   * output (`think: true`)
+   * When false: thinking is omitted from the request entirely
+   *
+   * Ollama rejects `think: true` with an HTTP 400 for models that don't
+   * advertise the `"thinking"` capability, so this must be probed before
+   * enabling it — never hardcode `true` at the call site.
+   *
+   * See: ollama/modelCapabilities.ts for model-specific thinking support detection.
+   * There is no subagent equivalent — the subagent's execution call
+   * deliberately never requests thinking (see subagent.ts).
+   */
+  agentModelSupportsThinking: false,
+
+  /**
    * **agentProvider / subagentProvider: "ollama"** — Which provider serves each role.
    *
    * A provider name of "ollama" always resolves to the native local Ollama client.
@@ -220,6 +237,11 @@ export type ServerConfig = {
    * When true, subagent model uses native Ollama tool calling API.
    */
   subagentModelSupportsTools: boolean;
+
+  /**
+   * When true, the agent model supports Ollama's extended `think` mode.
+   */
+  agentModelSupportsThinking: boolean;
 
   /**
    * Temperature setting for agent model (0.0 to 1.0).

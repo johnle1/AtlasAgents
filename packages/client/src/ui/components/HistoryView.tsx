@@ -108,39 +108,19 @@ export const renderHistoryItem = (
         </Box>
       );
     case "plan": {
-      // Draw execution summary, recalculating default values if mode labels are absent.
-      const executionLabel =
-        item.modeLabel ??
-        `${item.agentCount} agent${item.agentCount === 1 ? "" : "s"} · ${item.execution}`;
-
+      // A proposed plan under review — every step is still pending, so this
+      // renders the same flat `[ ]` style as the live PlanChecklist rather
+      // than the old per-agent grouping (agents/agentCount/execution still
+      // ride on the wire for back-compat but are no longer displayed).
       return (
         <Box key={key} flexDirection="column" marginY={1}>
           <Text bold>Plan</Text>
           <Text>Task: {item.task}</Text>
-          <Text dimColor>{executionLabel}</Text>
-
-          {/* ===== AGENT-SPECIFIC STEPS ===== */}
-          {/* Map active subagent workflows or fallback to sequential single-agent listings. */}
-          {item.agents.length > 0
-            ? item.agents.map((agent) => (
-                <Box key={`${key}-agent-${agent.id}`} flexDirection="column">
-                  <Text dimColor>
-                    ┄┄ Agent {agent.id} — {agent.label} ┄┄
-                  </Text>
-                  {agent.steps.map((step, stepIndex) => (
-                    <Text key={`${key}-a${agent.id}-s${stepIndex}`}>
-                      {" "}
-                      {stepIndex + 1}. {step}
-                    </Text>
-                  ))}
-                </Box>
-              ))
-            : item.steps.map((step, stepIndex) => (
-                <Text key={`${key}-s-${stepIndex}`}>
-                  {" "}
-                  {stepIndex + 1}. {step}
-                </Text>
-              ))}
+          {item.steps.map((step, stepIndex) => (
+            <Text key={`${key}-s-${stepIndex}`} color="cyan">
+              [ ] {step}
+            </Text>
+          ))}
 
           {/* ===== RISKS SECTION ===== */}
           {item.risks.length > 0 && (

@@ -12,9 +12,13 @@ import type {
   SubagentStage,
   AgentStage,
   PlanExecution,
+  PlanStep,
   StatusIcon,
   TaskLifecycleState,
 } from "../types/frames.js";
+
+/** The agent's live `update_plan` checklist state — see `PlanChecklist.tsx`. */
+export type PlanStepState = PlanStep;
 
 /**
  * Display styling for plain-text history lines.

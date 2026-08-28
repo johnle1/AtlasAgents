@@ -72,7 +72,8 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   {
     command: "/agent cap",
     label: "/agent cap [n]",
-    description: "Default agent cap is 3; ::focus/::collab/::max override per task",
+    description:
+      "Default agent cap is 3; ::focus/::collab/::max override per task",
     requiresArgs: true,
   },
   {
@@ -251,4 +252,3 @@ export const getCommandDescription = (command: string): string =>
  */
 export const commandRequiresArgs = (command: string): boolean =>
   catalogByCommand.get(command)?.requiresArgs === true;
-

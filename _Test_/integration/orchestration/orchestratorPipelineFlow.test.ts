@@ -1,25 +1,23 @@
 /**
- * Integration tests — the full `runOrchestratorPipeline` task-execution path.
+ * Integration tests — the full `runOrchestratorPipeline` task-execution path
+ * (unified agent-turn loop; see `agentTurn.ts`).
  *
  * Testing pyramid layer : Integration
  * Runner                 : Vitest
  * Real modules wired     : runOrchestratorPipeline, the REAL `Agent` and
  *                          `Subagent` classes it constructs internally (see
- *                          "Why deps.agent doesn't matter" below), real
- *                          `preparePlanningContext` / `runAgentPool` /
- *                          `contextHasWorkspaceStructure` helper logic.
+ *                          "Why deps.agent doesn't matter" below), the REAL
+ *                          `runAgentTurn` loop, `preparePlanningContext`.
  * Mocks                  : only the true external boundary — the two
  *                          role-routed `IOllamaClient`s returned by a fake
  *                          `IProviderRegistry.getRoleClient`, each answering
- *                          with canned `chatWithTools` turns (same pattern as
- *                          `_Test_/unit/agent.test.ts`). `contextBuilder`,
+ *                          with canned `chatWithTools` turns. `contextBuilder`,
  *                          `skillManager`, `sessionManager`,
  *                          `experienceRecorder`, and `config` are light
  *                          interface fakes; `workspace`/`terminal`/
- *                          `planBroker` are unused-but-typed stubs (this
- *                          scenario never reads/writes files or reviews a
- *                          plan, so their real implementations are never
- *                          reached).
+ *                          `planBroker` are unused-but-typed stubs (these
+ *                          scenarios never read/write files or review a plan,
+ *                          so their real implementations are never reached).
  *
  * Why `deps.agent` doesn't matter
  * -------------------------------
@@ -27,9 +25,9 @@
  * reconstructs its own `Agent`/`Subagent` from `providerRegistry.getRoleClient`
  * (see orchestratorPipeline.ts, "Agent passed to AgentOrchestrator but
  * reconstructed here with model-specific provider client"). That means the
- * REAL `Agent.plan()`/`Subagent.run()` control flow, retry/escalation logic,
- * and tool-call parsing all execute for real in this test — only the LLM
- * itself is faked, which is the correct integration boundary.
+ * REAL `runAgentTurn` control flow and tool-call parsing all execute for
+ * real in this test — only the LLM itself is faked, which is the correct
+ * integration boundary.
  *
  * Why this file exists
  * ---------------------
@@ -37,7 +35,7 @@
  * that no unit test could catch:
  *   1. `preparePlanningContext` passed the SUBAGENT's model to
  *      `contextBuilder.build`, even though the resulting header is only ever
- *      injected into the AGENT's planning prompt.
+ *      injected into the AGENT's prompt.
  *   2. The workspace-snapshot injection checked the SUBAGENT's tool-support
  *      flag to decide whether the AGENT needs a workspace snapshot.
  * Both modules involved passed their own unit tests throughout — the bug was
@@ -46,11 +44,12 @@
  * crossing points, so a regression here fails a test instead of shipping.
  *
  * Category checklist:
- *   ✅ Happy path          — plan → subagent pool → single-result emission, ok: true
+ *   ✅ Happy path          — the agent turn finishes directly, ok: true
  *   ✅ Contract consistency — agent's model reaches contextBuilder, not subagent's
- *   ✅ Contract consistency — workspace snapshot gates on the agent's tool-support flag
- *   ✅ Failure propagation — a failing subtask yields ok: false with partial results kept
- *   ✅ State integrity      — an aborted pipeline stops before any subagent turn runs
+ *   ✅ Contract consistency — agent's model reaches its own client, not subagent's
+ *   ✅ Failure propagation — a thrown model error yields a formatted error frame and rejects
+ *   ✅ State integrity      — an aborted pipeline stops before any model turn runs
+ *   ✅ Model placement      — a spilled-model warning is joined before the pipeline resolves
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -74,86 +73,17 @@ import type { OrchestratorPipelineDeps } from "../../../packages/server/src/orch
 // Canned model turns
 // ---------------------------------------------------------------------------
 
-/** A minimally valid agent think block — satisfies `agentThink.ts`'s parsing. */
-const AGENT_THINK_BLOCK = `<agent-think>
-COMPLEXITY: simple
-  reasoning: single trivial subtask
-
-UNDERSTAND:
-  literal: do the thing
-  actual: do the thing
-  implicit: none
-
-EXPLORATION:
-  need explore? no
-  if no: no exploration needed
-
-PLAN:
-  agent count: 1
-  execution: sequential
-
-  Agent 1 — implementation:
-    1. do the thing
-
-SELF-CHECK:
-  issues? none
-  file conflicts? none
-  wave assumptions? none
-
-COMMAND PLAN:
-  setup commands: none
-  verify commands: none
-</agent-think>`;
-
-/**
- * Satisfies both `extractThinking` (must be wrapped in the model's thinking
- * tag — see `THINK_BLOCK` in toolProtocol.ts) and `hasCommandPlanSection`
- * (setup/verify/off-limits headers) for the subagent's first turn.
- */
-const SUBAGENT_THINK_BLOCK = `<redacted_thinking>
-Setup commands: none
-Verify commands: none
-Off-limits (run-project): none
-Proceeding straight to finish — nothing to set up or verify for this trivial subtask.
-</redacted_thinking>`;
-
-const ONE_SUBTASK_PLAN_ARGS = {
-  subtasks: [
-    { id: 1, text: "do the thing", dependsOn: [], agentId: 1, agentLabel: "implementation" },
-  ],
-  execution: "sequential" as const,
-  agentCount: 1,
-  risks: [] as string[],
-};
-
-/** A fake `IOllamaClient` whose `chatWithTools` always proposes the one-subtask plan. */
-const makeAgentPlanningClient = (
+/** A fake `IOllamaClient` whose `chatWithTools` finishes the turn on the first call. */
+const makeAgentFinishClient = (
+  summary = "did the thing",
   onCall?: (model: string, messages: Message[]) => void,
 ): IOllamaClient =>
   ({
     chatWithTools: async (model: string, messages: Message[]) => {
       onCall?.(model, messages);
-      return { content: AGENT_THINK_BLOCK, toolCalls: [{ name: "submit_plan", args: ONE_SUBTASK_PLAN_ARGS }] };
+      return { content: "", toolCalls: [{ name: "finish", args: { summary, keyFindings: [] } }] };
     },
-    chat: async () => "combined result: done",
-  }) as unknown as IOllamaClient;
-
-/** A fake `IOllamaClient` whose `chatWithTools` finishes the subtask on the first turn. */
-const makeSubagentFinishClient = (summary = "did the thing"): IOllamaClient =>
-  ({
-    chatWithTools: async () => ({
-      content: SUBAGENT_THINK_BLOCK,
-      toolCalls: [{ name: "finish", args: { summary, keyFindings: [] } }],
-    }),
-  }) as unknown as IOllamaClient;
-
-/** A fake `IOllamaClient` whose `chatWithTools` reports the subtask as failed. */
-const makeSubagentFailClient = (): IOllamaClient =>
-  ({
-    chatWithTools: async () => ({
-      content: SUBAGENT_THINK_BLOCK,
-      toolCalls: [{ name: "escalate", args: { reason: "cannot proceed, simulated failure" } }],
-    }),
+    chat: async () => "unused",
   }) as unknown as IOllamaClient;
 
 // ---------------------------------------------------------------------------
@@ -162,7 +92,11 @@ const makeSubagentFailClient = (): IOllamaClient =>
 
 const makeConfig = (
   overrides: Partial<Record<
-    "agentModel" | "subagentModel" | "agentModelSupportsTools" | "subagentModelSupportsTools",
+    | "agentModel"
+    | "subagentModel"
+    | "agentModelSupportsTools"
+    | "subagentModelSupportsTools"
+    | "agentModelSupportsThinking",
     unknown
   >> = {},
 ): IConfigManager =>
@@ -173,6 +107,8 @@ const makeConfig = (
     getSubagentTemperature: async () => 0.4,
     getAgentModelSupportsTools: async () => overrides.agentModelSupportsTools ?? true,
     getSubagentModelSupportsTools: async () => overrides.subagentModelSupportsTools ?? true,
+    getAgentModelSupportsThinking: async () =>
+      overrides.agentModelSupportsThinking ?? true,
     getMaxRetries: async () => 3,
     getMaxContextBudget: async () => 0.2,
     // Both roles default to the built-in "ollama" provider so
@@ -212,9 +148,8 @@ const makeSessionManager = (): ISessionManager => ({
 
 /**
  * `perConn.workspace`/`terminal`/`planBroker` are never actually reached by
- * these scenarios: the subagent finishes on its first turn without any
- * file/command tool call, and the agent never triggers an interactive plan
- * review. Minimal stubs are enough to satisfy the types.
+ * these scenarios: the agent finishes on its first turn without any
+ * file/command tool call or plan review.
  */
 const makePerConnection = (): PerConnection =>
   ({
@@ -236,14 +171,17 @@ const makeDeps = (opts: {
   config: IConfigManager;
   contextBuilder: IContextBuilder;
   agentClient: IOllamaClient;
-  subagentClient: IOllamaClient;
+  subagentClient?: IOllamaClient;
 }): OrchestratorPipelineDeps => ({
   contextBuilder: opts.contextBuilder,
   skillManager: makeSkillManager(),
   sessionManager: makeSessionManager(),
   experienceRecorder: fakeExperienceRecorder(),
   agent: {} as unknown as Agent, // unused — see module doc
-  providerRegistry: makeProviderRegistry(opts.agentClient, opts.subagentClient),
+  providerRegistry: makeProviderRegistry(
+    opts.agentClient,
+    opts.subagentClient ?? opts.agentClient,
+  ),
   config: opts.config,
 });
 
@@ -253,7 +191,7 @@ const collectFrames = () => {
 };
 
 describe("orchestrator pipeline — happy path", () => {
-  it("runs plan → subagent pool → single-result emission with ok: true", async () => {
+  it("runs the agent turn to a direct finish with ok: true", async () => {
     const config = makeConfig();
     const { frames, emit } = collectFrames();
 
@@ -261,8 +199,7 @@ describe("orchestrator pipeline — happy path", () => {
       makeDeps({
         config,
         contextBuilder: makeContextBuilder(),
-        agentClient: makeAgentPlanningClient(),
-        subagentClient: makeSubagentFinishClient("did the thing"),
+        agentClient: makeAgentFinishClient("did the thing"),
       }),
       {
         session: { userId: "u1", requesterId: "r1" },
@@ -275,11 +212,14 @@ describe("orchestrator pipeline — happy path", () => {
 
     expect(outcome.ok).toBe(true);
     expect(outcome.results).toHaveLength(1);
-    expect(outcome.plan.subtasks).toHaveLength(1);
+    expect(outcome.results[0]?.content).toBe("did the thing");
 
     const statusStages = frames
       .filter((frame): frame is Extract<TaskFrame, { kind: "status" }> => frame.kind === "status")
       .map((frame) => frame.stage);
+    // agentTurn emits an initial "thinking" status (mapped to "understanding")
+    // and a final "done" status (mapped to "ready") — see agentTurn.ts's
+    // emitSubagentStatus.
     expect(statusStages).toContain("understanding");
     expect(statusStages).toContain("ready");
   });
@@ -296,8 +236,7 @@ describe("orchestrator pipeline — regression guard: agent model reaches contex
         contextBuilder: makeContextBuilder((_taskText, modelOverride) => {
           capturedModel = modelOverride;
         }),
-        agentClient: makeAgentPlanningClient(),
-        subagentClient: makeSubagentFinishClient(),
+        agentClient: makeAgentFinishClient(),
       }),
       {
         session: { userId: "u1", requesterId: "r1" },
@@ -308,23 +247,26 @@ describe("orchestrator pipeline — regression guard: agent model reaches contex
       },
     );
 
-    // This is the exact regression fixed this session: contextBuilder must
-    // see "agent-only-model", never "subagent-only-model".
+    // This is the exact regression fixed in the original planner-based
+    // pipeline: contextBuilder must see "agent-only-model", never
+    // "subagent-only-model". Still applies — preparePlanningContext is
+    // unchanged by the unified-loop rewrite.
     expect(capturedModel).toBe("agent-only-model");
   });
 
   it("queries the agent model with the agent's own client, not the subagent's", async () => {
     let modelSeenByAgentClient: string | undefined;
     const config = makeConfig({ agentModel: "agent-only-model", subagentModel: "subagent-only-model" });
+    const subagentClient = { chatWithTools: vi.fn() } as unknown as IOllamaClient;
 
     await runOrchestratorPipeline(
       makeDeps({
         config,
         contextBuilder: makeContextBuilder(),
-        agentClient: makeAgentPlanningClient((model) => {
+        agentClient: makeAgentFinishClient(undefined, (model) => {
           modelSeenByAgentClient = model;
         }),
-        subagentClient: makeSubagentFinishClient(),
+        subagentClient,
       }),
       {
         session: { userId: "u1", requesterId: "r1" },
@@ -336,28 +278,32 @@ describe("orchestrator pipeline — regression guard: agent model reaches contex
     );
 
     expect(modelSeenByAgentClient).toBe("agent-only-model");
+    // No multi-step work was requested, so run_steps_parallel never fires
+    // and the subagent-role client is never touched.
+    expect(subagentClient.chatWithTools).not.toHaveBeenCalled();
   });
 });
 
 describe("orchestrator pipeline — failure propagation", () => {
-  // `runOrchestratorPipeline` builds a full `{ok, plan, results, error}` outcome
-  // internally (for `experienceRecorder.finish`'s benefit) but always
-  // re-throws the original error afterward rather than returning that outcome
-  // to the caller — see the "Rethrow after experience recording" comment in
-  // orchestratorPipeline.ts. So the only caller-observable effects of a
-  // subtask failure are (a) the rejection itself and (b) the emitted error
-  // frame, which is what these assertions check.
-  it("rejects with a descriptive error when a subtask fails", async () => {
+  // A subtask failing inside a hidden run_steps_parallel batch no longer
+  // throws out of the pipeline — it becomes tool feedback the agent sees and
+  // reacts to (see runStepsParallelHandler.ts / agentTurn.ts's
+  // runStepsParallel). The pipeline-level failure/rethrow path is still
+  // reachable, though: an unhandled exception from the model client itself
+  // (e.g. a network error) still propagates, still gets a formatted error
+  // frame, and still rejects — that's what this covers now.
+  it("rejects with a descriptive error when the model client throws", async () => {
     const config = makeConfig();
+    const agentClient = {
+      chatWithTools: async () => {
+        throw new Error("simulated model connection failure");
+      },
+      chat: async () => "unused",
+    } as unknown as IOllamaClient;
 
     await expect(
       runOrchestratorPipeline(
-        makeDeps({
-          config,
-          contextBuilder: makeContextBuilder(),
-          agentClient: makeAgentPlanningClient(),
-          subagentClient: makeSubagentFailClient(),
-        }),
+        makeDeps({ config, contextBuilder: makeContextBuilder(), agentClient }),
         {
           session: { userId: "u1", requesterId: "r1" },
           taskText: "do the thing",
@@ -366,20 +312,21 @@ describe("orchestrator pipeline — failure propagation", () => {
           perConn: makePerConnection(),
         },
       ),
-    ).rejects.toThrow(/subtask 1 failed/i);
+    ).rejects.toThrow(/simulated model connection failure/i);
   });
 
   it("emits an error frame with formatted failure detail before rejecting", async () => {
     const config = makeConfig();
     const { frames, emit } = collectFrames();
+    const agentClient = {
+      chatWithTools: async () => {
+        throw new Error("simulated model connection failure");
+      },
+      chat: async () => "unused",
+    } as unknown as IOllamaClient;
 
     await runOrchestratorPipeline(
-      makeDeps({
-        config,
-        contextBuilder: makeContextBuilder(),
-        agentClient: makeAgentPlanningClient(),
-        subagentClient: makeSubagentFailClient(),
-      }),
+      makeDeps({ config, contextBuilder: makeContextBuilder(), agentClient }),
       {
         session: { userId: "u1", requesterId: "r1" },
         taskText: "do the thing",
@@ -392,32 +339,22 @@ describe("orchestrator pipeline — failure propagation", () => {
     const errorFrame = frames.find(
       (frame): frame is Extract<TaskFrame, { kind: "error" }> => frame.kind === "error",
     );
-    expect(errorFrame?.message).toMatch(/subtask 1 failed/i);
+    expect(errorFrame?.message).toMatch(/simulated model connection failure/i);
   });
 });
 
 describe("orchestrator pipeline — abort handling (state integrity)", () => {
-  it("rejects without running any subagent turn when the signal is already aborted", async () => {
+  it("rejects without running any model turn when the signal is already aborted", async () => {
     const config = makeConfig();
-    let subagentCalled = false;
-    const subagentClient: IOllamaClient = {
-      chatWithTools: async () => {
-        subagentCalled = true;
-        return { content: SUBAGENT_THINK_BLOCK, toolCalls: [{ name: "finish", args: { summary: "x" } }] };
-      },
-    } as unknown as IOllamaClient;
+    const agentChat = vi.fn();
+    const agentClient = { chatWithTools: agentChat, chat: async () => "unused" } as unknown as IOllamaClient;
 
     const controller = new AbortController();
     controller.abort();
 
     await expect(
       runOrchestratorPipeline(
-        makeDeps({
-          config,
-          contextBuilder: makeContextBuilder(),
-          agentClient: makeAgentPlanningClient(),
-          subagentClient,
-        }),
+        makeDeps({ config, contextBuilder: makeContextBuilder(), agentClient }),
         {
           session: { userId: "u1", requesterId: "r1" },
           taskText: "do the thing",
@@ -428,52 +365,32 @@ describe("orchestrator pipeline — abort handling (state integrity)", () => {
       ),
     ).rejects.toThrow(/aborted/i);
 
-    expect(subagentCalled).toBe(false);
+    expect(agentChat).not.toHaveBeenCalled();
   });
 });
 
-describe("orchestrator pipeline — model placement warning ordering (regression guard)", () => {
-  it("joins the backgrounded placement check before returning, even when it resolves after the rest of the pipeline finishes", async () => {
-    // The placement check was pure fire-and-forget: it started once the
-    // agent model was known and was assumed to resolve well before the pool
-    // phase finished ("the pool phase runs for seconds afterward — plenty
-    // of time"). That's a timing assumption, not a guarantee. If it
-    // resolved AFTER runOrchestratorPipeline had already returned and the
-    // caller closed the stream, its emit({kind:"warning"}) call would fire
-    // onNext after onComplete on the underlying RSocket responder — which
-    // the protocol doesn't allow. This proves the fix: the pipeline's own
-    // promise does not settle until the placement check has too.
-    //
-    // The pipeline now calls reportPlacement a *second* time, directly
-    // awaited, right after the subagent pool finishes (to catch a spilling
-    // subagent model — see modelPlacement.ts). That second call is not the
-    // subject of this regression test, so it resolves immediately with no
-    // warnings; only the first (backgrounded, agent-check) call is deferred.
+describe("orchestrator pipeline — model placement warning", () => {
+  it("joins the placement check before the pipeline promise resolves", async () => {
+    // Unlike the old two-phase pipeline (a backgrounded check after
+    // planning, plus a second awaited check after the pool), the unified
+    // loop has exactly one placement check, directly awaited at the end of
+    // the turn — so there's no backgrounding race to prove here, just that
+    // its warning reliably lands in `frames` by the time the outcome
+    // resolves.
     const config = makeConfig();
     const { frames, emit } = collectFrames();
 
-    let resolveReportPlacement!: (messages: string[]) => void;
-    let callCount = 0;
     const modelPlacementReporter = {
-      reportPlacement: () => {
-        callCount += 1;
-        if (callCount === 1) {
-          return new Promise<string[]>((resolve) => {
-            resolveReportPlacement = resolve;
-          });
-        }
-        return Promise.resolve([]);
-      },
+      reportPlacement: async () => ["gemma3:27b spilled to CPU (52% GPU)"],
       forgetScope: () => {},
     };
 
-    const pipelinePromise = runOrchestratorPipeline(
+    const outcome = await runOrchestratorPipeline(
       {
         ...makeDeps({
           config,
           contextBuilder: makeContextBuilder(),
-          agentClient: makeAgentPlanningClient(),
-          subagentClient: makeSubagentFinishClient("did the thing"),
+          agentClient: makeAgentFinishClient("did the thing"),
         }),
         modelPlacementReporter,
       },
@@ -486,18 +403,7 @@ describe("orchestrator pipeline — model placement warning ordering (regression
       },
     );
 
-    // Give the rest of the pipeline (plan → pool → synthesis, all fakes
-    // resolving synchronously) every chance to finish first. The placement
-    // check must still be unresolved and must not have emitted anything.
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(frames.some((frame) => frame.kind === "warning")).toBe(false);
-
-    resolveReportPlacement(["gemma3:27b spilled to CPU (52% GPU)"]);
-    const outcome = await pipelinePromise;
-
     expect(outcome.ok).toBe(true);
-    // The warning must already be in `frames` by the time the pipeline
-    // promise resolves — proving it was joined, not a race that got lucky.
     expect(frames.some((frame) => frame.kind === "warning")).toBe(true);
   });
 });

@@ -32,12 +32,20 @@ import {
 
 describe("getCommandSuggestions — normal cases", () => {
   it("returns all commands starting with '/set' (normal — prefix match)", () => {
-    // Typing '/set' should surface the three /set sub-commands
+    // Typing '/set' should surface every /set sub-command
     const suggestions = getCommandSuggestions("/set");
     const commands = suggestions.map((s) => s.command);
     expect(commands).toContain("/set password");
     expect(commands).toContain("/set server");
     expect(commands).toContain("/set port");
+    expect(commands).toContain("/set agent");
+    expect(commands).toContain("/set subagent");
+    expect(commands).toContain("/set approval");
+  });
+
+  it("narrows to /set subagent when typing '/set sub' (normal — regression, was missing from the catalog)", () => {
+    const suggestions = getCommandSuggestions("/set sub");
+    expect(suggestions.map((s) => s.command)).toEqual(["/set subagent"]);
   });
 
   it("returns all /models sub-commands when typing '/models' (normal)", () => {
@@ -217,6 +225,11 @@ describe("getCommandDescription — normal cases", () => {
     const desc = getCommandDescription("/models list");
     expect(desc.length).toBeGreaterThan(0);
   });
+
+  it("returns a subagent-specific description for /set subagent (normal — regression, was missing from the catalog)", () => {
+    const desc = getCommandDescription("/set subagent");
+    expect(desc).toContain("subagent");
+  });
 });
 
 describe("getCommandDescription — boundary / error cases", () => {
@@ -232,6 +245,26 @@ describe("getCommandDescription — boundary / error cases", () => {
 // ---------------------------------------------------------------------------
 // Catalog entries for Phase 1 commands
 // ---------------------------------------------------------------------------
+
+describe("COMMAND_CATALOG — /set drift guard", () => {
+  it("has a catalog entry for every /set subcommand handleSetConfig accepts (regression — /set subagent was silently missing)", () => {
+    // Mirrors the usage string in configHandlers.ts's handleSetConfig — keep
+    // this list in lockstep with that switch statement's case labels so a
+    // new /set subcommand can't ship without also being autocomplete-visible.
+    const subcommands = [
+      "password",
+      "server",
+      "port",
+      "agent",
+      "subagent",
+      "approval",
+    ];
+    const commands = COMMAND_CATALOG.map((entry) => entry.command);
+    for (const subcommand of subcommands) {
+      expect(commands).toContain(`/set ${subcommand}`);
+    }
+  });
+});
 
 describe("COMMAND_CATALOG — Phase 1 entries", () => {
   it("includes /clear and /notify (normal)", () => {

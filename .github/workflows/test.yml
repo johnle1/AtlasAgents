@@ -8,9 +8,10 @@ on:
 jobs:
   build-and-unit:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        node-version: [20, 22, 24]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node-version: [22, 24]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -23,15 +24,22 @@ jobs:
       - name: Build (also serves as the typecheck gate — this repo has no separate tsc/lint script)
         run: npm run build
       - name: Install test suite dependencies
-        run: cd _Test_ && npm install
+        working-directory: _Test_
+        run: npm install
       - name: Unit tests
-        run: cd _Test_ && npm run test:unit
+        working-directory: _Test_
+        run: npm run test:unit
       - name: Integration tests
-        run: cd _Test_ && npm run test:integration
+        working-directory: _Test_
+        run: npm run test:integration
 
   system:
     needs: build-and-unit
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,7 +53,9 @@ jobs:
         # only builds packages/client itself, so this must run first.
         run: npm run build -w @atlasagents/shared
       - name: Install test suite dependencies
-        run: cd _Test_ && npm install
+        working-directory: _Test_
+        run: npm install
       - name: System (E2E) tests
         # Builds packages/client itself, so system tests never silently skip in CI.
-        run: cd _Test_ && npm run test:e2e
+        working-directory: _Test_
+        run: npm run test:e2e

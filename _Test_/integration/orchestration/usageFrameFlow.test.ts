@@ -2,14 +2,14 @@
  * Integration tests — orchestrator pipeline emits a `usage` frame after a
  * model turn, carrying `usedTokens` and the resolved `num_ctx`.
  *
- * Wires the real `runOrchestratorPipeline` with the same canned-LLM
- * boundary as orchestratorPipelineFlow.test.ts. Asserts the wire contract
- * the footer depends on.
+ * Wires the real `runOrchestratorPipeline` (unified agent-turn loop) with
+ * the same canned-LLM boundary as orchestratorPipelineFlow.test.ts. Asserts
+ * the wire contract the footer depends on.
  *
  * Category checklist:
  * - Happy path: usage frame present with the stubbed num_ctx
  * - Contract: usedTokens is inside [0, contextWindow]
- * - Failure: a failing subtask still emits usage (context % still updates)
+ * - Failure: a thrown model error still emits usage before rejecting
  */
 
 import { describe, expect, it } from "vitest";
@@ -28,88 +28,21 @@ import type { TaskFrame } from "../../../packages/server/src/transport/frames.js
 import { runOrchestratorPipeline } from "../../../packages/server/src/orchestration/orchestrator/orchestratorPipeline.js";
 import type { OrchestratorPipelineDeps } from "../../../packages/server/src/orchestration/orchestrator/orchestratorPipelineTypes.js";
 
-const AGENT_THINK_BLOCK = `<agent-think>
-COMPLEXITY: simple
-  reasoning: single trivial subtask
+const makeAgentFinishClient = (): IOllamaClient =>
+  ({
+    chatWithTools: async () => ({
+      content: "",
+      toolCalls: [{ name: "finish", args: { summary: "did the thing", keyFindings: [] } }],
+    }),
+    chat: async () => "unused",
+  }) as unknown as IOllamaClient;
 
-UNDERSTAND:
-  literal: do the thing
-  actual: do the thing
-  implicit: none
-
-EXPLORATION:
-  need explore? no
-  if no: no exploration needed
-
-PLAN:
-  agent count: 1
-  execution: sequential
-
-  Agent 1 — implementation:
-    1. do the thing
-
-SELF-CHECK:
-  issues? none
-  file conflicts? none
-  wave assumptions? none
-
-COMMAND PLAN:
-  setup commands: none
-  verify commands: none
-</agent-think>`;
-
-const SUBAGENT_THINK_BLOCK = `<redacted_thinking>
-Setup commands: none
-Verify commands: none
-Off-limits (run-project): none
-Proceeding straight to finish — nothing to set up or verify for this trivial subtask.
-</redacted_thinking>`;
-
-const ONE_SUBTASK_PLAN_ARGS = {
-  subtasks: [
-    {
-      id: 1,
-      text: "do the thing",
-      dependsOn: [],
-      agentId: 1,
-      agentLabel: "implementation",
+const makeAgentThrowingClient = (): IOllamaClient =>
+  ({
+    chatWithTools: async () => {
+      throw new Error("simulated model connection failure");
     },
-  ],
-  execution: "sequential" as const,
-  agentCount: 1,
-  risks: [] as string[],
-};
-
-const makeAgentPlanningClient = (): IOllamaClient =>
-  ({
-    chatWithTools: async () => ({
-      content: AGENT_THINK_BLOCK,
-      toolCalls: [{ name: "submit_plan", args: ONE_SUBTASK_PLAN_ARGS }],
-    }),
-    chat: async () => "combined result: done",
-  }) as unknown as IOllamaClient;
-
-const makeSubagentFinishClient = (): IOllamaClient =>
-  ({
-    chatWithTools: async () => ({
-      content: SUBAGENT_THINK_BLOCK,
-      toolCalls: [
-        { name: "finish", args: { summary: "did the thing", keyFindings: [] } },
-      ],
-    }),
-  }) as unknown as IOllamaClient;
-
-const makeSubagentFailClient = (): IOllamaClient =>
-  ({
-    chatWithTools: async () => ({
-      content: SUBAGENT_THINK_BLOCK,
-      toolCalls: [
-        {
-          name: "escalate",
-          args: { reason: "cannot proceed, simulated failure" },
-        },
-      ],
-    }),
+    chat: async () => "unused",
   }) as unknown as IOllamaClient;
 
 const NUM_CTX = 8192;
@@ -121,6 +54,7 @@ const makeConfig = (): IConfigManager =>
     getAgentTemperature: async () => 0.1,
     getSubagentTemperature: async () => 0.4,
     getAgentModelSupportsTools: async () => true,
+    getAgentModelSupportsThinking: async () => true,
     getSubagentModelSupportsTools: async () => true,
     getMaxRetries: async () => 3,
     getMaxContextBudget: async () => 0.2,
@@ -156,17 +90,14 @@ const makePerConnection = (): PerConnection =>
     terminal: {},
   }) as unknown as PerConnection;
 
-const makeDeps = (
-  subagentClient: IOllamaClient,
-): OrchestratorPipelineDeps => ({
+const makeDeps = (agentClient: IOllamaClient): OrchestratorPipelineDeps => ({
   contextBuilder: makeContextBuilder(),
   skillManager: makeSkillManager(),
   sessionManager: makeSessionManager(),
   experienceRecorder: fakeExperienceRecorder(),
   agent: {} as unknown as Agent,
   providerRegistry: {
-    getRoleClient: (role: "agent" | "subagent") =>
-      role === "agent" ? makeAgentPlanningClient() : subagentClient,
+    getRoleClient: () => agentClient,
   } as unknown as IProviderRegistry,
   config: makeConfig(),
 });
@@ -180,7 +111,7 @@ const usageFramesOf = (frames: TaskFrame[]) =>
 describe("orchestrator pipeline — usage frame (happy path)", () => {
   it("emits a usage frame with the resolved num_ctx after a model turn", async () => {
     const frames: TaskFrame[] = [];
-    await runOrchestratorPipeline(makeDeps(makeSubagentFinishClient()), {
+    await runOrchestratorPipeline(makeDeps(makeAgentFinishClient()), {
       session: { userId: "u1", requesterId: "r1" },
       taskText: "do the thing",
       emit: (frame) => frames.push(frame),
@@ -197,10 +128,10 @@ describe("orchestrator pipeline — usage frame (happy path)", () => {
 });
 
 describe("orchestrator pipeline — usage frame (failure propagation)", () => {
-  it("still emits usage when a subtask fails so the footer can update", async () => {
+  it("still emits usage before a thrown model error rejects the pipeline", async () => {
     const frames: TaskFrame[] = [];
     await expect(
-      runOrchestratorPipeline(makeDeps(makeSubagentFailClient()), {
+      runOrchestratorPipeline(makeDeps(makeAgentThrowingClient()), {
         session: { userId: "u1", requesterId: "r1" },
         taskText: "do the thing",
         emit: (frame) => frames.push(frame),

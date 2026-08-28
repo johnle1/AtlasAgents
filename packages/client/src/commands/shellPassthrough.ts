@@ -97,8 +97,9 @@ export const handleBang = async (
 
   const result = await runShell(command, cwd, timeoutMs);
   const entries: BangHistoryEntry[] = [];
-  const stdout = result.stdout.replace(/\n$/, "");
-  const stderr = result.stderr.replace(/\n$/, "");
+  // cmd.exe (Windows) terminates output with \r\n; strip either form.
+  const stdout = result.stdout.replace(/\r?\n$/, "");
+  const stderr = result.stderr.replace(/\r?\n$/, "");
 
   if (stdout.length > 0) {
     entries.push({ kind: "text", text: stdout, variant: "secondary" });

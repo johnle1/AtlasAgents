@@ -33,6 +33,8 @@ export {
   clearSubagentBoards,
 } from "./bridge/subagentStatus.js";
 
+export { setActivePlan, getActivePlan } from "./bridge/activePlan.js";
+
 export {
   setBusy,
   setTaskActive,

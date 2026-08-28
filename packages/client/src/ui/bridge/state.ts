@@ -7,6 +7,7 @@
  */
 
 import type { BridgeHooks, PendingApproval, PendingPrompt } from "./types.js";
+import type { PlanStepState } from "../types.js";
 
 export type { BridgeHooks, PendingApproval, PendingPrompt } from "./types.js";
 
@@ -21,6 +22,8 @@ type BridgeState = {
   pendingPrompt: PendingPrompt | null;
   streamingTokenHandler: ((token: string) => void) | null;
   activeTaskCancel: (() => void) | null;
+  /** Mirrors DataContext's `activePlan` so non-React code (e.g. modelSelectionHandlers.ts's post-switch confirmation) can read the current checklist without a React context. */
+  activePlan: PlanStepState[];
 };
 
 const bridgeGlobalState: BridgeState = {
@@ -31,6 +34,7 @@ const bridgeGlobalState: BridgeState = {
   pendingPrompt: null,
   streamingTokenHandler: null,
   activeTaskCancel: null,
+  activePlan: [],
 };
 
 /**
@@ -156,3 +160,17 @@ export const setActiveTaskCancelValue = (
  */
 export const getActiveTaskCancelValue = (): (() => void) | null =>
   bridgeGlobalState.activeTaskCancel;
+
+/**
+ * Returns the agent's current live checklist, as last reported via
+ * `update_plan` (see `PlanChecklist.tsx`). Read by non-React code — e.g.
+ * `modelSelectionHandlers.ts`'s post-switch "Plan carried over" message —
+ * that needs the current value without a React context.
+ */
+export const getActivePlanValue = (): PlanStepState[] =>
+  bridgeGlobalState.activePlan;
+
+/** Updates the mirrored checklist value. Called alongside the React state setter. */
+export const setActivePlanValue = (steps: PlanStepState[]): void => {
+  bridgeGlobalState.activePlan = steps;
+};

@@ -9,11 +9,29 @@
  * waiting for a live socket.
  */
 
+import { release as osRelease } from "node:os";
 import type { Payload, RSocket } from "@rsocket/core";
-import type { TaskApprovalMode, TaskStreamPayload } from "@atlasagents/shared";
+import type {
+  ClientEnvPayload,
+  TaskApprovalMode,
+  TaskStreamPayload,
+} from "@atlasagents/shared";
 import type { TaskFrame } from "../types/frames.js";
 import { decodeFrame } from "../types/frames.js";
 import type { Config } from "../config/index.js";
+
+/**
+ * Reports this client process's platform once per task, so the agent's
+ * `run_command` calls — which execute here, not on the server — use the
+ * right shell syntax (POSIX vs. `cmd.exe`). Same on every call within one
+ * client process, so it's computed fresh rather than cached; the cost is
+ * negligible next to a network round trip.
+ */
+const currentClientEnv = (): ClientEnvPayload => ({
+  platform: process.platform,
+  shell: process.env.SHELL || (process.platform === "win32" ? "cmd.exe" : undefined),
+  osRelease: osRelease(),
+});
 
 /**
  * Initial / refill credit window for RSocket stream backpressure.
@@ -221,6 +239,7 @@ export const sendTask = (
     agentTemp: config.agentTemp,
     subagentTemp: config.subagentTemp,
     approvalMode,
+    clientEnv: currentClientEnv(),
   };
 
   return streamRequest(rsocket, body, metadata, onFrame, onToken);

@@ -254,6 +254,23 @@ export type TaskStreamPayload = {
    * permission policies the server does not enforce.
    */
   approvalMode?: TaskApprovalMode;
+
+  /**
+   * Client machine info, so the agent's `run_command` calls (which execute
+   * on the client, not the server) use the right shell syntax. Optional —
+   * an older client omitting this falls back to a POSIX/Linux default.
+   */
+  clientEnv?: ClientEnvPayload;
+};
+
+/** Client platform info reported with each task stream — see `TaskStreamPayload.clientEnv`. */
+export type ClientEnvPayload = {
+  /** Node's `process.platform` value, e.g. "darwin", "win32", "linux". */
+  platform: string;
+  /** Client shell, e.g. "/bin/zsh" or "cmd.exe" (best-effort, may be absent). */
+  shell?: string;
+  /** Free-form OS release string, e.g. "Darwin 25.6.0" (best-effort, may be absent). */
+  osRelease?: string;
 };
 
 /**
