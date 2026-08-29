@@ -12,6 +12,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Connection } from "../connection/index.js";
 import type { LocalFileProxy } from "../localFileProxy.js";
+import { loadConfig } from "../config/index.js";
+import type { McpServerConfig } from "../config/types.js";
 import { printError, printLine, printSuccess } from "../renderer.js";
 import { requestApprovalWithFeedback } from "../ui/approvalFlow.js";
 import { callTokenSaveTool } from "../mcp/mcpBridge.js";
@@ -22,6 +24,12 @@ import {
   isTokenSaveOnPath,
   listCuratedTools,
 } from "../mcp/tokenSaveClient.js";
+import {
+  disconnectMcpClient,
+  listMcpTools,
+  namespaceToolName,
+  type McpToolDef,
+} from "../mcp/mcpRegistry.js";
 import { formatErrorMessage } from "./utils.js";
 
 const execFileAsync = promisify(execFile);
@@ -92,6 +100,91 @@ export const syncTokenSaveTools = async (
     await conn.sendCommand("mcp.tools.sync", { tools });
     return tools.length;
   });
+};
+
+/**
+ * Syncs tools from TokenSave (if available) and every configured `mcpServers`
+ * entry to the server in a single `mcp.tools.sync` call.
+ *
+ * @remarks
+ * `mcp.tools.sync` **replaces** the server's whole tool list per call (see
+ * `routerBuilder.ts`'s `createMcpToolsSyncHandler`) — so unlike
+ * {@link syncTokenSaveTools}, which sends only TokenSave's tools and would
+ * silently wipe out any already-synced GitHub/Jira/Slack tools, this is the
+ * one function that should be called whenever *anything* about the
+ * configured server set changes (bootstrap, `/mcp add`, `/mcp remove`, and
+ * `/tokensave init`'s post-init sync). A server that fails to connect is
+ * skipped with a printed warning rather than failing the whole sync — one
+ * misconfigured server shouldn't take down every other one's tools.
+ *
+ * @param conn - Live RSocket connection.
+ * @param workspaceRoot - Absolute workspace path used for the TokenSave client.
+ * @returns Total number of tools synced across every server.
+ */
+export const syncAllMcpTools = async (
+  conn: Connection,
+  workspaceRoot: string,
+): Promise<number> => {
+  const payload: McpToolDef[] = [];
+
+  if ((await isTokenSaveOnPath()) && (await hasTokenSaveIndex(workspaceRoot))) {
+    const tokenSaveTools = await enqueueTokenSaveOperation(async () => {
+      const client = await getTokenSaveClient(workspaceRoot);
+      return listCuratedTools(client);
+    });
+    // Every TokenSave tool is a read-only search/lookup — see
+    // ALLOWED_TOKENSAVE_TOOLS in mcp/tokenSaveClient.ts.
+    for (const tool of tokenSaveTools) {
+      payload.push({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        readOnly: true,
+      });
+    }
+  }
+
+  // A config read failure shouldn't sink TokenSave's already-gathered tools
+  // above — degrade to "no configured servers" rather than propagating.
+  let mcpServers: Record<string, McpServerConfig> = {};
+  let mcpSecrets: Record<string, Record<string, string>> = {};
+  try {
+    const config = loadConfig();
+    mcpServers = config.mcpServers;
+    mcpSecrets = config.mcpSecrets;
+  } catch (error) {
+    printError(`Could not read MCP server config: ${formatErrorMessage(error)}`);
+  }
+
+  for (const [serverId, serverConfig] of Object.entries(mcpServers)) {
+    if (serverConfig.enabled === false) {
+      await disconnectMcpClient(serverId);
+      continue;
+    }
+    try {
+      const secrets = mcpSecrets[serverId] ?? {};
+      const tools = await listMcpTools(serverId, serverConfig, secrets);
+      for (const tool of tools) {
+        payload.push({
+          name: namespaceToolName(serverId, tool.name),
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+          readOnly: tool.readOnly,
+        });
+      }
+    } catch (error) {
+      printError(
+        `MCP server "${serverId}" failed to connect: ${formatErrorMessage(error)}`,
+      );
+    }
+  }
+
+  if (payload.length === 0) {
+    return 0;
+  }
+
+  await conn.sendCommand("mcp.tools.sync", { tools: payload });
+  return payload.length;
 };
 
 /**
@@ -178,9 +271,12 @@ export const handleTokenSave = async (
       try {
         await runTokenSaveInit(workspaceRoot);
         printSuccess("TokenSave initialized. Syncing tools to server...");
-        const synced = await syncTokenSaveTools(conn, workspaceRoot);
+        // syncAllMcpTools, not syncTokenSaveTools — mcp.tools.sync replaces
+        // the whole tool list, so this must re-sync every configured MCP
+        // server too, or this init would wipe out any of them already synced.
+        const synced = await syncAllMcpTools(conn, workspaceRoot);
         if (synced > 0) {
-          printSuccess(`Synced ${synced} TokenSave tool(s) to server.`);
+          printSuccess(`Synced ${synced} tool(s) to server.`);
         }
       } catch (err) {
         printError(`TokenSave init failed: ${formatErrorMessage(err)}`);

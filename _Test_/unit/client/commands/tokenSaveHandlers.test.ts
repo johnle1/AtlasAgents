@@ -17,6 +17,8 @@ const {
   mockRequestApprovalWithFeedback,
   mockSendCommand,
   mockExecFile,
+  mockLoadConfig,
+  mockListMcpTools,
 } = vi.hoisted(() => ({
   mockEnqueue: vi.fn(),
   mockGetClient: vi.fn(),
@@ -30,6 +32,8 @@ const {
   mockRequestApprovalWithFeedback: vi.fn(),
   mockSendCommand: vi.fn(),
   mockExecFile: vi.fn(),
+  mockLoadConfig: vi.fn(),
+  mockListMcpTools: vi.fn(),
 }));
 
 vi.mock("../../../../packages/client/src/mcp/tokenSaveClient.js", () => ({
@@ -43,6 +47,17 @@ vi.mock("../../../../packages/client/src/mcp/tokenSaveClient.js", () => ({
 vi.mock("../../../../packages/client/src/mcp/mcpBridge.js", () => ({
   callTokenSaveTool: mockCallTool,
 }));
+
+vi.mock("../../../../packages/client/src/config/index.js", () => ({
+  loadConfig: mockLoadConfig,
+}));
+
+vi.mock("../../../../packages/client/src/mcp/mcpRegistry.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../../../packages/client/src/mcp/mcpRegistry.js")
+  >("../../../../packages/client/src/mcp/mcpRegistry.js");
+  return { ...actual, listMcpTools: mockListMcpTools };
+});
 
 vi.mock("../../../../packages/client/src/renderer.js", () => ({
   printLine: mockPrintLine,
@@ -61,6 +76,7 @@ vi.mock("node:child_process", () => ({
 import {
   handleTokenSave,
   printTokenSaveInitTip,
+  syncAllMcpTools,
   syncTokenSaveTools,
 } from "../../../../packages/client/src/commands/tokenSaveHandlers.js";
 
@@ -78,6 +94,8 @@ beforeEach(() => {
   ]);
   mockSendCommand.mockResolvedValue(undefined);
   mockRequestApprovalWithFeedback.mockResolvedValue({ approved: true });
+  mockLoadConfig.mockReturnValue({ mcpServers: {}, mcpSecrets: {} });
+  mockListMcpTools.mockResolvedValue([]);
   mockExecFile.mockImplementation(
     (
       _cmd: string,
@@ -116,6 +134,109 @@ describe("syncTokenSaveTools", () => {
     expect(count).toBe(1);
     expect(mockSendCommand).toHaveBeenCalledWith("mcp.tools.sync", { tools });
     expect(mockEnqueue).toHaveBeenCalled();
+  });
+});
+
+describe("syncAllMcpTools", () => {
+  it("sends TokenSave tools marked read-only when no other servers are configured (normal)", async () => {
+    mockListTools.mockResolvedValue([
+      { name: "tokensave_search", description: "search" },
+    ]);
+    const count = await syncAllMcpTools(conn, "/workspace");
+    expect(count).toBe(1);
+    expect(mockSendCommand).toHaveBeenCalledWith("mcp.tools.sync", {
+      tools: [
+        {
+          name: "tokensave_search",
+          description: "search",
+          inputSchema: undefined,
+          readOnly: true,
+        },
+      ],
+    });
+  });
+
+  it("combines TokenSave tools with every configured server's tools, namespaced (normal)", async () => {
+    mockListTools.mockResolvedValue([{ name: "tokensave_search" }]);
+    mockLoadConfig.mockReturnValue({
+      mcpServers: {
+        github: { transport: "http", url: "https://example.invalid/mcp/" },
+      },
+      mcpSecrets: { github: { token: "ghp_x" } },
+    });
+    mockListMcpTools.mockResolvedValue([
+      { name: "create_issue", description: "Create an issue", inputSchema: {}, readOnly: false },
+    ]);
+
+    const count = await syncAllMcpTools(conn, "/workspace");
+
+    expect(count).toBe(2);
+    expect(mockListMcpTools).toHaveBeenCalledWith(
+      "github",
+      { transport: "http", url: "https://example.invalid/mcp/" },
+      { token: "ghp_x" },
+    );
+    const [, payload] = mockSendCommand.mock.calls[0]!;
+    const names = (payload as { tools: { name: string }[] }).tools.map((t) => t.name);
+    expect(names).toEqual(["tokensave_search", "mcp__github__create_issue"]);
+  });
+
+  it("skips a disabled server without connecting to it (boundary)", async () => {
+    mockListTools.mockResolvedValue([{ name: "tokensave_search" }]);
+    mockLoadConfig.mockReturnValue({
+      mcpServers: {
+        github: {
+          transport: "http",
+          url: "https://example.invalid/mcp/",
+          enabled: false,
+        },
+      },
+      mcpSecrets: {},
+    });
+
+    const count = await syncAllMcpTools(conn, "/workspace");
+
+    expect(count).toBe(1); // TokenSave only — the disabled server contributes nothing.
+    expect(mockListMcpTools).not.toHaveBeenCalled();
+  });
+
+  it("skips a server that fails to connect without blocking the others (error isolation)", async () => {
+    mockListTools.mockResolvedValue([{ name: "tokensave_search" }]);
+    mockLoadConfig.mockReturnValue({
+      mcpServers: {
+        broken: { transport: "http", url: "https://broken.invalid/mcp/" },
+      },
+      mcpSecrets: {},
+    });
+    mockListMcpTools.mockRejectedValue(new Error("connection refused"));
+
+    const count = await syncAllMcpTools(conn, "/workspace");
+
+    expect(count).toBe(1); // TokenSave's tool still made it through.
+    expect(mockPrintError).toHaveBeenCalledWith(
+      expect.stringContaining("broken"),
+    );
+  });
+
+  it("returns 0 and sends nothing when there is nothing to sync (boundary)", async () => {
+    mockIsOnPath.mockResolvedValue(false);
+    const count = await syncAllMcpTools(conn, "/workspace");
+    expect(count).toBe(0);
+    expect(mockSendCommand).not.toHaveBeenCalled();
+  });
+
+  it("still syncs TokenSave's tools when reading mcpServers config fails (error)", async () => {
+    mockListTools.mockResolvedValue([{ name: "tokensave_search" }]);
+    mockLoadConfig.mockImplementation(() => {
+      throw new Error("cipher locked");
+    });
+
+    const count = await syncAllMcpTools(conn, "/workspace");
+
+    expect(count).toBe(1);
+    expect(mockPrintError).toHaveBeenCalledWith(
+      expect.stringContaining("cipher locked"),
+    );
   });
 });
 

@@ -233,7 +233,7 @@ describe("findExistingEnvelope — legacy config.json-only upgrade path", () => 
     // Simulate a pre-existing install: only config.json has an envelope.
     const manager = new ConfigManager({ rootDir: root });
     await manager.unlockOrSetupProvidersCipher(async () => "legacy-pass");
-    await manager.addProvider("vllm", { baseUrl: "http://10.0.0.9:8000" });
+    await manager.addProvider("lmstudio", { baseUrl: "http://10.0.0.9:8000" });
     lockCipher();
 
     let promptCount = 0;

@@ -26,6 +26,7 @@ import { fakeExperienceRecorder } from "../../helpers/fakeExperienceRecorder.js"
 import type { IOllamaClient } from "../../../packages/server/src/orchestration/interfaces/ollamaInterfaces.js";
 import type { ToolSchema } from "../../../packages/server/src/orchestration/tools/types.js";
 import type { IProviderRegistry } from "../../../packages/server/src/providers/providerRegistry.js";
+import type { McpToolEntry } from "../../../packages/server/src/orchestration/mcp/mcpToolSchema.js";
 import type { PerConnection } from "../../../packages/server/src/container/types.js";
 import type { Agent } from "../../../packages/server/src/orchestration/agent/agent.js";
 import { runOrchestratorPipeline } from "../../../packages/server/src/orchestration/orchestrator/orchestratorPipeline.js";
@@ -83,6 +84,7 @@ const makeDeps = (
 
 const makePerConnection = (
   planDecision: () => Promise<{ decision: string; feedback?: string }>,
+  mcpTools?: McpToolEntry[],
 ): PerConnection =>
   ({
     planBroker: { request: planDecision },
@@ -90,7 +92,16 @@ const makePerConnection = (
     rebindStreamEmit: () => {},
     workspace: { listStructure: async () => "" },
     terminal: {},
+    mcpTools,
   }) as unknown as PerConnection;
+
+const mcpTool = (name: string, readOnly: boolean): McpToolEntry => ({
+  schema: {
+    type: "function",
+    function: { name, description: name, parameters: { type: "object", properties: {}, required: [] } },
+  },
+  readOnly,
+});
 
 /** Extracts the tool names offered to the model on one `chatWithTools` call. */
 const toolNamesFromCall = (mock: ReturnType<typeof vi.fn>, callIndex: number): string[] => {
@@ -131,6 +142,37 @@ describe("approvalMode — plan mode gates mutating tools", () => {
     const afterApproval = toolNamesFromCall(agentChat, 1);
     expect(afterApproval).toContain("write_file");
     expect(afterApproval).toContain("run_command");
+  });
+
+  it("offers a read-only MCP tool but withholds a mutating one before approval", async () => {
+    let call = 0;
+    const agentChat = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return { content: "", toolCalls: [{ name: "update_plan", args: UPDATE_PLAN_ARGS }] };
+      }
+      return { content: "", toolCalls: [{ name: "finish", args: FINISH_ARGS }] };
+    });
+    const agentClient = { chatWithTools: agentChat, chat: async () => "" } as unknown as IOllamaClient;
+
+    await runOrchestratorPipeline(makeDeps(agentClient), {
+      session: { userId: "u1", requesterId: "r1" },
+      taskText: "do the thing",
+      emit: () => {},
+      signal: new AbortController().signal,
+      perConn: makePerConnection(async () => ({ decision: "implement" }), [
+        mcpTool("mcp__github__search_issues", true),
+        mcpTool("mcp__github__create_issue", false),
+      ]),
+      approvalMode: "plan",
+    });
+
+    const beforeApproval = toolNamesFromCall(agentChat, 0);
+    expect(beforeApproval).toContain("mcp__github__search_issues");
+    expect(beforeApproval).not.toContain("mcp__github__create_issue");
+
+    const afterApproval = toolNamesFromCall(agentChat, 1);
+    expect(afterApproval).toContain("mcp__github__create_issue");
   });
 
   it("ends cleanly without calling a second turn when the user skips the plan", async () => {

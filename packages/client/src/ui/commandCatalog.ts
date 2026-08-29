@@ -46,12 +46,6 @@ export const COMMAND_CATALOG: CommandEntry[] = [
     description: "List configured providers and their role assignment",
   },
   {
-    command: "/providers add",
-    label: "/providers add <name> --url <baseUrl> [--key <apiKey>]",
-    description: "Add an OpenAI-compatible provider (vLLM, Trainium, TPU, ...)",
-    requiresArgs: true,
-  },
-  {
     command: "/providers remove",
     label: "/providers remove <name>",
     description: "Remove a configured provider",
@@ -155,6 +149,69 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   {
     command: "/cwd",
     description: "Print current directory",
+  },
+  {
+    command: "/sandbox",
+    description: "Show sandbox mode and active backend",
+  },
+  {
+    command: "/sandbox auto",
+    description: "Use the strongest sandbox backend available on this machine",
+  },
+  {
+    command: "/sandbox container",
+    description: "Always sandbox commands in a container (Docker/Podman)",
+  },
+  {
+    command: "/sandbox off",
+    description: "Disable command sandboxing",
+  },
+  {
+    command: "/mcp list",
+    description: "List configured MCP servers",
+  },
+  {
+    command: "/mcp add",
+    label: "/mcp add <github|jira|slack|name> [--command <cmd> | --url <url>]",
+    description: "Add a built-in preset or a custom MCP server",
+    requiresArgs: true,
+  },
+  {
+    command: "/mcp remove",
+    label: "/mcp remove <name>",
+    description: "Remove a configured MCP server",
+    requiresArgs: true,
+  },
+  {
+    command: "/mcp enable",
+    label: "/mcp enable <name>",
+    description: "Re-enable a disabled MCP server",
+    requiresArgs: true,
+  },
+  {
+    command: "/mcp disable",
+    label: "/mcp disable <name>",
+    description: "Turn off an MCP server without deleting its config",
+    requiresArgs: true,
+  },
+  {
+    command: "/mcp tools",
+    label: "/mcp tools [name]",
+    description: "List tools discovered from one or all MCP servers",
+  },
+  {
+    command: "/mcp check",
+    label: "/mcp check <name>",
+    description: "Connect to an MCP server and report its tool count",
+    requiresArgs: true,
+  },
+  {
+    command: "/tokensave init",
+    description: "Initialize the TokenSave code index for this workspace",
+  },
+  {
+    command: "/tokensave status",
+    description: "Show TokenSave index status",
   },
   {
     command: "/debug",

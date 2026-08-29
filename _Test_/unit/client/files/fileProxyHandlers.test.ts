@@ -53,6 +53,10 @@ vi.mock("../../../../packages/client/src/mcp/mcpBridge.js", () => ({
     isError: false,
     data: "ok",
   })),
+  callMcpTool: vi.fn(async () => ({
+    isError: false,
+    data: "generic ok",
+  })),
 }));
 
 vi.mock("../../../../packages/client/src/state/agentStatus.js", () => ({
@@ -235,10 +239,17 @@ describe("handleMcpCall", () => {
     );
   });
 
-  it("rejects disallowed tools", async () => {
+  it("rejects a name matching neither the tokensave nor mcp__ shape", async () => {
     const context = makeContext(os.tmpdir());
     await expect(
       handleMcpCall(context, { tool: "evil_tool" }),
+    ).rejects.toThrow("not a recognized MCP tool name");
+  });
+
+  it("rejects a tokensave-shaped tool not on the allow-list", async () => {
+    const context = makeContext(os.tmpdir());
+    await expect(
+      handleMcpCall(context, { tool: "tokensave_evil" }),
     ).rejects.toThrow("not allowed");
   });
 
@@ -253,5 +264,104 @@ describe("handleMcpCall", () => {
     });
     expect(callTokenSaveTool).toHaveBeenCalled();
     expect(result).toMatchObject({ isError: false });
+  });
+
+  describe("generic (non-tokensave) MCP servers", () => {
+    beforeEach(async () => {
+      const { resetToolRegistryForTests } = await import(
+        "../../../../packages/client/src/mcp/mcpRegistry.js"
+      );
+      resetToolRegistryForTests();
+    });
+
+    it("rejects a namespaced tool that was never discovered from a connected server (fail closed)", async () => {
+      const context = makeContext(os.tmpdir());
+      await expect(
+        handleMcpCall(context, { tool: "mcp__github__create_issue" }),
+      ).rejects.toThrow("not allowed");
+    });
+
+    it("calls a read-only tool without prompting for approval", async () => {
+      const { registerToolMetadata } = await import(
+        "../../../../packages/client/src/mcp/mcpRegistry.js"
+      );
+      const { requestApprovalWithFeedback } = await import(
+        "../../../../packages/client/src/ui/approvalFlow.js"
+      );
+      const { callMcpTool } = await import(
+        "../../../../packages/client/src/mcp/mcpBridge.js"
+      );
+      // This mock is shared across the whole file (unrelated file-mutation
+      // tests above also call it) — clear so this assertion checks only
+      // what happens during this test.
+      vi.mocked(requestApprovalWithFeedback).mockClear();
+      registerToolMetadata("github", "search_issues", true);
+
+      const context = makeContext(os.tmpdir());
+      const result = await handleMcpCall(context, {
+        tool: "mcp__github__search_issues",
+        arguments: { query: "bug" },
+      });
+
+      expect(requestApprovalWithFeedback).not.toHaveBeenCalled();
+      expect(callMcpTool).toHaveBeenCalledWith("github", "search_issues", {
+        query: "bug",
+      });
+      expect(result).toMatchObject({ isError: false });
+    });
+
+    it("requires approval for a non-read-only tool", async () => {
+      const { registerToolMetadata } = await import(
+        "../../../../packages/client/src/mcp/mcpRegistry.js"
+      );
+      const { requestApprovalWithFeedback } = await import(
+        "../../../../packages/client/src/ui/approvalFlow.js"
+      );
+      const { callMcpTool } = await import(
+        "../../../../packages/client/src/mcp/mcpBridge.js"
+      );
+      vi.mocked(requestApprovalWithFeedback).mockResolvedValueOnce({
+        approved: true,
+      });
+      registerToolMetadata("github", "create_issue", false);
+
+      const context = makeContext(os.tmpdir());
+      await handleMcpCall(context, {
+        tool: "mcp__github__create_issue",
+        arguments: { title: "Bug" },
+      });
+
+      expect(requestApprovalWithFeedback).toHaveBeenCalled();
+      expect(callMcpTool).toHaveBeenCalledWith("github", "create_issue", {
+        title: "Bug",
+      });
+    });
+
+    it("does not call the tool when approval is declined", async () => {
+      const { registerToolMetadata } = await import(
+        "../../../../packages/client/src/mcp/mcpRegistry.js"
+      );
+      const { requestApprovalWithFeedback } = await import(
+        "../../../../packages/client/src/ui/approvalFlow.js"
+      );
+      const { callMcpTool } = await import(
+        "../../../../packages/client/src/mcp/mcpBridge.js"
+      );
+      vi.mocked(requestApprovalWithFeedback).mockResolvedValueOnce({
+        approved: false,
+        feedback: "not now",
+      });
+      registerToolMetadata("github", "create_issue", false);
+      vi.mocked(callMcpTool).mockClear();
+
+      const context = makeContext(os.tmpdir());
+      const result = await handleMcpCall(context, {
+        tool: "mcp__github__create_issue",
+        arguments: { title: "Bug" },
+      });
+
+      expect(callMcpTool).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ isError: true, errorMessage: "not now" });
+    });
   });
 });

@@ -257,6 +257,42 @@ describe("COMMAND_CATALOG — /set drift guard", () => {
   });
 });
 
+describe("COMMAND_CATALOG — /sandbox drift guard", () => {
+  it("has a catalog entry for every /sandbox mode handleSandbox accepts", () => {
+    // Mirrors sandboxHandlers.ts's VALID_MODES plus the bare status form —
+    // commands/index.ts routes /sandbox to handleSandbox independently of
+    // this catalog, and /tokensave previously shipped routed-but-uncataloged
+    // (no autocomplete, no /help entry), so this guards against the same gap.
+    const commands = COMMAND_CATALOG.map((entry) => entry.command);
+    for (const form of ["/sandbox", "/sandbox auto", "/sandbox container", "/sandbox off"]) {
+      expect(commands).toContain(form);
+    }
+  });
+});
+
+describe("COMMAND_CATALOG — /mcp and /tokensave drift guard", () => {
+  it("has a catalog entry for every /mcp subcommand handleMcp accepts", () => {
+    const commands = COMMAND_CATALOG.map((entry) => entry.command);
+    for (const form of [
+      "/mcp list",
+      "/mcp add",
+      "/mcp remove",
+      "/mcp enable",
+      "/mcp disable",
+      "/mcp tools",
+      "/mcp check",
+    ]) {
+      expect(commands).toContain(form);
+    }
+  });
+
+  it("has a catalog entry for every /tokensave subcommand (was previously missing entirely)", () => {
+    const commands = COMMAND_CATALOG.map((entry) => entry.command);
+    expect(commands).toContain("/tokensave init");
+    expect(commands).toContain("/tokensave status");
+  });
+});
+
 describe("COMMAND_CATALOG — Phase 1 entries", () => {
   it("includes /clear and /notify (normal)", () => {
     const commands = COMMAND_CATALOG.map((entry) => entry.command);

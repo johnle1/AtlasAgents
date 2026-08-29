@@ -157,7 +157,7 @@ export const SERVER_DEFAULTS = {
    * A provider name of "ollama" always resolves to the native local Ollama client.
    * Any other value must have a matching entry in `providers` (added via
    * `/providers add` or ConfigManager.addProvider), pointing at an OpenAI-compatible
-   * endpoint (vLLM on a GPU box, AWS Trainium, Google TPU, ...).
+   * endpoint (LM Studio, llama.cpp's server, a hosted API, ...).
    */
   agentProvider: "ollama",
   subagentProvider: "ollama",
@@ -304,7 +304,7 @@ export type ServerConfig = {
    *
    * Deliberately has no default: when unset, the effective value falls back
    * to Ollama's own default (4096) rather than a guessed number. Set via
-   * `atlas-detect-hardware --write` (sized to detected VRAM) or `/set numCtx`.
+   * `/set numCtx`.
    */
   numCtx?: number;
 

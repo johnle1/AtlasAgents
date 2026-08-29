@@ -261,9 +261,9 @@ export class ConfigManager implements IConfigManager {
     // for the one case where neither is actually needed: nothing to encrypt
     // (`providers` is empty) AND no passphrase has been established this
     // process (`!isUnlocked()`). That's exactly a fresh, standalone process
-    // that never called unlockOrSetupProvidersCipher — notably
-    // `atlas-detect-hardware --write` — which otherwise failed every write
-    // with ConfigCipherLockedError for a field with no secret in it.
+    // that never called unlockOrSetupProvidersCipher — e.g. a standalone
+    // script writing config fields directly — which otherwise failed every
+    // write with ConfigCipherLockedError for a field with no secret in it.
     //
     // Once a passphrase HAS been established (isUnlocked() is true — e.g.
     // right after `unlockOrSetupProvidersCipher`'s reset flow calls
@@ -377,9 +377,9 @@ export class ConfigManager implements IConfigManager {
    *    port under the very same key/salt as this method protects
    *    `providers` under. Prompting a second time for the same passphrase
    *    would be redundant, so this returns immediately. Standalone callers
-   *    that never unlock anything else first (`atlas-detect-hardware
-   *    --write`, most unit tests) are unaffected — `isUnlocked()` is false
-   *    for them, so they fall through to the normal prompting flow below.
+   *    that never unlock anything else first (most unit tests) are
+   *    unaffected — `isUnlocked()` is false for them, so they fall through
+   *    to the normal prompting flow below.
    * 1. **No config file yet** (first run), or a file with no
    *    `$providersSecrets` yet: prompts to set a new passphrase and
    *    initializes the cipher. The first {@link _saveRaw} call creates the
@@ -873,8 +873,7 @@ export class ConfigManager implements IConfigManager {
    *
    * @remarks
    * Undefined means "not configured" — callers should fall back to Ollama's
-   * own default (4096) rather than guessing a value. Set via
-   * `atlas-detect-hardware --write` or `/set numCtx`.
+   * own default (4096) rather than guessing a value. Set via `/set numCtx`.
    *
    * @returns Configured `num_ctx` in tokens, or `undefined` if unset.
    */
@@ -1233,7 +1232,7 @@ export class ConfigManager implements IConfigManager {
   /**
    * Get the provider name currently serving the agent (planning) role.
    *
-   * @returns Provider name (e.g. "ollama", "vllm-gpu"); defaults to "ollama".
+   * @returns Provider name (e.g. "ollama", "lmstudio"); defaults to "ollama".
    */
   getAgentProvider = async (): Promise<string> => {
     const config = await this._loadRaw();
@@ -1243,7 +1242,7 @@ export class ConfigManager implements IConfigManager {
   /**
    * Get the provider name currently serving the subagent (execution) role.
    *
-   * @returns Provider name (e.g. "ollama", "vllm-gpu"); defaults to "ollama".
+   * @returns Provider name (e.g. "ollama", "lmstudio"); defaults to "ollama".
    */
   getSubagentProvider = async (): Promise<string> => {
     const config = await this._loadRaw();

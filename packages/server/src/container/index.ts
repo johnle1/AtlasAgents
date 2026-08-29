@@ -148,7 +148,7 @@ export type AppContainer = {
   /**
    * Resolves each role (agent/subagent) to whichever provider it's currently
    * configured to use — native Ollama, or any OpenAI-compatible backend
-   * (vLLM, Trainium, TPU) added via /providers.
+   * added via /providers.
    */
   providerRegistry: ProviderRegistry;
 

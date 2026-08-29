@@ -2,8 +2,8 @@
  * Unit tests — macOS Seatbelt profile builder.
  *
  * Category checklist:
- * - Normal: deny default, write allow for cwd/tmp, read deny for secrets
- * - Boundary: cwd is resolved; quotes in paths are escaped
+ * - Normal: deny default, write allow for writeRoots, read deny for credential stores
+ * - Boundary: quotes in paths are escaped; network policy toggles the rule
  * - Error: missing cwd still produces a parseable profile
  */
 
@@ -14,10 +14,20 @@ import {
   buildSeatbeltProfile,
   SEATBELT_DENIAL_PATTERN,
 } from "../../../../packages/client/src/fileProxy/sandbox/seatbelt.js";
+import { buildSandboxPolicy } from "../../../../packages/client/src/fileProxy/sandbox/policy.js";
+import type { SandboxContext } from "../../../../packages/client/src/fileProxy/sandbox/types.js";
+
+const ctxFor = (
+  cwd: string,
+  network: "allow" | "deny" = "allow",
+): SandboxContext => ({
+  cwd,
+  policy: buildSandboxPolicy({ cwd, network, platform: "darwin" }),
+});
 
 describe("buildSeatbeltProfile", () => {
   it("denies by default and allows process/exec/mach (normal)", () => {
-    const profile = buildSeatbeltProfile({ cwd: "/proj" });
+    const profile = buildSeatbeltProfile(ctxFor("/proj"));
     expect(profile).toContain("(deny default)");
     expect(profile).toContain("(allow process*)");
     expect(profile).toContain("(allow mach*)");
@@ -26,15 +36,15 @@ describe("buildSeatbeltProfile", () => {
 
   it("allows writes under cwd and tmp (normal)", () => {
     const cwd = path.resolve("/proj");
-    const profile = buildSeatbeltProfile({ cwd });
+    const profile = buildSeatbeltProfile(ctxFor(cwd));
     expect(profile).toContain(`(allow file-write* (subpath "${cwd}"))`);
     expect(profile).toContain(
       `(allow file-write* (subpath "${os.tmpdir()}"))`,
     );
   });
 
-  it("denies reads of ~/.ssh ~/.aws ~/.gnupg (normal)", () => {
-    const profile = buildSeatbeltProfile({ cwd: "/proj" });
+  it("denies reads of credential stores incl. ~/.ssh ~/.aws ~/.gnupg (normal)", () => {
+    const profile = buildSeatbeltProfile(ctxFor("/proj"));
     const home = os.homedir();
     expect(profile).toContain(
       `(deny file-read* (subpath "${path.join(home, ".ssh")}"))`,
@@ -45,10 +55,23 @@ describe("buildSeatbeltProfile", () => {
     expect(profile).toContain(
       `(deny file-read* (subpath "${path.join(home, ".gnupg")}"))`,
     );
+    // Widened deny list — see policy.ts.
+    expect(profile).toContain(
+      `(deny file-read* (subpath "${path.join(home, ".npmrc")}"))`,
+    );
+    expect(profile).toContain(
+      `(deny file-read* (subpath "${path.join(home, "Library", "Keychains")}"))`,
+    );
+  });
+
+  it("denies network when the policy says deny (normal — auto mode)", () => {
+    const profile = buildSeatbeltProfile(ctxFor("/proj", "deny"));
+    expect(profile).toContain("(deny network*)");
+    expect(profile).not.toContain("(allow network*)");
   });
 
   it("escapes quotes in cwd (boundary)", () => {
-    const profile = buildSeatbeltProfile({ cwd: '/tmp/weird"dir' });
+    const profile = buildSeatbeltProfile(ctxFor('/tmp/weird"dir'));
     expect(profile).toContain('\\"');
     expect(profile).not.toMatch(/subpath "\/tmp\/weird"dir"/);
   });
@@ -60,7 +83,7 @@ describe("buildSeatbeltProfile", () => {
 
     it("also allows writes under $TMPDIR when it differs from os.tmpdir() (boundary)", () => {
       vi.stubEnv("TMPDIR", "/custom/tmp");
-      const profile = buildSeatbeltProfile({ cwd: "/proj" });
+      const profile = buildSeatbeltProfile(ctxFor("/proj"));
       expect(profile).toContain(
         `(allow file-write* (subpath "${path.resolve("/custom/tmp")}"))`,
       );
@@ -68,7 +91,7 @@ describe("buildSeatbeltProfile", () => {
 
     it("does not add a TMPDIR write rule when TMPDIR is unset (boundary)", () => {
       vi.stubEnv("TMPDIR", "");
-      const profile = buildSeatbeltProfile({ cwd: "/proj" });
+      const profile = buildSeatbeltProfile(ctxFor("/proj"));
       const writeRuleCount = (
         profile.match(/\(allow file-write\*/g) ?? []
       ).length;

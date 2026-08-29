@@ -104,7 +104,7 @@ export const createServices = (
 
   // Initialize provider registry: resolves each role (agent/subagent) to
   // whichever provider it's currently configured to use — native Ollama, or
-  // any OpenAI-compatible backend (vLLM, Trainium, TPU) added via /providers.
+  // any OpenAI-compatible backend added via /providers.
   const providerRegistry = new ProviderRegistry({
     config: configManager,
     ollamaClient,

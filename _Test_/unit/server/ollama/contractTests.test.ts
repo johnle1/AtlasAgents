@@ -4,8 +4,9 @@
  * Validates the core claim: "Unified internal representation across all backends".
  *
  * Table-driven test suite executed against fixtures modeled on real wire outputs
- * from Ollama, vLLM, and MLX-LM. Asserts that regardless of the backend source,
- * the parsed ChatWithToolsResult and streaming outputs converge to identical internal shapes.
+ * from Ollama, a generic OpenAI-compatible server, and MLX-LM. Asserts that
+ * regardless of the backend source, the parsed ChatWithToolsResult and
+ * streaming outputs converge to identical internal shapes.
  */
 
 import { describe, expect, it } from "vitest";
@@ -14,9 +15,9 @@ import type { Message } from "../../../../packages/server/src/orchestration/type
 import type { ToolSchema } from "../../../../packages/server/src/orchestration/tools/types.js";
 import {
   createOllamaOpenAiSseFrames,
-  createVllmTextSseFrames,
-  createVllmToolCallSseFrames,
-  createVllmReasoningSseFrames,
+  createOpenAiCompatibleTextSseFrames,
+  createOpenAiCompatibleToolCallSseFrames,
+  createOpenAiCompatibleReasoningSseFrames,
   createMlxlmTextSseFrames,
   createMlxlmToolFallbackSseFrames,
 } from "../../../helpers/fixtures/index.js";
@@ -71,8 +72,8 @@ describe("Cross-Backend Contract Tests — Text Streaming (chatStream)", () => {
       expectedOutput: "Here are the files.",
     },
     {
-      backend: "vLLM (with usage stats chunk)",
-      frames: createVllmTextSseFrames(["Here ", "are ", "the files."], { includeUsage: true }),
+      backend: "OpenAI-compatible server (with usage stats chunk)",
+      frames: createOpenAiCompatibleTextSseFrames(["Here ", "are ", "the files."], { includeUsage: true }),
       expectedOutput: "Here are the files.",
     },
     {
@@ -110,8 +111,8 @@ describe("Cross-Backend Contract Tests — Text Streaming (chatStream)", () => {
 });
 
 describe("Cross-Backend Contract Tests — Tool Invocations (chatWithTools)", () => {
-  it("normalizes vLLM fragmented multi-turn tool calls into standard OllamaToolCall shape", async () => {
-    const frames = createVllmToolCallSseFrames([
+  it("normalizes OpenAI-compatible fragmented multi-turn tool calls into standard OllamaToolCall shape", async () => {
+    const frames = createOpenAiCompatibleToolCallSseFrames([
       {
         name: "run_command",
         argChunks: ['{"cmd":', ' "ls ', '-la"}'],
@@ -159,8 +160,8 @@ describe("Cross-Backend Contract Tests — Tool Invocations (chatWithTools)", ()
 });
 
 describe("Cross-Backend Contract Tests — Reasoning & Thinking Tokens", () => {
-  it("normalizes reasoning_content channel on reasoning-capable vLLM backends", async () => {
-    const frames = createVllmReasoningSseFrames(
+  it("normalizes reasoning_content channel on reasoning-capable OpenAI-compatible backends", async () => {
+    const frames = createOpenAiCompatibleReasoningSseFrames(
       ["Let me think... ", "Checking directory contents."],
       ["Files: file1.txt, file2.txt"],
     );

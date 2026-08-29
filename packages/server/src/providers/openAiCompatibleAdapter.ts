@@ -2,10 +2,11 @@
  * HTTP client for any OpenAI-compatible `/v1/chat/completions` backend.
  *
  * @remarks
- * This is the one client every non-Ollama provider uses — vLLM on a local GPU,
- * AWS Trainium, Google TPU, or any other OpenAI-compatible server. They differ
- * only by `baseUrl`; the wire protocol (SSE streaming, tool-call shape) is the
- * same for all of them, so a single adapter implementation covers every case.
+ * This is the one client every non-Ollama provider uses — LM Studio,
+ * llama.cpp's server, a hosted API, or any other OpenAI-compatible server.
+ * They differ only by `baseUrl`; the wire protocol (SSE streaming, tool-call
+ * shape) is the same for all of them, so a single adapter implementation
+ * covers every case.
  *
  * Implements the same {@link IOllamaClient} contract as the native Ollama
  * client so callers (Agent, Subagent) don't need to know which backend they're
@@ -75,7 +76,7 @@ type OpenAiStreamDelta = {
  *
  * @remarks
  * OpenAI's SSE format wraps all response data in a `choices` array with one element
- * per chunk. This is the shape received from any OpenAI-compatible server (vLLM, Ollama
+ * per chunk. This is the shape received from any OpenAI-compatible server (LM Studio, Ollama
  * with OpenAI wrapper, AWS Bedrock, Google Vertex, etc.).
  */
 type OpenAiStreamChunk = {
@@ -263,7 +264,7 @@ export type FetchLike = typeof fetch;
  *
  * @remarks
  * This adapter implements the {@link IOllamaClient} interface for any backend
- * that speaks OpenAI's wire protocol — vLLM on local GPU, AWS SageMaker, Google Vertex AI,
+ * that speaks OpenAI's wire protocol — LM Studio, AWS SageMaker, Google Vertex AI,
  * or any other OpenAI-compatible server. A single adapter covers all of them because
  * they differ only by `baseUrl`; the SSE streaming format and tool-call shape are identical.
  *
@@ -282,7 +283,7 @@ export type FetchLike = typeof fetch;
  * @example
  * ```ts
  * const adapter = new OpenAiCompatibleAdapter(
- *   "https://vllm.example.com/v1",
+ *   "http://localhost:1234/v1",
  *   "sk-xxx"
  * );
  * const text = await adapter.chat("mistral-7b", messages, { temperature: 0.7 });

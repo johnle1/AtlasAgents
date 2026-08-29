@@ -53,17 +53,26 @@ const fieldPlaceholder = (
 /**
  * Renders one tool schema as a single prompt line describing its call shape.
  *
+ * @remarks
+ * Includes the tool's own description (when non-empty) in parentheses
+ * before the call template. For a built-in tool the name alone (`read_file`,
+ * `run_command`) is usually self-explanatory; for an MCP tool — especially
+ * one from a third-party server with a terse or generic name — the
+ * description is often the only signal the model has for deciding whether
+ * the tool applies to the task at hand, so dropping it here would leave the
+ * model guessing purely from the name and argument list.
+ *
  * @param schema - The tool schema to render.
- * @returns A line like `- edit_file: {"tool":"edit_file","path":"<...>","old":"<...>"}`.
+ * @returns A line like `- edit_file (Replaces text in a file.): {"tool":"edit_file","path":"<...>","old":"<...>"}`.
  *
  * @example
  * ```ts
  * schemaToPromptLine(readFileTool.schema);
- * '- read_file: {"tool":"read_file","path":"<Relative path from workspace root>"}'
+ * '- read_file (Read the full content of a file from the workspace.): {"tool":"read_file","path":"<Relative path from workspace root>"}'
  * ```
  */
 export const schemaToPromptLine = (schema: ToolSchema): string => {
-  const { name, parameters } = schema.function;
+  const { name, description, parameters } = schema.function;
   const fields = Object.keys(parameters.properties)
     .map((key) =>
       fieldPlaceholder(
@@ -73,7 +82,8 @@ export const schemaToPromptLine = (schema: ToolSchema): string => {
       ),
     )
     .join(",");
-  return `- ${name}: {"tool":"${name}",${fields}}`;
+  const descriptionSuffix = description ? ` (${description})` : "";
+  return `- ${name}${descriptionSuffix}: {"tool":"${name}",${fields}}`;
 };
 
 /** Worked example of a multi-line `edit_file` call with properly escaped newlines. */

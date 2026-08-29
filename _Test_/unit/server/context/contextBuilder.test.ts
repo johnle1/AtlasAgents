@@ -323,7 +323,7 @@ describe("ContextBuilder.build — non-Ollama provider budget (regression guard)
     // tag it was never pulled with; showModel() throws, the resolver falls
     // back to OLLAMA_DEFAULT_NUM_CTX (4096), and the memory header budget
     // silently collapses from ~25,600 tokens to ~819 — even though the real
-    // model (say, a 128k-context vLLM deployment) never receives num_ctx on
+    // model (say, a 128k-context LM Studio deployment) never receives num_ctx on
     // the wire at all. A rule long enough to fit only under the larger,
     // correct budget proves which one was actually used.
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "atlas-context-"));
@@ -338,7 +338,7 @@ describe("ContextBuilder.build — non-Ollama provider budget (regression guard)
     } as unknown as IOllamaAdminClient;
     const config = {
       getAgentModel: async () => "gpt-oss-120b",
-      getAgentProvider: async () => "vllm-gpu",
+      getAgentProvider: async () => "lmstudio",
       getMaxContextBudget: async () => 0.2,
       getNumCtx: async () => undefined,
     } as unknown as IConfigManager;

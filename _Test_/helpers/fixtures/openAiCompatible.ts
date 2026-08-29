@@ -1,5 +1,5 @@
 /**
- * Fixture generators for vLLM `/v1/chat/completions` responses.
+ * Fixture generators for a generic OpenAI-compatible `/v1/chat/completions` server.
  *
  * Covers:
  * 1. Standard token streaming
@@ -8,8 +8,8 @@
  * 4. Usage object chunk at end of stream
  */
 
-/** Creates vLLM SSE frames for streamed text */
-export const createVllmTextSseFrames = (
+/** Creates OpenAI-compatible SSE frames for streamed text */
+export const createOpenAiCompatibleTextSseFrames = (
   tokens: string[],
   options?: {
     model?: string;
@@ -22,7 +22,7 @@ export const createVllmTextSseFrames = (
   for (let i = 0; i < tokens.length; i++) {
     frames.push(
       JSON.stringify({
-        id: "cmpl-vllm-789",
+        id: "cmpl-oai-789",
         object: "chat.completion.chunk",
         created: 1700000000 + i,
         model,
@@ -45,7 +45,7 @@ export const createVllmTextSseFrames = (
   };
 
   const finalPayload: Record<string, unknown> = {
-    id: "cmpl-vllm-789",
+    id: "cmpl-oai-789",
     object: "chat.completion.chunk",
     created: 1700000000 + tokens.length,
     model,
@@ -64,8 +64,8 @@ export const createVllmTextSseFrames = (
   return frames;
 };
 
-/** Creates vLLM SSE frames for streamed tool calls fragmented across chunks */
-export const createVllmToolCallSseFrames = (
+/** Creates OpenAI-compatible SSE frames for streamed tool calls fragmented across chunks */
+export const createOpenAiCompatibleToolCallSseFrames = (
   toolCalls: Array<{
     name: string;
     argChunks: string[];
@@ -76,12 +76,12 @@ export const createVllmToolCallSseFrames = (
   const frames: string[] = [];
 
   toolCalls.forEach((tc, toolIndex) => {
-    const toolCallId = tc.id ?? `call_${toolIndex}_vllm`;
+    const toolCallId = tc.id ?? `call_${toolIndex}_oai`;
 
     // First frame provides the name and ID
     frames.push(
       JSON.stringify({
-        id: "cmpl-vllm-tool-123",
+        id: "cmpl-oai-tool-123",
         object: "chat.completion.chunk",
         created: 1700000000,
         model,
@@ -108,7 +108,7 @@ export const createVllmToolCallSseFrames = (
     for (const argChunk of tc.argChunks) {
       frames.push(
         JSON.stringify({
-          id: "cmpl-vllm-tool-123",
+          id: "cmpl-oai-tool-123",
           object: "chat.completion.chunk",
           created: 1700000000,
           model,
@@ -134,7 +134,7 @@ export const createVllmToolCallSseFrames = (
   // Finish frame
   frames.push(
     JSON.stringify({
-      id: "cmpl-vllm-tool-123",
+      id: "cmpl-oai-tool-123",
       object: "chat.completion.chunk",
       created: 1700000000,
       model,
@@ -151,8 +151,8 @@ export const createVllmToolCallSseFrames = (
   return frames;
 };
 
-/** Creates vLLM SSE frames with reasoning content deltas */
-export const createVllmReasoningSseFrames = (
+/** Creates OpenAI-compatible SSE frames with reasoning content deltas */
+export const createOpenAiCompatibleReasoningSseFrames = (
   thinkingTokens: string[],
   contentTokens: string[],
   model = "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
@@ -162,7 +162,7 @@ export const createVllmReasoningSseFrames = (
   for (const token of thinkingTokens) {
     frames.push(
       JSON.stringify({
-        id: "cmpl-vllm-reason-123",
+        id: "cmpl-oai-reason-123",
         object: "chat.completion.chunk",
         created: 1700000000,
         model,
@@ -180,7 +180,7 @@ export const createVllmReasoningSseFrames = (
   for (const token of contentTokens) {
     frames.push(
       JSON.stringify({
-        id: "cmpl-vllm-reason-123",
+        id: "cmpl-oai-reason-123",
         object: "chat.completion.chunk",
         created: 1700000000,
         model,
@@ -197,7 +197,7 @@ export const createVllmReasoningSseFrames = (
 
   frames.push(
     JSON.stringify({
-      id: "cmpl-vllm-reason-123",
+      id: "cmpl-oai-reason-123",
       object: "chat.completion.chunk",
       created: 1700000000,
       model,

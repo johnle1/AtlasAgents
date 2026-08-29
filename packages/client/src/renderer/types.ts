@@ -67,12 +67,12 @@ export type DirEntry = {
  * ```ts
  * const groups: ModelGroup[] = [
  *   { provider: "ollama", models: ["gemma3:27b", "llama3:70b"] },
- *   { provider: "vllm", models: [], error: "Connection refused" }
+ *   { provider: "lmstudio", models: [], error: "Connection refused" }
  * ];
  * ```
  */
 export type ModelGroup = {
-  /** Provider name (e.g., "ollama", "vllm", "openai"). */
+  /** Provider name (e.g., "ollama", "lmstudio", "openai"). */
   provider: string;
 
   /** List of model names available from this provider. */
@@ -112,7 +112,7 @@ export type CurrentModelSelection = {
  * const entries: FlatModelEntry[] = [
  *   { provider: "ollama", model: "gemma3:27b" },
  *   { provider: "ollama", model: "llama3:70b" },
- *   { provider: "vllm", model: "mistral:7b" }
+ *   { provider: "lmstudio", model: "mistral:7b" }
  * ];
  * // User selects 2 → { provider: "ollama", model: "llama3:70b" }
  * ```

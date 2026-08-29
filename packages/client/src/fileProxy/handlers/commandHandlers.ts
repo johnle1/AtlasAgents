@@ -31,8 +31,95 @@ import {
 import type { DispatchContext, ShellResult } from "../types.js";
 import { logger } from "../../utils/logger.js";
 import { getApprovalMode } from "../../ui/bridge/allowlist.js";
-import { detectSandboxDenial } from "../sandbox/index.js";
-import type { SandboxProvider } from "../sandbox/types.js";
+import { getDefaultConfig, loadConfig } from "../../config/index.js";
+import { scrubEnv } from "../envScrub.js";
+import {
+  buildSandboxPolicy,
+  detectSandboxDenial,
+  resolveConfiguredSandbox,
+} from "../sandbox/index.js";
+import type { SandboxMode } from "../sandbox/index.js";
+import type { NetworkPolicy, SandboxPolicy, SandboxProvider } from "../sandbox/types.js";
+import type { ApprovalMode } from "../../config/approvalMode.js";
+
+/**
+ * Network confinement for a sandboxed command, keyed off approval mode.
+ *
+ * @remarks
+ * `auto` is the one mode with no human reviewing each command before it
+ * runs, so it's the one place a network-exfiltration path (read a secret,
+ * POST it somewhere) matters most — deny by default there. Every other mode
+ * has a human looking at the command first, so network stays allowed;
+ * denying it there would just break ordinary `npm install`/`git fetch` work
+ * behind a prompt that already provides the real check.
+ */
+const networkPolicyForMode = (mode: ApprovalMode): NetworkPolicy =>
+  mode === "auto" ? "deny" : "allow";
+
+/**
+ * Reads `sandbox` config, falling back to the default on any read failure.
+ *
+ * @remarks
+ * By the time a command can run, bootstrap has already called `loadConfig`
+ * successfully at least once (unlocking the config cipher if needed), so
+ * this should never actually throw in production. Falls back rather than
+ * propagating regardless, since a config read failure for a non-secret
+ * setting shouldn't take down command execution — sandboxing degrades to
+ * its default rather than the run failing outright.
+ */
+const loadSandboxConfig = (): { mode: SandboxMode; containerImage: string } => {
+  try {
+    return loadConfig().sandbox;
+  } catch {
+    return getDefaultConfig().sandbox;
+  }
+};
+
+/**
+ * Tracks whether {@link warnSandboxUnavailable} has already fired this
+ * process — printed once, not on every command, so it stays visible without
+ * flooding scrollback on a machine that's simply missing a backend.
+ */
+let sandboxUnavailableWarned = false;
+
+/**
+ * Warns once per process when `sandbox.mode` is not `"off"` but no backend
+ * could be resolved on this machine — otherwise the command still runs, just
+ * silently unconfined (see {@link resolveSandboxForCommand}), with no signal
+ * that the configured boundary isn't actually in effect.
+ */
+const warnSandboxUnavailable = (): void => {
+  if (sandboxUnavailableWarned) {
+    return;
+  }
+  sandboxUnavailableWarned = true;
+  beginBlockOutput();
+  logger.blank();
+  const theme = getTheme();
+  logger.info(
+    `  ${theme.warning}⚠${theme.reset}  No sandbox backend available — commands are running unconfined. Run /sandbox status for details.`,
+  );
+  logger.blank();
+};
+
+/** Resolves the active sandbox (if any) and the policy to run `command` under. */
+const resolveSandboxForCommand = (
+  cwd: string,
+): { sandbox: SandboxProvider; policy: SandboxPolicy } | null => {
+  const { mode, containerImage } = loadSandboxConfig();
+  const sandbox = resolveConfiguredSandbox(mode, containerImage);
+  if (!sandbox) {
+    if (mode !== "off") {
+      warnSandboxUnavailable();
+    }
+    return null;
+  }
+  const policy = buildSandboxPolicy({
+    cwd,
+    network: networkPolicyForMode(getApprovalMode()),
+  });
+  return { sandbox, policy };
+};
 
 /** {@link ShellResult} plus the optional revise reason a decline can carry. */
 type CommandRunResult = ShellResult & { feedback?: string };
@@ -80,7 +167,13 @@ const declinedCommandResult = (feedback?: string): CommandRunResult => ({
  *
  * @remarks
  * Detached + `stdio: "ignore"` + `unref()`: the process outlives this request
- * and its output is not proxied back to the agent.
+ * and its output is not proxied back to the agent — deliberate, since this
+ * is how a long-running dev server is meant to behave, so unlike foreground
+ * commands this does **not** gain a kill-after-timeout (that would defeat
+ * the feature). It does gain the same sandbox confinement and env scrubbing
+ * as foreground commands when a backend is available (see
+ * {@link resolveSandboxForCommand}) — a backgrounded `rm -rf` deserves the
+ * same containment as a foregrounded one.
  *
  * @param context - Provides `currentDir` for the spawned process's cwd.
  * @param command - Raw command line to run.
@@ -98,17 +191,31 @@ const runBackgroundCommand = async (
     printBashApproved();
   }
 
-  const commandParts = command.trim().split(/\s+/);
-  if (commandParts.length === 0 || !commandParts[0]) {
+  if (command.trim().length === 0) {
     return { stdout: "", stderr: "empty command", exitCode: 1 };
   }
 
+  const sandboxed = resolveSandboxForCommand(context.currentDir);
+  const spawnSpec = sandboxed
+    ? (() => {
+        const { argv } = sandboxed.sandbox.wrapCommand(command, {
+          cwd: context.currentDir,
+          policy: sandboxed.policy,
+        });
+        return { bin: argv[0] ?? "/bin/sh", args: argv.slice(1) };
+      })()
+    : (() => {
+        const commandParts = command.trim().split(/\s+/);
+        return { bin: commandParts[0] ?? "", args: commandParts.slice(1) };
+      })();
+
   let spawnedProcess;
   try {
-    spawnedProcess = spawn(commandParts[0], commandParts.slice(1), {
+    spawnedProcess = spawn(spawnSpec.bin, spawnSpec.args, {
       detached: true,
       stdio: "ignore",
       cwd: context.currentDir,
+      env: scrubEnv(),
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -170,12 +277,15 @@ const executeForegroundCommand = async (
   context: DispatchContext,
   command: string,
   commandClassification: BashClass,
-  sandbox?: SandboxProvider,
+  sandboxed: { sandbox: SandboxProvider; policy: SandboxPolicy } | null,
 ): Promise<ShellResult> => {
   const startTime = Date.now();
 
   const trackedCommand = wrapCommandForCwdTracking(command, isWindowsShell());
-  const executionResult = await context.runShell(trackedCommand, { sandbox });
+  const executionResult = await context.runShell(trackedCommand, {
+    sandbox: sandboxed?.sandbox,
+    policy: sandboxed?.policy,
+  });
 
   const { cleanedStdout, newCwd } = extractCwdFromOutput(
     executionResult.stdout,
@@ -213,13 +323,23 @@ const executeForegroundCommand = async (
  *    a process with `stdio: "ignore"` — does not capture output.
  * 2. Non-`"safe"` foreground commands prompt run/skip; `"dangerous"` also
  *    prints a warning banner.
- * 3. Foreground runs wrap the command for CWD tracking, strip the marker from
+ * 3. Every foreground command runs through the platform sandbox backend
+ *    (see {@link resolveSandboxForCommand}) when one is available — `"safe"`
+ *    included, since sandboxing confines what a command can *do*, which is
+ *    orthogonal to whether the user was asked to approve it first. If the
+ *    sandbox denies something legitimate, the user is offered one retry
+ *    *without* the sandbox rather than being stuck.
+ * 4. Foreground runs wrap the command for CWD tracking, strip the marker from
  *    stdout, and call `setCurrentDir` when the new path is inside the workspace
  *    (escapes like `cd /` are ignored).
  *
  * Mode overrides (consulted via {@link getApprovalMode}):
- * - `auto` skips every prompt unconditionally — safe, cautious, dangerous,
- *   and background commands all run free, with no sandboxing.
+ * - `auto` skips every approval prompt unconditionally — safe, cautious,
+ *   dangerous, and background commands all run without a human checking
+ *   first. Sandboxing still applies when a backend is available, and its
+ *   network policy switches to deny-by-default specifically because `auto`
+ *   is the one mode with no human in the loop to catch an exfiltration
+ *   attempt (see {@link networkPolicyForMode}).
  * - `safe` always runs free regardless of mode.
  *
  * Skipped commands return `exitCode: -1` and a stderr note — they do not throw.
@@ -254,12 +374,7 @@ export const handleCommandRun = async (
   }
 
   const skipPrompt = mode === "auto";
-  // No mode opts a command into sandboxed execution anymore — `auto` skips
-  // the prompt outright instead of sandboxing. `executeForegroundCommand`
-  // still accepts a sandbox provider (unused here, always undefined) since
-  // that's a general capability of the sandbox module, not specific to
-  // approval-mode gating — see fileProxy/sandbox/index.ts.
-  const sandbox: SandboxProvider | undefined = undefined;
+  const sandboxed = resolveSandboxForCommand(context.currentDir);
 
   const needsPrompt = !skipPrompt && commandClassification !== "safe";
 
@@ -277,13 +392,10 @@ export const handleCommandRun = async (
     context,
     command,
     commandClassification,
-    sandbox,
+    sandboxed,
   );
 
-  if (
-    sandbox &&
-    detectSandboxDenial(sandbox, result)
-  ) {
+  if (sandboxed && detectSandboxDenial(sandboxed.sandbox, result)) {
     const { approved, feedback } = await confirmRunOrSkip(command);
     if (!approved) {
       printDeclineFeedback(feedback);
@@ -294,6 +406,7 @@ export const handleCommandRun = async (
       context,
       command,
       commandClassification,
+      null,
     );
   }
 

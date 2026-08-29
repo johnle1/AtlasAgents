@@ -32,3 +32,69 @@ describe("runShell — timeout handling", () => {
     expect(result.stdout.trim()).toBe("ok");
   });
 });
+
+describe("runShell — sandbox wrapping", () => {
+  it("spawns the sandbox provider's argv instead of the bare shell when policy is supplied", async () => {
+    let capturedCwd: string | undefined;
+    const sandbox = {
+      id: "test-sandbox",
+      denialPattern: /never-matches/,
+      wrapCommand: (command: string, ctx: { cwd: string }) => {
+        capturedCwd = ctx.cwd;
+        // Re-exec through /bin/sh so the fake "sandbox" is actually runnable.
+        return { argv: ["/bin/sh", "-c", command] };
+      },
+    };
+    const policy = { writeRoots: [os.tmpdir()], readDenies: [], network: "allow" as const };
+
+    const result = await runShell(
+      "echo wrapped",
+      os.tmpdir(),
+      5_000,
+      undefined,
+      { sandbox, policy },
+    );
+
+    expect(result.stdout.trim()).toBe("wrapped");
+    expect(capturedCwd).toBe(os.tmpdir());
+  });
+
+  it("falls back to the bare shell when a sandbox is supplied without a policy", async () => {
+    const wrapCommand = () => ({ argv: ["/bin/sh", "-c", "echo should-not-run"] });
+    const sandbox = { id: "test-sandbox", denialPattern: /x/, wrapCommand };
+
+    // No `policy` — shellRunner requires both together, so this must behave
+    // exactly like no sandbox at all rather than crashing on a missing policy.
+    const result = await runShell("echo ok", os.tmpdir(), 5_000, undefined, {
+      sandbox,
+    });
+
+    expect(result.stdout.trim()).toBe("ok");
+  });
+});
+
+describe("runShell — environment scrubbing", () => {
+  it("does not leak a credential-shaped env var from the parent process into the child", async () => {
+    const original = process.env.MY_TEST_API_TOKEN;
+    process.env.MY_TEST_API_TOKEN = "should-not-leak";
+    try {
+      const result = await runShell(
+        'node -e "console.log(process.env.MY_TEST_API_TOKEN || \'\')"',
+        os.tmpdir(),
+        5_000,
+      );
+      expect(result.stdout.trim()).toBe("");
+    } finally {
+      if (original === undefined) {
+        delete process.env.MY_TEST_API_TOKEN;
+      } else {
+        process.env.MY_TEST_API_TOKEN = original;
+      }
+    }
+  });
+
+  it("still passes through PATH so the shell can find ordinary binaries", async () => {
+    const result = await runShell("echo ok", os.tmpdir(), 5_000);
+    expect(result.exitCode).toBe(0);
+  });
+});

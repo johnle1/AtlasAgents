@@ -236,10 +236,10 @@ export type TaskStreamPayload = {
   /** Model id for the subagent role (tool use / edits). */
   subsubagentModel: string;
 
-  /** Provider serving the agent role (e.g. "ollama", "vllm-gpu"). */
+  /** Provider serving the agent role (e.g. "ollama", "lmstudio"). */
   agentProvider: string;
 
-  /** Provider serving the subagent role (e.g. "ollama", "vllm-gpu"). */
+  /** Provider serving the subagent role (e.g. "ollama", "lmstudio"). */
   subagentProvider: string;
 
   /** Agent sampling temperature in roughly `0.0`–`1.0`. */

@@ -1,7 +1,7 @@
 /**
  * Translates AtlasAgents's Ollama-native message/tool shapes to and from the
- * OpenAI-compatible `/v1/chat/completions` wire format used by vLLM and any
- * other OpenAI-compatible backend.
+ * OpenAI-compatible `/v1/chat/completions` wire format used by LM Studio,
+ * llama.cpp's server, and any other OpenAI-compatible backend.
  *
  * @remarks
  * Ollama represents tool calls as `{ function: { name, arguments: object } }`

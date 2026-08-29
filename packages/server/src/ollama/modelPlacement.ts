@@ -143,7 +143,7 @@ export const formatSpillMessage = (placement: ModelPlacement): string => {
   if (placement.kind === "cpu") {
     const driverHint =
       process.platform === "darwin"
-        ? "On Apple Silicon, check iogpu.wired_limit_mb — run atlas-detect-hardware."
+        ? "On Apple Silicon, check the GPU memory ceiling with `sysctl iogpu.wired_limit_mb`."
         : "Check that `nvidia-smi` runs and the GPU driver is loaded — 0% (rather than a partial split) usually means Ollama found no usable GPU, not that the model is too big. `journalctl -u ollama | grep -i cuda` shows which compute library it chose at startup.";
     return `⚠ ${placement.model} is running entirely on CPU (0% GPU) — expect roughly 10x slower responses. ${driverHint}`;
   }
@@ -154,7 +154,7 @@ export const formatSpillMessage = (placement: ModelPlacement): string => {
     "more-quantized model.";
   const appleHint =
     process.platform === "darwin"
-      ? " On Apple Silicon also check iogpu.wired_limit_mb — run atlas-detect-hardware."
+      ? " On Apple Silicon also check the GPU memory ceiling with `sysctl iogpu.wired_limit_mb`."
       : "";
 
   return `⚠ ${placement.model} is running ${percent}% on GPU / ${100 - percent}% on CPU — expect slower responses. ${remedy}${appleHint}`;

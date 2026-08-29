@@ -3,51 +3,38 @@
  *
  * @remarks
  * Builds a per-command profile: deny-by-default, allow process/exec/mach,
- * allow file-read except `~/.ssh` / `~/.aws` / `~/.gnupg`, allow file-write
- * under cwd and temp dirs. Network is allowed in v1 (policy is a later
- * shared feature). `sandbox-exec` is deprecated but still ships with macOS.
+ * allow file-read except the credential stores in `policy.readDenies`,
+ * allow file-write only under `policy.writeRoots`, and gate network on
+ * `policy.network`. `sandbox-exec` is deprecated but still ships with macOS.
  */
 
-import * as os from "node:os";
-import * as path from "node:path";
-
-import type { SandboxProvider } from "./types.js";
+import type { SandboxContext, SandboxProvider } from "./types.js";
 
 const quoteSeatbeltPath = (value: string): string =>
   value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
 /**
- * Builds a Seatbelt profile string scoped to `cwd`.
+ * Builds a Seatbelt profile string enforcing `ctx.policy`.
  *
- * @param input - Working directory used as the write allow-subpath.
+ * @param ctx - Working directory (informational here — write scope comes
+ *   from `ctx.policy.writeRoots`) and the policy to enforce.
  * @returns Profile text for `sandbox-exec -p`.
  *
  * @example
  * ```ts
- * const profile = buildSeatbeltProfile({ cwd: "/proj" });
+ * const profile = buildSeatbeltProfile({ cwd: "/proj", policy });
  * profile.includes('(deny default)'); // true
  * ```
  */
-export const buildSeatbeltProfile = (input: { cwd: string }): string => {
-  const cwd = quoteSeatbeltPath(path.resolve(input.cwd));
-  const tmp = quoteSeatbeltPath(os.tmpdir());
-  const envTmp = process.env.TMPDIR
-    ? quoteSeatbeltPath(path.resolve(process.env.TMPDIR))
-    : null;
-  const home = os.homedir();
-  const denyRead = [".ssh", ".aws", ".gnupg"].map((suffix) =>
-    quoteSeatbeltPath(path.join(home, suffix)),
-  );
-
-  const writePaths = [cwd, tmp, envTmp].filter(
-    (entry): entry is string => Boolean(entry),
-  );
-  const writeAllows = writePaths
-    .map((entry) => `(allow file-write* (subpath "${entry}"))`)
+export const buildSeatbeltProfile = (ctx: SandboxContext): string => {
+  const writeAllows = ctx.policy.writeRoots
+    .map((entry) => `(allow file-write* (subpath "${quoteSeatbeltPath(entry)}"))`)
     .join("\n");
-  const readDenies = denyRead
-    .map((entry) => `(deny file-read* (subpath "${entry}"))`)
+  const readDenies = ctx.policy.readDenies
+    .map((entry) => `(deny file-read* (subpath "${quoteSeatbeltPath(entry.path)}"))`)
     .join("\n");
+  const networkRule =
+    ctx.policy.network === "deny" ? "(deny network*)" : "(allow network*)";
 
   return `(version 1)
 (deny default)
@@ -58,7 +45,7 @@ export const buildSeatbeltProfile = (input: { cwd: string }): string => {
 (allow file-read*)
 ${readDenies}
 ${writeAllows}
-(allow network*)
+${networkRule}
 `;
 };
 
@@ -80,7 +67,7 @@ export const createSeatbeltProvider = (): SandboxProvider => ({
   id: "seatbelt",
   denialPattern: SEATBELT_DENIAL_PATTERN,
   wrapCommand: (command, ctx) => {
-    const profile = buildSeatbeltProfile({ cwd: ctx.cwd });
+    const profile = buildSeatbeltProfile(ctx);
     return {
       argv: ["sandbox-exec", "-p", profile, "/bin/sh", "-c", command],
     };

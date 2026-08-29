@@ -164,7 +164,7 @@ const main = async (): Promise<void> => {
   }
 
   // Only bootstrap local Ollama when at least one role is actually configured
-  // to use the "ollama" provider — a pure vLLM/Trainium/TPU deployment has no
+  // to use the "ollama" provider — a pure OpenAI-compatible-only deployment has no
   // local Ollama to start or connect to.
   const configPreview = new ConfigManager({ rootDir: process.cwd() });
 

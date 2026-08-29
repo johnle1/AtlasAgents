@@ -1,16 +1,17 @@
 # AtlasAgents
 
-AtlasAgents is a self-hosted, client/server AI coding agent. You run **`atlas-server`** on a machine with access to an LLM (local via [Ollama](https://ollama.com), or any OpenAI-compatible endpoint such as vLLM), and connect to it from **`atlas`**, a terminal client, over an encrypted RSocket/TCP connection.
+AtlasAgents is a self-hosted, client/server AI coding agent, built for individual developers. You run **`atlas-server`** on a machine with access to an LLM (local via [Ollama](https://ollama.com), or any OpenAI-compatible endpoint such as LM Studio), and connect to it from **`atlas`**, a terminal client, over an encrypted RSocket/TCP connection.
 
 ## Features
 
-- **Self-hosted** — your code and prompts never leave a machine you control; the LLM can be fully local (Ollama) or point at any OpenAI-compatible backend (vLLM, etc.).
+- **Self-hosted** — your code and prompts never leave a machine you control; the LLM can be fully local (Ollama) or point at any OpenAI-compatible backend (LM Studio, llama.cpp's server, a hosted API, etc.).
 - **Encrypted client/server** — TLS with trust-on-first-use certificate pinning, plus password authentication.
 - **One unified agent loop** — the agent answers directly when it can, calls a tool (read a file, run a command) when the answer depends on your workspace, and only writes a checklist for genuinely multi-step work. There's no separate "planning phase" for every message — a greeting gets a greeting back, not a project plan.
 - **Hidden parallel execution** — for independent steps in a checklist, the agent can fan work out to a pool of background workers and fold the results back in; this never shows up as separate UI, just checklist items completing together.
 - **Persistent memory** — session continuity, learned preferences, and reusable patterns are extracted from past tasks and consolidated over time.
 - **Skills** — markdown instruction files that the client syncs to the server; the server picks the most relevant one per task.
-- **Hardware-aware provider setup** — `atlas-detect-hardware` inspects the host (NVIDIA GPU / AWS Trainium / GCP TPU / CPU) and suggests a `vllm serve` configuration.
+- **Sandboxed command execution** — shell commands run inside an OS-level sandbox (Seatbelt on macOS, bubblewrap on Linux, a container on Windows) rather than directly in your shell; see [Sandboxing](#sandboxing).
+- **Extensible via MCP** — add your own Model Context Protocol servers (GitHub, Jira, Slack, or anything else) with `/mcp add`; see [MCP servers](#mcp-servers).
 - **Optional code-index integration** — [TokenSave](#optional-tokensave) speeds up workspace search/navigation via MCP.
 
 `atlasagents` and `atlasagents-server` are published to npm — install them directly, or build from this monorepo if you're contributing.
@@ -94,19 +95,67 @@ The server's `startup.json` and `config.json` share one passphrase and one deriv
 
 `atlas-server --password`/`--port`/`--reset` (config-repair mode, like the client's) also require the correct passphrase — but unlike `start`, a wrong entry there just fails with an error rather than offering the reset menu, so it can't be used to bypass the auth password without knowing the passphrase.
 
-## Providers (Ollama, vLLM)
+## Sandboxing
+
+Shell commands the agent runs are confined by an OS-level sandbox, not just an approval prompt:
+
+| Platform | Backend | Requires |
+| --- | --- | --- |
+| macOS | Seatbelt (`sandbox-exec`) | Nothing — ships with macOS |
+| Linux | bubblewrap (`bwrap`) | `bwrap` on `PATH` (e.g. `apt install bubblewrap`) |
+| Windows | Container (Docker or Podman) | Docker Desktop or Podman |
+| Any | Container (opt-in) | Docker or Podman |
+
+A sandboxed command can only write under the workspace and temp directories, can't read common credential stores (`~/.ssh`, `~/.aws`, `~/.npmrc`, cloud CLI config, etc. — the container backend goes further and simply can't see anything outside the workspace at all), and has its network access denied by default in `auto` approval mode specifically, since that's the one mode with no human reviewing each command before it runs. Every other mode leaves network access on, since a human is already looking at the command.
+
+If no backend is available (e.g. Linux without `bwrap`, or neither Docker nor Podman installed), commands still run — unconfined, gated only by the approval prompt, same as before sandboxing existed. Check what's active any time with:
+
+```
+/sandbox           # shows the configured mode and the backend actually in use
+/sandbox auto      # default — strongest backend available per-platform
+/sandbox container # always use a container, even where a native backend exists
+/sandbox off       # disable sandboxing entirely
+```
+
+The container backend needs an image — build the bundled one once with:
+
+```bash
+docker build -t atlas-sandbox:latest sandbox/
+```
+
+or point `sandbox.containerImage` in `config.json` at your own.
+
+## MCP servers
+
+Atlas connects to any number of [Model Context Protocol](https://modelcontextprotocol.io) servers — GitHub, Jira, Slack, TokenSave (see below), or your own — and offers their tools to the agent alongside the built-in file/command tools.
+
+```
+/mcp list                # configured servers
+/mcp add github          # built-in preset — prompts for a personal access token
+/mcp add jira            # built-in preset — opens a browser for OAuth on first connect
+/mcp add slack           # built-in preset — prompts for a bot token + team id
+/mcp add my-tool --command npx --args -y,@me/my-mcp   # custom stdio server
+/mcp add my-api --url https://api.example.com/mcp     # custom HTTP server
+/mcp tools [name]        # tools discovered from one or all servers
+/mcp check <name>        # connect and report the tool count
+/mcp disable <name>      # turn off without deleting its config/credentials
+/mcp enable <name>
+/mcp remove <name>       # deletes its config and credentials
+```
+
+Every tool from a server added via `/mcp add` is namespaced `mcp__<server>__<tool>` (e.g. `mcp__github__create_issue`) so two servers can never collide on a shared tool name. **Any tool not marked read-only prompts for approval before it runs**, the same run/skip/revise prompt as a shell command — read-only-ness comes from the tool's own MCP metadata, or from `--readonly` on a custom server that doesn't declare it. Credentials (`mcpSecrets` in `config.json`) are encrypted at rest the same way the server password is — see [Config encryption at rest](#config-encryption-at-rest).
+
+**Verify preset endpoints before relying on them**: GitHub/Jira/Slack's MCP offerings are still evolving — if a preset's default looks stale, `/mcp add <name> --command ... | --url ...` overrides it, or edit `mcpServers` in `config.json` directly.
+
+**Building your own MCP server?** [`examples/mcp-server/`](examples/mcp-server/) is a copy-me template covering the parts specific to Atlas — the `readOnlyHint` annotation that drives the approval prompt above, how credentials reach your process, and why stdout has to stay untouched on a stdio server.
+
+## Providers (Ollama or any OpenAI-compatible endpoint)
 
 Any role (agent/subagent) can be pointed at `ollama` or at a named OpenAI-compatible backend.
 
 - **Ollama**: install it yourself. The server auto-starts `ollama serve` if needed.
-- **vLLM (or other OpenAI-compatible endpoints)**: run `atlas-detect-hardware` to get a suggested provider config for your hardware:
-
-  ```bash
-  atlas-detect-hardware          # print a suggested config + vllm serve command
-  atlas-detect-hardware --write  # also add it to config.json
-  ```
-
-- Manage providers from the client with `/providers list|add|remove`, and models with `/models list|find|pull|delete|show|running|storage`.
+- **Any other OpenAI-compatible endpoint** (LM Studio, llama.cpp's server, a hosted API, ...): there is currently no `/providers add` — the provider's `baseUrl`/`apiKey` are stored encrypted as a whole (see [Config encryption at rest](#config-encryption-at-rest)), so they can't be hand-edited into `config.json` either. Adding a provider currently requires a small script against the server's `ConfigManager.addProvider`.
+- Manage already-configured providers from the client with `/providers list|remove`, and models with `/models list|find|pull|delete|show|running|storage`.
 
 ### Model storage: why `/models delete` doesn't always free space
 
@@ -202,12 +251,14 @@ atlas-server --regen-cert
 | `/skills list\|add\|sync`                         | Manage skill files                                      |
 | `/memory show\|forget\|clear`                     | Inspect or clear learned memory                         |
 | `/models list\|find\|pull\|delete\|show\|running\|storage` | Manage models; `storage` reports real on-disk usage |
-| `/providers list\|add\|remove`                    | Manage LLM provider backends                            |
+| `/providers list\|remove`                         | View or remove configured LLM provider backends          |
 | `/new`                                            | Start a new task                                        |
 | `/explore`                                        | Explore-only mode (read, no edits)                      |
 | `/tokensave init\|status`                         | Manage the optional TokenSave code-index integration    |
+| `/mcp list\|add\|remove\|enable\|disable\|tools\|check` | Manage MCP servers (GitHub, Jira, Slack, custom)   |
 | `/workspace`                                      | Workspace info/controls                                 |
 | `/cwd`                                            | Show/change the working directory                       |
+| `/sandbox`, `/sandbox auto\|container\|off`       | Show or change the command sandbox mode                 |
 | `/think`                                          | Toggle/adjust reasoning verbosity                       |
 | `/spinner`                                        | Toggle the loading spinner                              |
 | `/theme`                                          | Pick a color theme                                      |
@@ -265,14 +316,13 @@ refused). A line starting with `!` runs the rest as a local shell command
 
 ### Optional: TokenSave
 
-`/tokensave` integrates with TokenSave, a separate Rust-based code-intelligence indexer that speeds up workspace search/navigation via MCP. Install it with `cargo install tokensave`, then run `/tokensave init` inside the client.
+`/tokensave` integrates with TokenSave, a separate Rust-based code-intelligence indexer that speeds up workspace search/navigation via MCP. Install it with `cargo install tokensave`, then run `/tokensave init` inside the client. TokenSave is a built-in MCP integration with its own init step (`/mcp` doesn't manage it) — see [MCP servers](#mcp-servers) for GitHub/Jira/Slack and your own servers.
 
 ## Troubleshooting
 
 - **Client won't connect / "certificate fingerprint mismatch"** — the server's cert changed (e.g. you ran `atlas-server --regen-cert`, or pointed at a different server). Run `atlas --trust-fingerprint` to re-pin it.
 - **Forgot the server password, or the address/port changed** — run `atlas --reset` to clear the saved password, address, port, and pinned fingerprint, then reconnect through the setup wizard. Or use `atlas --password` / `atlas --address <host>` / `atlas --port <port>` to fix a single value without a full reset.
 - **Agent can't reach the model / Ollama errors** — make sure Ollama is installed and you've run `ollama pull <model>` at least once; the server only auto-starts `ollama serve`, it doesn't install Ollama or pull models for you.
-- **Not sure which provider config fits your hardware** — run `atlas-detect-hardware` for a suggested vLLM config, or `--write` to apply it directly.
 - **`npm install` fails to link `@atlasagents/shared`** — you likely ran it inside `packages/client` or `packages/server` instead of the repo root; see the [Quick Start](#quick-start) note.
 - **Port already in use** — pass a different port with `atlas-server` (prompted on first run) or override the client's target with `atlas --port <port>`.
 
@@ -287,7 +337,7 @@ refused). A line starting with `!` runs the rest as a local shell command
 - **Orchestration** (`packages/server/src/orchestration`): a single unified agent loop (`agent/agentTurn.ts`) handles every task — it answers directly, calls a tool (`read_file`, `run_command`, ...), or, for genuinely multi-step work, maintains a live checklist via an `update_plan` tool call. Independent checklist steps can run concurrently via `run_steps_parallel`, each completed by the same unified agent loop rather than a separate subagent persona — this is an implementation detail the agent chooses to use, not something the UI exposes. An in-progress checklist survives a mid-session model switch (`/model`), so a newly selected model picks up where the last one left off.
 - **Memory** (`packages/server/src/memory`): session continuity, learned preferences, and reusable patterns are extracted from past tasks and consolidated periodically, so the agent improves within a given `atlas-server` data directory over time.
 - **Skills** (`user-data/skills/` server-side, `~/.atlasagents/skills/` client-side): markdown instruction files the client syncs to the server; the server picks the most relevant one per task.
-- **Providers**: any role (agent/subagent) can be pointed at `ollama` or at a named OpenAI-compatible backend. `atlas-detect-hardware` inspects the host (NVIDIA GPU / AWS Trainium / GCP TPU / CPU) and suggests a `vllm serve` provider configuration.
+- **Providers**: any role (agent/subagent) can be pointed at `ollama` or at a named OpenAI-compatible backend (see [Providers](#providers-ollama-or-any-openai-compatible-endpoint)).
 
 The directory you launch `atlas-server` from is both its **data root** (`user-data/`, `tls/` get created there) and its **workspace root** (the files it reads/edits). In practice: run it from inside the project you want the agent to work on, and add `user-data/` and `tls/` to that project's `.gitignore`.
 

@@ -447,10 +447,23 @@ export const runAgentTurn = async (
   // stay available so the agent can still investigate and propose a plan.
   // This is what makes plan mode actually stop before executing, rather
   // than relying on the model to volunteer not to call those tools.
-  const fullRegistry = createAgentTurnToolRegistry(perConn.tokenSaveTools);
+  const mcpSchemas = perConn.mcpTools?.map((entry) => entry.schema);
+  const fullRegistry = createAgentTurnToolRegistry(mcpSchemas);
   const PLAN_MODE_ALLOWED_TOOLS = new Set(["read_file", "update_plan", "finish"]);
+  // MCP tools are read-only-eligible per-tool, not per-name-prefix — each
+  // one's readOnly flag is resolved client-side (from the MCP spec's
+  // annotations.readOnlyHint, or the server's configured default) and
+  // synced alongside its schema. Missing from the map (a non-MCP tool)
+  // falls through to `false`, which is correct: only PLAN_MODE_ALLOWED_TOOLS
+  // and tools explicitly marked read-only are offered in plan mode.
+  const mcpReadOnlyByName = new Map(
+    (perConn.mcpTools ?? []).map((entry) => [
+      entry.schema.function.name,
+      entry.readOnly,
+    ]),
+  );
   const isPlanModeAllowed = (name: string): boolean =>
-    PLAN_MODE_ALLOWED_TOOLS.has(name) || name.startsWith("tokensave_");
+    PLAN_MODE_ALLOWED_TOOLS.has(name) || mcpReadOnlyByName.get(name) === true;
   const restrictedRegistry = fullRegistry.filter((tool) =>
     isPlanModeAllowed(tool.schema.function.name),
   );
@@ -547,7 +560,7 @@ export const runAgentTurn = async (
   // Tools and system prompt for one concurrent step dispatched by
   // run_steps_parallel — built once per turn, not per step, since neither
   // depends on which steps end up running.
-  const workerRegistry = createWorkerToolRegistry(perConn.tokenSaveTools);
+  const workerRegistry = createWorkerToolRegistry(mcpSchemas);
   const workerSystemText = buildWorkerSystemText({
     clientEnv,
     toolSchemas: getToolSchemas(workerRegistry),

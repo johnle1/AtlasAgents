@@ -34,7 +34,7 @@ const legacyConfig = {
 
 const makePerConn = (overrides: Partial<PerConnection> = {}): PerConnection =>
   ({
-    tokenSaveTools: undefined,
+    mcpTools: undefined,
     workspace: {},
     terminal: {},
     planBroker: { request: vi.fn(async () => ({ decision: "implement" })) },

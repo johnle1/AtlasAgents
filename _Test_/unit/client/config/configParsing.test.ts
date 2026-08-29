@@ -53,6 +53,30 @@ describe("mergeConfigFromDisk", () => {
     expect(merged.ui.showSpinner).toBe(DEFAULT_CONFIG.ui.showSpinner);
   });
 
+  it("merges sandbox partially, keeping containerImage default", () => {
+    const merged = mergeConfigFromDisk({
+      sandbox: { mode: "container" } as never,
+    });
+    expect(merged.sandbox.mode).toBe("container");
+    expect(merged.sandbox.containerImage).toBe(
+      DEFAULT_CONFIG.sandbox.containerImage,
+    );
+  });
+
+  it("rejects an invalid sandbox.mode and falls back to the default (error)", () => {
+    const merged = mergeConfigFromDisk({
+      sandbox: { mode: "yolo" } as never,
+    });
+    expect(merged.sandbox.mode).toBe(DEFAULT_CONFIG.sandbox.mode);
+  });
+
+  it("accepts a custom containerImage", () => {
+    const merged = mergeConfigFromDisk({
+      sandbox: { mode: "auto", containerImage: "my-org/my-sandbox:1.2" } as never,
+    });
+    expect(merged.sandbox.containerImage).toBe("my-org/my-sandbox:1.2");
+  });
+
   it("persists default / accept_edits / plan and migrates auto_edit (normal)", () => {
     expect(
       mergeConfigFromDisk({ approvalMode: "accept_edits" }).approvalMode,
@@ -109,6 +133,15 @@ describe("configNeedsPersist", () => {
         { ...DEFAULT_CONFIG, ui: { theme: "default" } },
         {},
       ),
+    ).toBe(true);
+  });
+
+  it("returns true when sandbox is missing or incomplete (upgrade path for pre-sandbox config files)", () => {
+    const withoutSandbox = { ...DEFAULT_CONFIG } as Record<string, unknown>;
+    delete withoutSandbox.sandbox;
+    expect(configNeedsPersist(withoutSandbox, {})).toBe(true);
+    expect(
+      configNeedsPersist({ ...DEFAULT_CONFIG, sandbox: { mode: "auto" } }, {}),
     ).toBe(true);
   });
 

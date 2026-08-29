@@ -8,6 +8,7 @@
 
 import { spawn } from "node:child_process";
 
+import { scrubEnv } from "./envScrub.js";
 import type { ShellResult } from "./types.js";
 import type { RunShellOptions } from "./sandbox/types.js";
 
@@ -80,7 +81,7 @@ const formatAbortMessage = (signal: AbortSignal): string => {
  * @param cwd - Absolute working directory for the child.
  * @param timeoutMs - Kill deadline; default `120_000`.
  * @param signal - Optional session abort (e.g. RSocket disconnect).
- * @param options - Optional sandbox wrap (auto-mode cautious commands).
+ * @param options - Optional sandbox provider + policy to wrap the command with.
  * @returns {@link ShellResult} when the process closes or is cancelled.
  * @throws {@link Error} When the child emits `error` before a successful settle.
  *
@@ -116,16 +117,23 @@ export const runShell = (
     //         - stdout: "pipe" (capture output from command)
     //         - stderr: "pipe" (capture errors separately from stdout)
     // Step 2e: Set working directory (cwd) so command runs in correct location
-    const sandboxArgv = options?.sandbox?.wrapCommand(command, { cwd }).argv;
+    const sandboxArgv =
+      options?.sandbox && options.policy
+        ? options.sandbox.wrapCommand(command, { cwd, policy: options.policy }).argv
+        : undefined;
     const spawnSpec = sandboxArgv
       ? { bin: sandboxArgv[0] ?? "/bin/sh", args: sandboxArgv.slice(1) }
       : isWindowsPlatform
         ? { bin: "cmd.exe", args: ["/d", "/s", "/c", command] }
         : { bin: "/bin/sh", args: ["-c", command] };
 
+    // Scrubbed regardless of sandbox presence — most users start with no OS
+    // sandbox backend installed, so this is the one credential-leak
+    // mitigation that reaches all of them. See envScrub.ts.
     const spawnedProcess = spawn(spawnSpec.bin, spawnSpec.args, {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
+      env: scrubEnv(),
     });
 
     // ===== STEP 3: Initialize output buffers =====

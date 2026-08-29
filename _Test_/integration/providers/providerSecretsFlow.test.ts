@@ -150,7 +150,7 @@ describe("provider secrets — routes never leak key material", () => {
   it("the encrypted key survives a simulated process restart through the route layer", async () => {
     const { config, root } = await makeConfigManager();
     await config.unlockOrSetupProvidersCipher(async () => "restart-flow-pass");
-    await config.addProvider("vllm", {
+    await config.addProvider("lmstudio", {
       baseUrl: "http://10.0.0.9:8000",
       apiKey: "sk-restart-key",
     });
@@ -163,11 +163,11 @@ describe("provider secrets — routes never leak key material", () => {
     const result = await router2.routeCommand(SESSION, "providers.list", {});
 
     expect(result).toMatchObject({
-      providers: { vllm: { baseUrl: "http://10.0.0.9:8000", hasApiKey: true } },
+      providers: { lmstudio: { baseUrl: "http://10.0.0.9:8000", hasApiKey: true } },
     });
     // And the plaintext key is genuinely still there for actual use, just not
     // in the client-facing route response above.
-    expect(await config2.getProvider("vllm")).toEqual({
+    expect(await config2.getProvider("lmstudio")).toEqual({
       baseUrl: "http://10.0.0.9:8000",
       apiKey: "sk-restart-key",
     });

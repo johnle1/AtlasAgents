@@ -1,8 +1,9 @@
 /**
  * Unit tests — server providers/singleModelAdmin.ts
  *
- * vLLM/Trainium/TPU have no pull/delete/swap semantics — the model is fixed
- * at launch. These tests confirm listing works against GET /models and that
+ * Single-model OpenAI-compatible backends (LM Studio, llama.cpp's server, ...)
+ * have no pull/delete/swap semantics — the model is fixed at launch. These
+ * tests confirm listing works against GET /models and that
  * pull/delete surface a clear AdminUnsupportedError instead of failing silently.
  */
 

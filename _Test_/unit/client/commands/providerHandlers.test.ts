@@ -1,10 +1,11 @@
 /**
  * Unit tests — client commands/providerHandlers.ts
  *
- * Confirms `/providers list|add|remove` parse arguments correctly and send
+ * Confirms `/providers list|remove` parse arguments correctly and send
  * the right route + payload to the server, using a faked Connection (only
  * `sendCommand` is exercised, matching the pattern used elsewhere for
- * Connection-dependent command handlers).
+ * Connection-dependent command handlers). There is no `/providers add` —
+ * providers are added by editing the server's config directly.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -19,8 +20,8 @@ const fakeConnection = (
 describe("handleProviders — list", () => {
   it("sends providers.list with an empty payload", async () => {
     const sendCommand = vi.fn(async () => ({
-      providers: { "vllm-gpu": { baseUrl: "http://localhost:8000/v1" } },
-      agentProvider: "vllm-gpu",
+      providers: { "lmstudio": { baseUrl: "http://localhost:1234/v1" } },
+      agentProvider: "lmstudio",
       subagentProvider: "ollama",
     }));
 
@@ -40,64 +41,14 @@ describe("handleProviders — list", () => {
   });
 });
 
-describe("handleProviders — add", () => {
-  it("parses name, --url, and --key and sends providers.add", async () => {
-    const sendCommand = vi.fn(async () => ({ ok: true }));
-
-    await handleProviders(
-      "add",
-      "vllm-gpu --url http://localhost:8000/v1 --key secret",
-      fakeConnection(sendCommand),
-    );
-
-    expect(sendCommand).toHaveBeenCalledWith("providers.add", {
-      name: "vllm-gpu",
-      baseUrl: "http://localhost:8000/v1",
-      apiKey: "secret",
-    });
-  });
-
-  it("omits apiKey when --key is not given", async () => {
-    const sendCommand = vi.fn(async () => ({ ok: true }));
-
-    await handleProviders(
-      "add",
-      "vllm-gpu --url http://localhost:8000/v1",
-      fakeConnection(sendCommand),
-    );
-
-    expect(sendCommand).toHaveBeenCalledWith("providers.add", {
-      name: "vllm-gpu",
-      baseUrl: "http://localhost:8000/v1",
-      apiKey: undefined,
-    });
-  });
-
-  it("does not call the server when --url is missing", async () => {
-    const sendCommand = vi.fn(async () => ({ ok: true }));
-
-    await handleProviders("add", "vllm-gpu", fakeConnection(sendCommand));
-
-    expect(sendCommand).not.toHaveBeenCalled();
-  });
-
-  it("does not call the server when no name is given", async () => {
-    const sendCommand = vi.fn(async () => ({ ok: true }));
-
-    await handleProviders("add", "", fakeConnection(sendCommand));
-
-    expect(sendCommand).not.toHaveBeenCalled();
-  });
-});
-
 describe("handleProviders — remove", () => {
   it("sends providers.remove with the trimmed name", async () => {
     const sendCommand = vi.fn(async () => ({ ok: true }));
 
-    await handleProviders("remove", "  vllm-gpu  ", fakeConnection(sendCommand));
+    await handleProviders("remove", "  lmstudio  ", fakeConnection(sendCommand));
 
     expect(sendCommand).toHaveBeenCalledWith("providers.remove", {
-      name: "vllm-gpu",
+      name: "lmstudio",
     });
   });
 
@@ -115,6 +66,18 @@ describe("handleProviders — unknown subcommand", () => {
     const sendCommand = vi.fn(async () => ({ ok: true }));
 
     await handleProviders("bogus", "", fakeConnection(sendCommand));
+
+    expect(sendCommand).not.toHaveBeenCalled();
+  });
+
+  it("'add' is no longer a recognized subcommand (regression — /providers add was removed)", async () => {
+    const sendCommand = vi.fn(async () => ({ ok: true }));
+
+    await handleProviders(
+      "add",
+      "lmstudio --url http://localhost:1234/v1",
+      fakeConnection(sendCommand),
+    );
 
     expect(sendCommand).not.toHaveBeenCalled();
   });

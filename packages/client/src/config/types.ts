@@ -12,6 +12,8 @@ import * as path from "node:path";
 import * as os from "node:os";
 import type { SecretsEnvelope } from "@atlasagents/shared";
 import type { ApprovalMode, PersistedApprovalMode } from "./approvalMode.js";
+import type { SandboxMode } from "../fileProxy/sandbox/index.js";
+import { DEFAULT_SANDBOX_IMAGE } from "../fileProxy/sandbox/index.js";
 
 /**
  * Footer / status presentation for a mode (icon + label + Ink color).
@@ -36,8 +38,71 @@ export const APPROVAL_MODE_DISPLAY: Record<ApprovalMode, ApprovalModeDisplay> =
     auto: { label: "⏵⏵ Auto", color: "#FF5555", bold: true },
   };
 
+/**
+ * `/sandbox` configuration persisted to disk.
+ *
+ * @remarks
+ * Not sensitive — safe to store in plaintext alongside every other
+ * non-secret `Config` field.
+ */
+export interface SandboxConfig {
+  /**
+   * `"auto"` (default) picks the strongest backend available per-platform;
+   * `"container"` forces the container backend even where an OS-native one
+   * exists; `"off"` disables sandboxing entirely. See
+   * `fileProxy/sandbox/index.ts` for what each mode resolves to.
+   */
+  mode: SandboxMode;
+
+  /**
+   * Image tag the container backend runs commands in. Defaults to the
+   * image built from `sandbox/Dockerfile`; override if your project
+   * needs a different toolchain baked in.
+   */
+  containerImage: string;
+}
+
+/**
+ * One configured MCP (Model Context Protocol) server — connection shape
+ * only, never credentials (those live in `mcpSecrets`, encrypted).
+ *
+ * @remarks
+ * `readOnly` is a manual, server-wide override: when set, every tool from
+ * this server skips the approval prompt and stays available in plan mode,
+ * regardless of what each tool's own MCP `annotations.readOnlyHint` says.
+ * Leave unset to trust each tool's own hint (falling back to "not
+ * read-only" — the safer default — when a tool declares none).
+ *
+ * `enabled` (default `true` when absent) lets `/mcp disable <name>` turn a
+ * server off without discarding its config/credentials — cheaper and more
+ * reversible than `/mcp remove` + re-adding. A disabled server is skipped by
+ * the automatic sync (`syncAllMcpTools`) and torn down if currently
+ * connected; `/mcp test`/`/mcp tools <name>`, naming it explicitly, still
+ * work so you can check it before re-enabling.
+ */
+export type McpServerConfig =
+  | {
+      transport: "stdio";
+      /** Executable to spawn (e.g. `"npx"`, `"tokensave"`). */
+      command: string;
+      /** Arguments passed to `command`. */
+      args?: string[];
+      readOnly?: boolean;
+      enabled?: boolean;
+    }
+  | {
+      transport: "http";
+      /** MCP streamable-HTTP endpoint URL. */
+      url: string;
+      readOnly?: boolean;
+      enabled?: boolean;
+    };
+
 /** The `Config` fields sensitive enough to encrypt at rest. */
-export type SecretConfigFields = Pick<Config, "password" | "server">;
+export type SecretConfigFields = Pick<
+  Config,
+  "password" | "server" | "mcpSecrets"
+>;
 
 /**
  * On-disk shape of config.json.
@@ -45,10 +110,13 @@ export type SecretConfigFields = Pick<Config, "password" | "server">;
  * @remarks
  * `password`/`server` appear at the top level only in a legacy,
  * not-yet-migrated (plaintext) file; once migrated they live exclusively
- * inside `$secrets`. Every other `Config` field stays a plain top-level key
- * either way — only these two are ever encrypted.
+ * inside `$secrets`. `mcpSecrets` has no such legacy plaintext era — it's
+ * always encrypted from the first write. Every other `Config` field stays a
+ * plain top-level key either way.
  */
-export type StoredConfig = Partial<Omit<Config, "password" | "server">> & {
+export type StoredConfig = Partial<
+  Omit<Config, "password" | "server" | "mcpSecrets">
+> & {
   password?: string;
   server?: string;
   $secrets?: SecretsEnvelope;
@@ -70,7 +138,7 @@ export type StoredConfig = Partial<Omit<Config, "password" | "server">> & {
  */
 export const omitSecretFields = (
   stored: StoredConfig,
-): Partial<Omit<Config, "password" | "server">> => {
+): Partial<Omit<Config, "password" | "server" | "mcpSecrets">> => {
   const rest = { ...stored };
   delete rest.$secrets;
   delete rest.password;
@@ -232,7 +300,7 @@ export interface Config {
    * @remarks
    * `"ollama"` (the default) talks to the local Ollama instance. Any other
    * value must match a provider added on the server via `/providers add` —
-   * e.g. a vLLM server on a GPU box, AWS Trainium, or Google TPU.
+   * e.g. LM Studio, llama.cpp's server, or a hosted OpenAI-compatible API.
    */
   agentProvider: string;
 
@@ -349,6 +417,28 @@ export interface Config {
   approvalMode: PersistedApprovalMode;
 
   /**
+   * `/sandbox` mode and container image — see {@link SandboxConfig}.
+   */
+  sandbox: SandboxConfig;
+
+  /**
+   * Configured MCP servers, keyed by a user-chosen server id (e.g.
+   * `"github"`, `"tokensave"`, `"my-tool"`). Connection shape only — never
+   * credentials; see {@link mcpSecrets}. Managed via `/mcp add|remove|list`.
+   */
+  mcpServers: Record<string, McpServerConfig>;
+
+  /**
+   * Per-server credential bundles, keyed by the same server id as
+   * {@link mcpServers}. Each value is a flat env-var-shaped map: for a
+   * `stdio` server these are merged into the spawned process's
+   * environment; for an `http` server, a `token` key is sent as
+   * `Authorization: Bearer <token>`. Encrypted at rest alongside
+   * `password`/`server` — see the Security section of the README.
+   */
+  mcpSecrets: Record<string, Record<string, string>>;
+
+  /**
    * Pinned SHA-256 fingerprints of server TLS certificates, keyed by `"host:port"`.
    *
    * @remarks
@@ -424,6 +514,16 @@ export const DEFAULT_CONFIG: Config = {
 
   // Permission mode — Shift+Tab cycles default / accept_edits / plan
   approvalMode: "default",
+
+  // Strongest available backend per-platform; see fileProxy/sandbox/index.ts
+  sandbox: {
+    mode: "auto",
+    containerImage: DEFAULT_SANDBOX_IMAGE,
+  },
+
+  // Empty until added via /mcp add (or the bundled TokenSave/GitHub/Jira/Slack presets)
+  mcpServers: {},
+  mcpSecrets: {},
 
   // No servers trusted yet — populated on first connect to each host:port (TOFU)
   serverFingerprints: {},

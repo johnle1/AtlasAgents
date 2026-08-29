@@ -145,7 +145,7 @@ describe("preparePlanningContext", () => {
       {
         taskText: "task",
         agentModel: "gpt-oss-120b",
-        modelOverrides: { agentProvider: "vllm-gpu" },
+        modelOverrides: { agentProvider: "lmstudio" },
         perConn: { workspace: {} } as never,
         emit: vi.fn(),
         signal: new AbortController().signal,
@@ -155,7 +155,7 @@ describe("preparePlanningContext", () => {
     expect(contextBuilder.build).toHaveBeenCalledWith(
       "task",
       "gpt-oss-120b",
-      "vllm-gpu",
+      "lmstudio",
     );
     expect(config.getAgentProvider).not.toHaveBeenCalled();
   });

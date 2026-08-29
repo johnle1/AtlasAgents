@@ -31,7 +31,7 @@ import { wireSessionAbortSignal } from "./wireSessionAbortSignal.js";
 import { setInkActive } from "../uiBridge.js";
 import {
   printTokenSaveInitTip,
-  syncTokenSaveTools,
+  syncAllMcpTools,
 } from "../../commands/tokenSaveHandlers.js";
 
 /**
@@ -214,20 +214,20 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
       const skillManager = new SkillManager(rsocketConnection);
 
       try {
-        const syncedToolCount = await syncTokenSaveTools(
+        const syncedToolCount = await syncAllMcpTools(
           rsocketConnection,
           workspaceRootDirectory,
         );
         if (syncedToolCount > 0) {
           sessionInitializationMessages.push(
-            `Synced ${syncedToolCount} TokenSave tool(s) to server.`,
+            `Synced ${syncedToolCount} MCP tool(s) to server.`,
           );
         } else {
           await printTokenSaveInitTip(workspaceRootDirectory);
         }
       } catch (tokenSaveSyncError) {
         sessionInitializationMessages.push(
-          `TokenSave sync failed: ${
+          `MCP tool sync failed: ${
             tokenSaveSyncError instanceof Error
               ? tokenSaveSyncError.message
               : String(tokenSaveSyncError)

@@ -1,5 +1,5 @@
 /**
- * Error types for OpenAI-compatible model providers (vLLM, Trainium, TPU, ...).
+ * Error types for OpenAI-compatible model providers (LM Studio, llama.cpp's server, ...).
  *
  * @remarks
  * Mirrors the shape of {@link OllamaError} so callers can handle provider
@@ -27,7 +27,7 @@ export class ModelProviderError extends Error {
 
 /**
  * Thrown when an admin operation (pull, delete) is not supported by a
- * single-model backend such as vLLM, where the model is fixed at launch.
+ * single-model backend such as LM Studio, where the model is fixed at launch.
  */
 export class AdminUnsupportedError extends Error {
   constructor(message: string) {

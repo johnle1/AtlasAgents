@@ -93,8 +93,8 @@ function parseObjectField<T>(payload: unknown, field: string): T {
  *
  * @remarks
  * `providers.list` and `config.get` both expose this map to any authenticated
- * client. `apiKey` is a credential for a third-party model provider (e.g. a
- * vLLM/OpenAI-compatible endpoint) — no client consumer reads it, only
+ * client. `apiKey` is a credential for a third-party model provider (e.g. an
+ * OpenAI-compatible endpoint) — no client consumer reads it, only
  * `baseUrl` and the provider name, so it must never be sent. `hasApiKey` is
  * kept (rather than omitting the field entirely) so a future UI can still
  * show "key configured" without ever shipping the secret itself.
@@ -542,8 +542,11 @@ function createMcpToolsSyncHandler(
     }
 
     const rawTools = Array.isArray(body.tools) ? body.tools : [];
-    perConnection.tokenSaveTools = rawTools.map(mcpToolToAtlasSchema);
-    return { synced: perConnection.tokenSaveTools.length };
+    perConnection.mcpTools = rawTools.map((tool) => ({
+      schema: mcpToolToAtlasSchema(tool),
+      readOnly: tool.readOnly ?? false,
+    }));
+    return { synced: perConnection.mcpTools.length };
   };
 }
 

@@ -2,7 +2,7 @@
  * Unit tests — server providers/providerRegistry.ts
  *
  * Covers the seam that lets Agent/Subagent keep depending on IOllamaClient
- * unchanged while the actual backend (Ollama, vLLM, ...) is resolved per
+ * unchanged while the actual backend (Ollama, LM Studio, ...) is resolved per
  * role, per call, from config — including the per-task override path used
  * when a client-sent task overrides the configured provider.
  */
@@ -62,12 +62,12 @@ describe("ProviderRegistry.getClient / getAdmin", () => {
     const ollamaClient = fakeOllamaClient();
     const registry = new ProviderRegistry({
       config: makeConfig({
-        providers: { "vllm-gpu": { baseUrl: "http://localhost:8000/v1" } },
+        providers: { "lmstudio": { baseUrl: "http://localhost:1234/v1" } },
       }),
       ollamaClient,
     });
 
-    const client = await registry.getClient("vllm-gpu");
+    const client = await registry.getClient("lmstudio");
     expect(client).toBeInstanceOf(OpenAiCompatibleAdapter);
   });
 
@@ -105,8 +105,8 @@ describe("ProviderRegistry.getRoleClient", () => {
     const registry = new ProviderRegistry({
       config: makeConfig({
         agentProvider: "ollama",
-        subagentProvider: "vllm-gpu",
-        providers: { "vllm-gpu": { baseUrl: "http://localhost:8000/v1" } },
+        subagentProvider: "lmstudio",
+        providers: { "lmstudio": { baseUrl: "http://localhost:1234/v1" } },
       }),
       ollamaClient,
     });
@@ -127,7 +127,7 @@ describe("ProviderRegistry.getRoleClient", () => {
     const registry = new ProviderRegistry({
       config: makeConfig({
         agentProvider: "ollama",
-        providers: { "vllm-gpu": { baseUrl: "http://localhost:8000/v1" } },
+        providers: { "lmstudio": { baseUrl: "http://localhost:1234/v1" } },
       }),
       ollamaClient,
     });

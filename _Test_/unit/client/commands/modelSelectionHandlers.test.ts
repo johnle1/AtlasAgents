@@ -96,7 +96,7 @@ const fakePrompts = (choice: number): PromptPort =>
 const GROUPED_MODELS_RESPONSE = {
   groups: [
     { provider: "ollama", models: ["gemma3:27b"] },
-    { provider: "vllm-gpu", models: ["Qwen2.5-7B-Instruct"] },
+    { provider: "lmstudio", models: ["Qwen2.5-7B-Instruct"] },
   ],
 };
 
@@ -113,18 +113,18 @@ describe("handleSetModel — selection", () => {
       updateConfig: connectionUpdateConfig,
     } as unknown as Connection;
 
-    // Entry #2 is the vllm-gpu model (continuous numbering after ollama's one model).
+    // Entry #2 is the lmstudio model (continuous numbering after ollama's one model).
     await handleSetModel("agent", connection, fakePrompts(2));
 
     expect(sendCommand).toHaveBeenNthCalledWith(1, "providers.listModels", {});
     expect(sendCommand).toHaveBeenNthCalledWith(2, "config.setModel", {
       role: "agent",
-      provider: "vllm-gpu",
+      provider: "lmstudio",
       model: "Qwen2.5-7B-Instruct",
     });
     expect(updateConfigMock).toHaveBeenCalledWith({
       subagentModel: "Qwen2.5-7B-Instruct",
-      agentProvider: "vllm-gpu",
+      agentProvider: "lmstudio",
     });
     expect(connectionUpdateConfig).toHaveBeenCalledWith(currentConfig);
   });
@@ -181,7 +181,7 @@ describe("handleSetModel — current selection markers", () => {
       subagentModel: "  gemma3:27b  ",
       subsubagentModel: " Qwen2.5-7B-Instruct ",
       agentProvider: "ollama",
-      subagentProvider: "vllm-gpu",
+      subagentProvider: "lmstudio",
     };
     const sendCommand = vi.fn().mockResolvedValueOnce(GROUPED_MODELS_RESPONSE);
     const connection = {
@@ -196,7 +196,7 @@ describe("handleSetModel — current selection markers", () => {
       "agent",
       {
         agent: { provider: "ollama", model: "gemma3:27b" },
-        subagent: { provider: "vllm-gpu", model: "Qwen2.5-7B-Instruct" },
+        subagent: { provider: "lmstudio", model: "Qwen2.5-7B-Instruct" },
       },
     );
   });

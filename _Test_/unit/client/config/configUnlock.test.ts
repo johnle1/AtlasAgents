@@ -95,6 +95,30 @@ describe("config.ts — encryption at rest", () => {
     expect(raw).not.toContain("extremely-unique-marker-value");
   });
 
+  it("round-trips mcpSecrets through save and reload, encrypted alongside password/server", async () => {
+    await unlockOrSetupConfigCipher(async () => "mcp-secrets-pass");
+    setConfig("mcpSecrets", { github: { token: "ghp_extremely_unique_marker" } });
+
+    const reloaded = loadConfig();
+    expect(reloaded.mcpSecrets).toEqual({
+      github: { token: "ghp_extremely_unique_marker" },
+    });
+
+    const raw = fs.readFileSync(configFile, "utf-8");
+    expect(raw).not.toContain("ghp_extremely_unique_marker");
+    expect(raw).not.toContain('"mcpSecrets"');
+  });
+
+  it("keeps mcpServers (non-secret) in plaintext, unlike mcpSecrets", async () => {
+    await unlockOrSetupConfigCipher(async () => "mcp-servers-pass");
+    setConfig("mcpServers", {
+      github: { transport: "http", url: "https://example.invalid/mcp/" },
+    });
+
+    const raw = fs.readFileSync(configFile, "utf-8");
+    expect(raw).toContain("https://example.invalid/mcp/");
+  });
+
   it("restart: unlocks an existing encrypted file with the correct passphrase on the first try", async () => {
     await unlockOrSetupConfigCipher(async () => "restart-pass");
     setConfig("password", "s3cret");

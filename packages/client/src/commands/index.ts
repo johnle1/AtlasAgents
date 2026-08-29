@@ -12,9 +12,10 @@
  * - Models: `/models`, `/providers`
  * - Skills / memory: `/skills`, `/memory`
  * - Workspace: `/workspace`, `/cwd`
+ * - Sandbox: `/sandbox`
  * - Display: `/spinner`, `/think`, `/theme`, `/clear`, `/notify`
  * - Session: `/explore`, `/new`, `/exit`, `/help`
- * - TokenSave: `/tokensave`
+ * - MCP: `/mcp` (generic servers), `/tokensave` (built-in preset with its own init step)
  *
  * @example
  * ```ts
@@ -46,9 +47,11 @@ import { handleProviders } from "./providerHandlers.js";
 import { handleSkills } from "./skillHandlers.js";
 import { handleMemory } from "./memoryHandlers.js";
 import { handleWorkspace, handleCwd } from "./workspaceHandlers.js";
+import { handleSandbox } from "./sandboxHandlers.js";
 import { handleSpinner, handleThink, handleNotify } from "./displayHandlers.js";
 import { handleExplore, handleNew, handleExit } from "./sessionHandlers.js";
 import { handleTokenSave } from "./tokenSaveHandlers.js";
+import { handleMcp } from "./mcpHandlers.js";
 import { printError, printHelp } from "../renderer.js";
 import { clearScreen } from "../ui/uiBridge.js";
 
@@ -177,6 +180,15 @@ export class CommandHandler {
       case "tokensave":
         await handleTokenSave(subcommand, argument, this.conn, this.fileProxy);
         break;
+      case "mcp":
+        await handleMcp(
+          subcommand,
+          argument,
+          this.conn,
+          this.fileProxy,
+          this.prompts,
+        );
+        break;
       case "workspace":
         await handleWorkspace(
           subcommand,
@@ -187,6 +199,9 @@ export class CommandHandler {
         break;
       case "cwd":
         handleCwd(this.fileProxy);
+        break;
+      case "sandbox":
+        handleSandbox(subcommand);
         break;
       case "think":
         handleThink(subcommand, argument);

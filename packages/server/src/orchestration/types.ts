@@ -43,7 +43,7 @@ export type TaskModelOverrides = {
   agentModel?: string;
   /** Override subagent model */
   subagentModel?: string;
-  /** Override the provider serving the agent role (e.g. "ollama", "vllm-gpu") */
+  /** Override the provider serving the agent role (e.g. "ollama", "lmstudio") */
   agentProvider?: string;
   /** Override the provider serving the subagent role */
   subagentProvider?: string;

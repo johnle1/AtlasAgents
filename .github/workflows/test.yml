@@ -33,6 +33,34 @@ jobs:
         working-directory: _Test_
         run: npm run test:integration
 
+  mcp-server-example:
+    # Standalone — examples/mcp-server is deliberately outside the npm
+    # workspace (packages/*) and the root build chain, since it's a template
+    # for developers to copy, not a package Atlas ships. This job is what
+    # keeps it from silently rotting: without it, nothing would ever build
+    # or test this directory in CI.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: examples/mcp-server/package-lock.json
+      - name: Install example dependencies
+        working-directory: examples/mcp-server
+        run: npm install
+      - name: Build
+        working-directory: examples/mcp-server
+        run: npm run build
+      - name: Test
+        working-directory: examples/mcp-server
+        run: npm test
+
   system:
     needs: build-and-unit
     strategy:

@@ -153,7 +153,7 @@ const nativeConfig = {
 
 /** Minimal PerConnection stub — the direct-answer path never touches workspace/terminal/planBroker. */
 const fakePerConn = {
-  tokenSaveTools: undefined,
+  mcpTools: undefined,
   workspace: {},
   terminal: {},
   planBroker: {},

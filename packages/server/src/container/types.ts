@@ -22,7 +22,7 @@ import type { IModelPlacementReporter } from "../ollama/modelPlacement.js";
 import type { AgentOrchestrator } from "../orchestration/orchestrator/orchestrator.js";
 
 // ===== WORKSPACE TYPE IMPORTS =====
-import type { ToolSchema } from "../orchestration/tools/types.js";
+import type { McpToolEntry } from "../orchestration/mcp/mcpToolSchema.js";
 import type { PlanReviewBroker } from "../workspace/review/planReviewBroker.js";
 import type { TerminalExecutor } from "../workspace/execution/terminalExecutor.js";
 import type { WorkspaceManager } from "../workspace/manager/workspaceManager.js";
@@ -147,13 +147,13 @@ export type PerConnection = {
   terminal: TerminalExecutor;
 
   /**
-   * MCP TokenSave tools synchronized from the client for this session.
-   *
-   * Contains tool schemas that the client has made available via their
-   * TokenSave MCP server. Populated during connection handshake if the
-   * client supports TokenSave tools.
+   * MCP tools synchronized from the client for this session, across every
+   * MCP server the client has configured (TokenSave and any added via
+   * `/mcp add`). Each entry carries the model-facing schema plus whether
+   * the tool is read-only, used to withhold mutating tools in plan mode
+   * (see `agentTurn.ts`).
    */
-  tokenSaveTools?: ToolSchema[];
+  mcpTools?: McpToolEntry[];
 
   /**
    * The agent's live checklist for this connection, as last reported via
@@ -243,7 +243,7 @@ export type InitializedServices = {
   /**
    * Resolves each role (agent/subagent) to whichever provider it's currently
    * configured to use — native Ollama, or any OpenAI-compatible backend
-   * (vLLM, Trainium, TPU) added via /providers.
+   * added via /providers.
    */
   providerRegistry: ProviderRegistry;
 

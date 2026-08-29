@@ -54,7 +54,7 @@ describe("configCipher (server) — round trip", () => {
 
   it("unlockCipher against an existing envelope decrypts correctly with the right passphrase", () => {
     initializeCipher("serverpass");
-    const providers = { vllm: { baseUrl: "http://10.0.0.9:8000" } };
+    const providers = { lmstudio: { baseUrl: "http://10.0.0.9:8000" } };
     const envelope = encryptSecrets(providers);
     lockCipher();
     unlockCipher("serverpass", envelope);
@@ -95,7 +95,7 @@ describe("configCipher (server) — rotateKey", () => {
 
   it("the old passphrase no longer unlocks anything encrypted after rotation", () => {
     initializeCipher("old-pass");
-    const providers = { vllm: { baseUrl: "http://10.0.0.9:8000" } };
+    const providers = { lmstudio: { baseUrl: "http://10.0.0.9:8000" } };
     const envelope = encryptSecrets(providers);
     lockCipher();
 
@@ -120,7 +120,7 @@ describe("configCipher (server) — rotateKey", () => {
     const sessionSecret = { openai: { baseUrl: "https://api.openai.com" } };
     const sessionEnvelope = encryptSecrets(sessionSecret);
 
-    const otherEnvelope = encryptSecrets({ vllm: { baseUrl: "http://10.0.0.9:8000" } });
+    const otherEnvelope = encryptSecrets({ lmstudio: { baseUrl: "http://10.0.0.9:8000" } });
     expect(() =>
       rotateKey("wrong-pass", "new-pass", otherEnvelope),
     ).toThrow(ConfigDecryptionError);
