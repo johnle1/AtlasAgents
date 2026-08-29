@@ -39,12 +39,17 @@ const runSkip: ApprovalRequest = { type: "runSkip", command: "rm -rf build" };
 const keepUndo: ApprovalRequest = { type: "keepUndo", contextLabel: "a.ts" };
 
 describe("buildOptions", () => {
-  it("returns Implement / Skip / Revise for planReview (normal)", () => {
+  it("returns the Claude-Code-style auto-accept / manual-approve / keep-planning rows for planReview (normal)", () => {
     const options = buildOptions(planReview);
     expect(options.map((option) => option.value)).toEqual([
-      "implement",
-      "skip",
+      "autoAcceptEdits",
+      "manualApprove",
       "edit",
+    ]);
+    expect(options.map((option) => option.label)).toEqual([
+      "Yes, and auto-accept edits",
+      "Yes, and manually approve edits",
+      "No, keep planning",
     ]);
   });
 
@@ -68,14 +73,15 @@ describe("buildOptions", () => {
     ]);
   });
 
-  it("does not include Always allow for planReview (boundary)", () => {
+  it("does not include Always allow or a standalone Skip row for planReview (boundary)", () => {
     const options = buildOptions(planReview);
     expect(options.map((option) => option.value)).toEqual([
-      "implement",
-      "skip",
+      "autoAcceptEdits",
+      "manualApprove",
       "edit",
     ]);
     expect(options.some((option) => option.value === "always")).toBe(false);
+    expect(options.some((option) => option.value === "skip")).toBe(false);
   });
 });
 

@@ -118,7 +118,8 @@ export class CommandHandler {
    * @remarks
    * Parsing: strip leading `/`, split on whitespace into
    * `command` / `subcommand` / `argument` (argument may contain spaces).
-   * `/set agent|subagent` delegates model picking via {@link handleSetModel}.
+   * `/model` picks the agent's model; `/set subagent` picks the subagent's —
+   * both delegate to {@link handleSetModel}.
    * `/help` prints the full catalog; `/clear` empties the Ink scrollback.
    *
    * @param input - Raw readline / prompt line from the user.
@@ -198,6 +199,9 @@ export class CommandHandler {
         break;
       case "theme":
         await this.prompts.pickTheme();
+        break;
+      case "model":
+        await handleSetModel("agent", this.conn, this.prompts);
         break;
       case "help":
         printHelp();

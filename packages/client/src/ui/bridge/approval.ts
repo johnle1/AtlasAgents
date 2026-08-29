@@ -30,14 +30,11 @@ export const getPendingApproval = (): ApprovalRequest | null =>
  * Requests user approval for a task, returning a promise that resolves with the decision.
  *
  * @remarks
- * Short-circuit order: session allowlist → `bypass` (all types) →
- * `accept_edits` / `auto` keepUndo → `auto` planReview → UI.
- * `accept_edits` covers file edits only; shell commands, plan reviews,
- * and other risky actions still prompt. `auto` is the hands-off mode:
- * file edits and plan reviews auto-approve here, and the command layer
- * runs safe commands free and cautious ones sandboxed. The bridge must
- * not short-circuit `runSkip` — the command layer only routes here when
- * it already decided a prompt is warranted (e.g. dangerous commands).
+ * Short-circuit order: session allowlist → `auto` (all types) →
+ * `accept_edits` keepUndo → UI. `accept_edits` covers file edits only;
+ * shell commands and plan reviews still prompt. `auto` is full bypass —
+ * every request type auto-approves unconditionally, including shell
+ * commands the command layer would otherwise gate (dangerous included).
  * `planReview` resolves `"implement"` (a {@link PlanDecision}), never
  * `true` — the server validates the decision token.
  * If the Ink interface is inactive, this function resolves immediately with a default fallback
@@ -56,21 +53,14 @@ export const requestApproval = (
 
   const mode = getApprovalMode();
 
-  if (mode === "bypass") {
+  if (mode === "auto") {
     return Promise.resolve(
       approvalRequest.type === "planReview" ? "implement" : true,
     );
   }
 
-  if (
-    (mode === "accept_edits" || mode === "auto") &&
-    approvalRequest.type === "keepUndo"
-  ) {
+  if (mode === "accept_edits" && approvalRequest.type === "keepUndo") {
     return Promise.resolve(true);
-  }
-
-  if (mode === "auto" && approvalRequest.type === "planReview") {
-    return Promise.resolve("implement");
   }
 
   const isUIActive = getInkUIActive();

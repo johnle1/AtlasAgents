@@ -7,23 +7,17 @@
  * 1. Task initialization and experience recording setup
  * 2. Context building and skill selection
  * 3. One unified agent turn — direct answer, tool use, or (for genuinely
- *    multi-step work) a checklist the agent maintains via `update_plan`,
- *    optionally fanning independent steps out to the hidden subagent pool
- *    via `run_steps_parallel`
+ *    multi-step work) a checklist the agent maintains via `update_plan`
  * 4. Experience recording and outcome reporting
  *
  * The pipeline supports cancellation via AbortSignal and emits progress
  * updates throughout execution. There is no separate up-front planning
- * phase — see `agentTurn.ts` for why, and `run_steps_parallel`/
- * `orchestratorPipelineHelpers.ts`'s `runAgentPool` for where the DAG
- * worker-pool machinery still lives (now reached only from that tool).
+ * phase — see `agentTurn.ts` for why. A single agent model handles the
+ * whole turn; no subagent or worker pool is constructed.
  */
 
 import { randomUUID } from "node:crypto";
-import type { TaskFrame } from "../../transport/frames.js";
 import { clampUsage, estimateTokensFromText } from "@atlasagents/shared";
-import { Agent } from "../agent/agent.js";
-import { Subagent } from "../subagent/subagent.js";
 import { runAgentTurn } from "../agent/agentTurn.js";
 import type { OrchestrationOutcome } from "../types.js";
 import {
@@ -111,7 +105,6 @@ export const runOrchestratorPipeline = async (
   // where failure occurred (e.g., "failed at phase: agent.turn").
   let phase = "init";
   let agentModel = "";
-  let subagentModel = "";
   let primaryError: unknown;
 
   try {
@@ -124,31 +117,21 @@ export const runOrchestratorPipeline = async (
     // Model resolution: per-task overrides take precedence over server config.
     // This allows callers to experiment with different model endpoints/versions per-task.
     const serverAgent = await config.getAgentModel();
-    const serverSubagent = await config.getSubagentModel();
     agentModel = modelOverrides?.agentModel?.trim() || serverAgent;
-    subagentModel = modelOverrides?.subagentModel?.trim() || serverSubagent;
 
-    // Resolve num_ctx/keep_alive once per task, up front — Agent/Subagent are
-    // constructed fresh per task with a fixed model tag for their lifetime,
-    // so this doesn't need to happen per model call. Only queries Ollama
-    // (via contextBuilder.resolveNumCtx, cached per tag) when the role is
-    // actually on the "ollama" provider — an OpenAI-compatible role has no
-    // num_ctx concept and skipping the check avoids a pointless local
-    // /api/show round-trip.
+    // Resolve num_ctx/keep_alive once per task, up front — the model tag is
+    // fixed for this task's lifetime, so this doesn't need to happen per
+    // model call. Only queries Ollama (via contextBuilder.resolveNumCtx,
+    // cached per tag) when the role is actually on the "ollama" provider —
+    // an OpenAI-compatible role has no num_ctx concept and skipping the
+    // check avoids a pointless local /api/show round-trip.
     const agentProviderName =
       modelOverrides?.agentProvider ?? (await config.getAgentProvider());
-    const subagentProviderName =
-      modelOverrides?.subagentProvider ?? (await config.getSubagentProvider());
     const agentNumCtx =
       agentProviderName === "ollama"
         ? await contextBuilder.resolveNumCtx(agentModel)
         : undefined;
-    const subagentNumCtx =
-      subagentProviderName === "ollama"
-        ? await contextBuilder.resolveNumCtx(subagentModel)
-        : undefined;
-    const keepAlive = await config.getKeepAlive();
-    const contextWindow = agentNumCtx ?? subagentNumCtx ?? 0;
+    const contextWindow = agentNumCtx ?? 0;
     let usedTokens = estimateTokensFromText(taskText);
     emitUsage(usedTokens, contextWindow);
 
@@ -156,26 +139,6 @@ export const runOrchestratorPipeline = async (
       "agent",
       modelOverrides?.agentProvider,
     );
-    const agent = new Agent({
-      ollama: agentOllama,
-      config,
-      numCtx: agentNumCtx,
-      keepAlive,
-    });
-
-    // Only ever invoked now via the hidden pool behind `run_steps_parallel`
-    // (see `agentTurn.ts`) — never as an up-front planning phase.
-    const subagent = new Subagent({
-      ollama: providerRegistry.getRoleClient(
-        "subagent",
-        modelOverrides?.subagentProvider,
-      ),
-      config,
-      agent: agent,
-      extraTools: perConn?.tokenSaveTools,
-      numCtx: subagentNumCtx,
-      keepAlive,
-    });
 
     await experienceRecorder.start(taskId, taskText);
 
@@ -196,7 +159,7 @@ export const runOrchestratorPipeline = async (
 
     phase = "agent.turn";
     const turnResult = await runAgentTurn(
-      { ollama: agentOllama, config, agent, subagent, experienceRecorder },
+      { ollama: agentOllama, config, experienceRecorder },
       {
         taskId,
         taskText,
@@ -216,17 +179,10 @@ export const runOrchestratorPipeline = async (
     usedTokens += estimateTokensFromText(turnResult.content);
     emitUsage(usedTokens, contextWindow);
 
-    // GPU/CPU placement check — the agent (and possibly the hidden subagent
-    // pool, if `run_steps_parallel` ran) has now had every chance to load a
-    // model, so this is the single point where a spilled model would show
-    // up. Unlike the old two-phase pipeline (one check after planning, one
-    // after the pool), there's no longer a clean "planning done, pool not
-    // started yet" boundary to split this into two — read/write/run_command
-    // and a hidden parallel batch can all happen within the same turn.
-    const placementTargets = [
-      ...(agentProviderName === "ollama" ? [agentModel] : []),
-      ...(subagentProviderName === "ollama" ? [subagentModel] : []),
-    ];
+    // GPU/CPU placement check — the agent has now had every chance to load
+    // a model, so this is the single point where a spilled model would
+    // show up.
+    const placementTargets = agentProviderName === "ollama" ? [agentModel] : [];
     if (modelPlacementReporter && placementTargets.length > 0 && !signal.aborted) {
       const messages = await modelPlacementReporter
         .reportPlacement(placementTargets, session.requesterId)
@@ -247,7 +203,6 @@ export const runOrchestratorPipeline = async (
     const detail = formatOrchestratorFailure(err, {
       phase,
       agentModel,
-      subagentModel,
     });
     const message = err instanceof Error ? err.message : String(err);
     outcome = {

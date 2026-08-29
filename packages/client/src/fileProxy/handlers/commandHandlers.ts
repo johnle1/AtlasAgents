@@ -31,10 +31,7 @@ import {
 import type { DispatchContext, ShellResult } from "../types.js";
 import { logger } from "../../utils/logger.js";
 import { getApprovalMode } from "../../ui/bridge/allowlist.js";
-import {
-  detectSandboxDenial,
-  resolveSandbox,
-} from "../sandbox/index.js";
+import { detectSandboxDenial } from "../sandbox/index.js";
 import type { SandboxProvider } from "../sandbox/types.js";
 
 /** {@link ShellResult} plus the optional revise reason a decline can carry. */
@@ -92,7 +89,7 @@ const runBackgroundCommand = async (
   context: DispatchContext,
   command: string,
 ): Promise<CommandRunResult> => {
-  if (getApprovalMode() !== "bypass") {
+  if (getApprovalMode() !== "auto") {
     const { approved, feedback } = await confirmRunOrSkip(command);
     if (!approved) {
       printDeclineFeedback(feedback);
@@ -221,11 +218,9 @@ const executeForegroundCommand = async (
  *    (escapes like `cd /` are ignored).
  *
  * Mode overrides (consulted via {@link getApprovalMode}):
- * - `bypass` skips every prompt (including background).
- * - `auto` + `cautious` runs under {@link resolveSandbox} when a provider
- *   exists; sandbox denials re-prompt to retry unsandboxed. Without a
- *   provider, cautious commands prompt (capability, not a gate).
- * - `auto` + `dangerous` still prompts. `safe` always runs free.
+ * - `auto` skips every prompt unconditionally — safe, cautious, dangerous,
+ *   and background commands all run free, with no sandboxing.
+ * - `safe` always runs free regardless of mode.
  *
  * Skipped commands return `exitCode: -1` and a stderr note — they do not throw.
  *
@@ -258,26 +253,15 @@ export const handleCommandRun = async (
     return runBackgroundCommand(context, command);
   }
 
-  const skipPrompt = mode === "bypass";
-  let sandbox: SandboxProvider | undefined;
+  const skipPrompt = mode === "auto";
+  // No mode opts a command into sandboxed execution anymore — `auto` skips
+  // the prompt outright instead of sandboxing. `executeForegroundCommand`
+  // still accepts a sandbox provider (unused here, always undefined) since
+  // that's a general capability of the sandbox module, not specific to
+  // approval-mode gating — see fileProxy/sandbox/index.ts.
+  const sandbox: SandboxProvider | undefined = undefined;
 
-  if (
-    !skipPrompt &&
-    mode === "auto" &&
-    commandClassification === "cautious"
-  ) {
-    const provider = resolveSandbox();
-    if (provider) {
-      sandbox = provider;
-    } else {
-      logSandboxUnavailableOnce();
-    }
-  }
-
-  const needsPrompt =
-    !skipPrompt &&
-    commandClassification !== "safe" &&
-    !(mode === "auto" && commandClassification === "cautious" && sandbox);
+  const needsPrompt = !skipPrompt && commandClassification !== "safe";
 
   if (needsPrompt) {
     const declineResult = await confirmForegroundCommand(
@@ -314,20 +298,4 @@ export const handleCommandRun = async (
   }
 
   return result;
-};
-
-let sandboxUnavailableLogged = false;
-
-/**
- * Logs once per process that auto-mode cautious commands will prompt
- * because this machine has no sandbox backend.
- */
-const logSandboxUnavailableOnce = (): void => {
-  if (sandboxUnavailableLogged) {
-    return;
-  }
-  sandboxUnavailableLogged = true;
-  logger.info(
-    "sandbox unavailable on this platform — auto mode prompts instead",
-  );
 };

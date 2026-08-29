@@ -5,12 +5,17 @@
  * Provides utility functions for orchestrator pipeline operations: context
  * preparation ahead of the unified agent turn, and the hidden worker-pool
  * machinery `run_steps_parallel` dispatches through (`runAgentPool` and its
- * supporting helpers). Extracted for better testability and separation of
- * concerns from the main pipeline orchestration.
+ * supporting helpers). `runAgentPool` itself is agent-agnostic — it takes a
+ * `runSubtask` callback rather than a `Subagent` instance, so the pool's
+ * dependency-respecting concurrency is available to any caller without
+ * requiring a separate subagent persona/class (see `agentTurn.ts`, which
+ * supplies a callback that runs each step through the same unified agent
+ * loop as the top-level turn). Extracted for better testability and
+ * separation of concerns from the main pipeline orchestration.
  */
 
-import type { IExperienceRecorder } from "../interfaces.js";
 import type {
+  PlannedSubtask,
   SubagentPlan,
   SubtaskResult,
   ToolResultSummary,
@@ -19,7 +24,6 @@ import { emptyCommandPlan } from "../types.js";
 import type { PerConnection } from "../../container/types.js";
 import type { MaxSubagentsParam } from "../maxSubagents.js";
 import type { TaskModelOverrides } from "../types.js";
-import type { Subagent } from "../subagent/subagent.js";
 import type { TaskFrame } from "../../transport/frames.js";
 import {
   contextHasWorkspaceStructure,
@@ -282,44 +286,31 @@ export const toOrderedResults = (
  *
  * @remarks
  * Extracted from the "agent.pool" phase of {@link runOrchestratorPipeline}.
- * `resultMap` is mutated in place as subtasks complete (each `subagent.run`
- * result is set on it) so the caller's copy — used to build a partial
- * `outcome` on later failure — stays current even though this function
- * doesn't return the map itself.
+ * Agent-agnostic: the caller supplies `runSubtask`, which is however it
+ * wants to actually complete one step — `agentTurn.ts` passes a callback
+ * that runs the same unified agent loop the top-level turn uses, so no
+ * separate subagent persona or model is required for steps to run in
+ * parallel. `resultMap` is mutated in place as subtasks complete so the
+ * caller's copy — used to build a partial `outcome` on later failure —
+ * stays current even though this function doesn't return the map itself.
  *
  * @throws {@link AbortError} When `signal` is aborted mid-run.
  * @throws {@link OrchestrationError} When a subtask fails, or a deadlock is
  *   detected (pending subtasks remain after every worker exits).
  */
-export const runAgentPool = async (
-  subagent: Subagent,
-  params: {
-    taskId: string;
-    plan: SubagentPlan;
-    skillBody: string;
-    maxSubagents: MaxSubagentsParam;
-    experienceRecorder: IExperienceRecorder;
-    perConn: PerConnection;
-    modelOverrides: TaskModelOverrides | undefined;
-    resultMap: Map<number, ToolResultSummary>;
-    emit: (frame: TaskFrame) => void;
-    emitStatus: (frame: Extract<TaskFrame, { kind: "status" }>) => void;
-    signal: AbortSignal;
-  },
-): Promise<SubtaskResult[]> => {
-  const {
-    taskId,
-    plan,
-    skillBody,
-    maxSubagents,
-    experienceRecorder,
-    perConn,
-    modelOverrides,
-    resultMap,
-    emit,
-    emitStatus,
-    signal,
-  } = params;
+export const runAgentPool = async (params: {
+  plan: SubagentPlan;
+  maxSubagents: MaxSubagentsParam;
+  resultMap: Map<number, ToolResultSummary>;
+  runSubtask: (
+    subtask: PlannedSubtask,
+    sessionContext: string,
+  ) => Promise<ToolResultSummary>;
+  emitStatus: (frame: Extract<TaskFrame, { kind: "status" }>) => void;
+  signal: AbortSignal;
+}): Promise<SubtaskResult[]> => {
+  const { plan, maxSubagents, resultMap, runSubtask, emitStatus, signal } =
+    params;
 
   const totalTasks = plan.subtasks.length;
   const workerCount = workerCountFor(maxSubagents, plan);
@@ -388,22 +379,10 @@ export const runAgentPool = async (
         ),
       );
 
-      const subtaskResult = await subagent.run({
-        taskId,
-        subtask: subtask.text,
-        agentId: subtask.agentId,
-        agentLabel: subtask.agentLabel,
-        skillContent: skillBody,
-        sessionContext: buildSessionContext(queue.completed, subtask.dependsOn),
-        commandPlan: plan.commandPlan,
-        workspace: perConn.workspace,
-        terminal: perConn.terminal,
-        recorder: experienceRecorder,
-        emit,
-        signal,
-        modelOverrides,
-        debug: modelOverrides?.debug === true,
-      });
+      const subtaskResult = await runSubtask(
+        subtask,
+        buildSessionContext(queue.completed, subtask.dependsOn),
+      );
 
       const newlyReady = complete(queue, subtask.id, subtaskResult);
       resultMap.set(subtask.id, subtaskResult);

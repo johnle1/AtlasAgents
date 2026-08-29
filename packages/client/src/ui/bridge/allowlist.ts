@@ -135,7 +135,7 @@ export const getApprovalMode = (): ApprovalMode => sessionApprovalMode;
  *
  * @remarks
  * Notifies the Ink UI via `onApprovalModeChange` so the footer stays in
- * lockstep with `/set approval` and Shift+Tab.
+ * lockstep with Shift+Tab — the only way the mode ever changes.
  *
  * @param mode - Next mode.
  */
@@ -145,10 +145,11 @@ export const setSessionApprovalMode = (mode: ApprovalMode): void => {
 };
 
 /**
- * Cycles `default → accept_edits → plan → default`. While busy, `plan` is
- * skipped so a running task cannot be switched into a mode that would
- * strand it at confirm-plan. `auto` and `bypass` are not in the cycle —
- * Shift+Tab from either returns `default`.
+ * Cycles `default → accept_edits → plan → auto → default`. While busy,
+ * landing on `plan` is skipped in favor of `default` so a running task
+ * cannot be switched into a mode that would strand it at confirm-plan —
+ * `auto` has no such restriction, since it's useful for un-sticking a
+ * stuck prompt mid-task.
  *
  * @param current - Mode before the keypress.
  * @param busy - Whether a task is in flight.
@@ -156,7 +157,7 @@ export const setSessionApprovalMode = (mode: ApprovalMode): void => {
  *
  * @example
  * ```ts
- * cycleApprovalMode("accept_edits", true); // "default" — plan skipped
+ * cycleApprovalMode("plan", true); // "auto" — plan's busy-skip doesn't apply here
  * cycleApprovalMode("auto", false); // "default"
  * ```
  */

@@ -1,5 +1,5 @@
 /**
- * Cross-platform sandbox capability used by auto-mode shell commands.
+ * Cross-platform sandbox capability a caller may opt into for shell commands.
  *
  * @remarks
  * Sandboxing is a **capability, not a gate**. {@link resolveSandbox} returns

@@ -32,9 +32,6 @@ const legacyConfig = {
   getAgentModelSupportsTools: async () => false,
 } as unknown as IConfigManager;
 
-/** A Subagent whose `run` must never be called by these scenarios — see assertions below. */
-const untouchedSubagent = { run: vi.fn() } as never;
-
 const makePerConn = (overrides: Partial<PerConnection> = {}): PerConnection =>
   ({
     tokenSaveTools: undefined,
@@ -72,8 +69,6 @@ describe("runAgentTurn — direct answer (the core regression guard)", () => {
       {
         ollama: { chatWithTools } as unknown as IOllamaClient,
         config: nativeConfig,
-        agent: {} as never,
-        subagent: untouchedSubagent,
         experienceRecorder: {} as never,
       },
       {
@@ -90,8 +85,6 @@ describe("runAgentTurn — direct answer (the core regression guard)", () => {
     // No checklist was ever proposed for a bare greeting.
     expect(frames.some((f) => f.kind === "plan-update")).toBe(false);
     expect(frames.some((f) => f.kind === "confirm-plan")).toBe(false);
-    // The hidden subagent pool was never touched.
-    expect((untouchedSubagent as { run: ReturnType<typeof vi.fn> }).run).not.toHaveBeenCalled();
   });
 
   it("in legacy/text mode, a plain-text response with no <<TOOL>> block is treated as the direct answer", async () => {
@@ -104,8 +97,6 @@ describe("runAgentTurn — direct answer (the core regression guard)", () => {
       {
         ollama: { chatStream } as unknown as IOllamaClient,
         config: legacyConfig,
-        agent: {} as never,
-        subagent: untouchedSubagent,
         experienceRecorder: {} as never,
       },
       {
@@ -145,8 +136,6 @@ describe("runAgentTurn — question answered with a tool", () => {
       {
         ollama: { chatWithTools } as unknown as IOllamaClient,
         config: nativeConfig,
-        agent: {} as never,
-        subagent: untouchedSubagent,
         experienceRecorder: {} as never,
       },
       {
@@ -161,8 +150,6 @@ describe("runAgentTurn — question answered with a tool", () => {
     expect(chatWithTools).toHaveBeenCalledTimes(2);
     expect(result.ok).toBe(true);
     expect(result.content).toContain("atlasagents");
-    // Still no checklist for a one-tool-call question.
-    expect((untouchedSubagent as { run: ReturnType<typeof vi.fn> }).run).not.toHaveBeenCalled();
   });
 
   it("answers a git question with run_command, not a plan", async () => {
@@ -197,8 +184,6 @@ describe("runAgentTurn — question answered with a tool", () => {
       {
         ollama: { chatWithTools } as unknown as IOllamaClient,
         config: nativeConfig,
-        agent: {} as never,
-        subagent: untouchedSubagent,
         experienceRecorder: {} as never,
       },
       {
@@ -241,8 +226,6 @@ describe("runAgentTurn — malformed output recovery", () => {
       {
         ollama: { chatWithTools } as unknown as IOllamaClient,
         config: nativeConfig,
-        agent: {} as never,
-        subagent: untouchedSubagent,
         experienceRecorder: {} as never,
       },
       { ...baseParams(makePerConn()), emit: () => {}, emitToken: () => {} },
@@ -269,8 +252,6 @@ describe("runAgentTurn — malformed output recovery", () => {
       {
         ollama: { chatWithTools } as unknown as IOllamaClient,
         config: nativeConfig,
-        agent: {} as never,
-        subagent: untouchedSubagent,
         experienceRecorder: {} as never,
       },
       {
@@ -299,8 +280,6 @@ describe("runAgentTurn — reasoning-tag safety net", () => {
       {
         ollama: { chatWithTools } as unknown as IOllamaClient,
         config: nativeConfig,
-        agent: {} as never,
-        subagent: untouchedSubagent,
         experienceRecorder: {} as never,
       },
       {
@@ -328,8 +307,6 @@ describe("runAgentTurn — plan handoff across a model switch", () => {
       {
         ollama: { chatWithTools } as unknown as IOllamaClient,
         config: nativeConfig,
-        agent: {} as never,
-        subagent: untouchedSubagent,
         experienceRecorder: {} as never,
       },
       {
@@ -366,8 +343,6 @@ describe("runAgentTurn — plan handoff across a model switch", () => {
       {
         ollama: { chatWithTools } as unknown as IOllamaClient,
         config: nativeConfig,
-        agent: {} as never,
-        subagent: untouchedSubagent,
         experienceRecorder: {} as never,
       },
       { ...baseParams(makePerConn()), emit: () => {}, emitToken: () => {} },
@@ -389,8 +364,6 @@ describe("runAgentTurn — plan handoff across a model switch", () => {
       {
         ollama: { chatWithTools } as unknown as IOllamaClient,
         config: nativeConfig,
-        agent: {} as never,
-        subagent: untouchedSubagent,
         experienceRecorder: {} as never,
       },
       {
@@ -412,29 +385,37 @@ describe("runAgentTurn — plan handoff across a model switch", () => {
 
 describe("runAgentTurn — run_steps_parallel respects the session's concurrency cap", () => {
   /**
-   * Builds a fake Subagent whose `run` tracks how many calls are ever
-   * in-flight at once, so the tests below can assert real concurrency
-   * (not just call count) — regression guard for the bug where
+   * Builds a fake `chatWithTools` that scripts the first two calls (the
+   * main turn proposing the plan, then dispatching the batch) and tracks
+   * how many *later* calls — one per concurrent step, since each step is
+   * completed by the same loop calling the same model client — are ever
+   * in-flight at once. Regression guard for the bug where
    * run_steps_parallel hardcoded maxSubagents: "max" internally, silently
    * ignoring the session's ::focus/::collab/::max modifier.
    */
-  const makeTrackingSubagent = () => {
+  const makeTrackingChatWithTools = (
+    scripted: Array<{ toolCalls: { name: string; args: unknown }[] }>,
+  ) => {
     let inFlight = 0;
     let maxInFlight = 0;
-    const run = vi.fn(async (params: { subtask: string }) => {
+    let call = 0;
+    const chatWithTools = vi.fn(async () => {
+      call += 1;
+      const step = scripted[call - 1];
+      if (step) {
+        return { content: "", thinking: "", toolCalls: step.toolCalls };
+      }
+      // Beyond the scripted calls: a concurrent step's own model call (or
+      // the main turn's final wrap-up call) — track in-flight overlap,
+      // then answer with plain text so the caller (step or turn) ends.
       inFlight += 1;
       maxInFlight = Math.max(maxInFlight, inFlight);
       // Yield a tick so truly-concurrent calls overlap in the tracker.
       await new Promise((resolve) => setTimeout(resolve, 5));
       inFlight -= 1;
-      return {
-        summary: `done: ${params.subtask}`,
-        keyFindings: [],
-        filesTouched: [],
-        ok: true,
-      };
+      return { content: "done", thinking: "", toolCalls: [] };
     });
-    return { subagent: { run } as never, getMaxInFlight: () => maxInFlight };
+    return { chatWithTools, getMaxInFlight: () => maxInFlight };
   };
 
   const twoStepPlan = () => ({
@@ -444,30 +425,18 @@ describe("runAgentTurn — run_steps_parallel respects the session's concurrency
     ],
   });
 
+  const scriptedTurn = () => [
+    { toolCalls: [{ name: "update_plan", args: twoStepPlan() }] },
+    { toolCalls: [{ name: "run_steps_parallel", args: { stepIds: [1, 2] } }] },
+  ];
+
   it("::focus (maxSubagents: 1) runs a requested batch one worker at a time", async () => {
-    const { subagent, getMaxInFlight } = makeTrackingSubagent();
-    let call = 0;
-    const chatWithTools = vi.fn(async () => {
-      call += 1;
-      if (call === 1) {
-        return { content: "", thinking: "", toolCalls: [{ name: "update_plan", args: twoStepPlan() }] };
-      }
-      if (call === 2) {
-        return {
-          content: "",
-          thinking: "",
-          toolCalls: [{ name: "run_steps_parallel", args: { stepIds: [1, 2] } }],
-        };
-      }
-      return { content: "done", thinking: "", toolCalls: [] };
-    });
+    const { chatWithTools, getMaxInFlight } = makeTrackingChatWithTools(scriptedTurn());
 
     await runAgentTurn(
       {
         ollama: { chatWithTools } as unknown as IOllamaClient,
         config: nativeConfig,
-        agent: {} as never,
-        subagent,
         experienceRecorder: {} as never,
       },
       {
@@ -482,29 +451,12 @@ describe("runAgentTurn — run_steps_parallel respects the session's concurrency
   });
 
   it("default (maxSubagents: 3, DAG width 2) runs both steps of a batch concurrently", async () => {
-    const { subagent, getMaxInFlight } = makeTrackingSubagent();
-    let call = 0;
-    const chatWithTools = vi.fn(async () => {
-      call += 1;
-      if (call === 1) {
-        return { content: "", thinking: "", toolCalls: [{ name: "update_plan", args: twoStepPlan() }] };
-      }
-      if (call === 2) {
-        return {
-          content: "",
-          thinking: "",
-          toolCalls: [{ name: "run_steps_parallel", args: { stepIds: [1, 2] } }],
-        };
-      }
-      return { content: "done", thinking: "", toolCalls: [] };
-    });
+    const { chatWithTools, getMaxInFlight } = makeTrackingChatWithTools(scriptedTurn());
 
     await runAgentTurn(
       {
         ollama: { chatWithTools } as unknown as IOllamaClient,
         config: nativeConfig,
-        agent: {} as never,
-        subagent,
         experienceRecorder: {} as never,
       },
       {

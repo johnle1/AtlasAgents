@@ -73,11 +73,14 @@ export const getToolSchemas = (registry: ToolHandler[]): ToolSchema[] =>
  * Distinct from {@link createToolRegistry} in two ways: it omits `escalate`
  * (there is no separate lead agent to escalate to — this loop IS the lead),
  * and it adds `update_plan` / `run_steps_parallel`, the two tools that let
- * the agent express a checklist and hand independent steps to the hidden
- * subagent pool. `finish` is still included — it's what lets a multi-step
- * turn end explicitly (with its existing verify-before-finish gate), while a
- * simple conversational turn just ends when the model returns plain text
- * with no tool call at all.
+ * the agent express a checklist and run independent steps concurrently.
+ * `finish` is still included — it's what lets a multi-step turn end
+ * explicitly (with its existing verify-before-finish gate), while a simple
+ * conversational turn just ends when the model returns plain text with no
+ * tool call at all. This registry is fully self-contained — the unified
+ * agent turn never requires a subagent to be constructed; `run_steps_parallel`
+ * completes each concurrent step through the same loop (see
+ * {@link createWorkerToolRegistry}), not a separate persona.
  *
  * @param extraTools - Optional TokenSave (MCP) tool schemas to include for this run.
  * @returns The full list of handlers the unified agent turn can call.
@@ -91,6 +94,31 @@ export const createAgentTurnToolRegistry = (
   runCommandTool,
   updatePlanTool,
   runStepsParallelTool,
+  finishTool,
+  ...createTokenSaveToolHandlers(extraTools),
+];
+
+/**
+ * Builds the ordered list of tools available to one concurrent step
+ * dispatched by `run_steps_parallel`.
+ *
+ * @remarks
+ * A step is completed by the same tool-calling loop as the top-level agent
+ * turn, just with a narrower toolset: no `update_plan` (the checklist
+ * belongs to the parent turn, not to one of its concurrent steps) and no
+ * `run_steps_parallel` (steps don't recursively fan out further batches).
+ * No `escalate` either, for the same reason as {@link createAgentTurnToolRegistry}.
+ *
+ * @param extraTools - Optional TokenSave (MCP) tool schemas to include for this run.
+ * @returns The full list of handlers one concurrent step can call.
+ */
+export const createWorkerToolRegistry = (
+  extraTools: ToolSchema[] = [],
+): ToolHandler[] => [
+  readFileTool,
+  writeFileTool,
+  editFileTool,
+  runCommandTool,
   finishTool,
   ...createTokenSaveToolHandlers(extraTools),
 ];

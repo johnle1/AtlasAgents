@@ -11,17 +11,18 @@
  * - Calls a tool (`read_file`, `run_command`, ...) when the answer depends
  *   on the workspace.
  * - Writes a checklist via `update_plan` only for genuinely multi-step work,
- *   and only then fans work out to the hidden subagent pool via
- *   `run_steps_parallel` when steps are independent.
+ *   and only then runs independent steps concurrently via
+ *   `run_steps_parallel` — each one completed by this same loop, not a
+ *   separate subagent persona or model.
  *
- * It deliberately omits the subagent loop's ceremony — the mandatory
- * `<redacted_thinking>` block, first-turn command-plan enforcement, and
- * escalation machinery — none of which make sense for a top-level loop that
- * has no separate lead agent to defer to.
+ * No subagent or distinct worker persona is required for this loop to run;
+ * `run_steps_parallel` is just this loop invoked several times concurrently
+ * (see `runToolCallLoop` below). It deliberately omits the old subagent
+ * loop's ceremony — the mandatory `<redacted_thinking>` block, first-turn
+ * command-plan enforcement, and escalation machinery — none of which make
+ * sense for a single agent with no lead to defer to.
  */
 
-import type { Agent } from "./agent.js";
-import type { Subagent } from "../subagent/subagent.js";
 import type {
   IConfigManager,
   IExperienceRecorder,
@@ -31,6 +32,7 @@ import type {
   ClientEnv,
   CommandPlan,
   Message,
+  PlannedSubtask,
   PlanStep,
   SubagentPlan,
   TaskModelOverrides,
@@ -51,14 +53,15 @@ import {
 } from "../toolProtocol.js";
 import {
   createAgentTurnToolRegistry,
+  createWorkerToolRegistry,
   getToolHandlerMap,
   getToolSchemas,
 } from "../tools/registry.js";
 import type { ToolHandler, ToolHandlerContext } from "../tools/types.js";
-import { runAgentPool } from "../orchestrator/orchestratorPipelineHelpers.js";
-import { buildAgentTurnSystemText } from "./agentPrompt.js";
+import { buildAgentTurnSystemText, buildWorkerSystemText } from "./agentPrompt.js";
 import { createThinkFrameEmitter, createThinkTagScanner } from "../thinkStream.js";
 import type { ThinkTagScanner } from "../thinkStream.js";
+import { runAgentPool } from "../orchestrator/orchestratorPipelineHelpers.js";
 import { AbortError } from "../../errors/index.js";
 import { logger } from "../../utils/logger.js";
 
@@ -140,10 +143,6 @@ export type AgentTurnResult = {
 export type AgentTurnDeps = {
   ollama: IOllamaClient;
   config: IConfigManager;
-  /** The lead agent's `advise`/`combine` remain available to dispatched hidden subagents (escalation). */
-  agent: Agent;
-  /** Hidden worker used only by `run_steps_parallel`. */
-  subagent: Subagent;
   experienceRecorder: IExperienceRecorder;
 };
 
@@ -181,6 +180,239 @@ const resolveTurnConfig = async (
 };
 
 /**
+ * The tool-calling ReAct loop shared by the top-level agent turn and by
+ * every concurrent step `run_steps_parallel` dispatches.
+ *
+ * @remarks
+ * Factored out so a "step" and "the whole turn" are the exact same
+ * mechanism — native vs. legacy tool-call handling, reasoning-tag scanning,
+ * malformed-call recovery, the iteration ceiling — with zero duplicated
+ * protocol logic. The two call sites differ only in what they pass in:
+ * the top-level turn gates its registry on plan-mode approval and streams
+ * the final answer to the user, while a worker step gets a fixed registry
+ * and every callback is a no-op so nothing it does is ever visible on its
+ * own — the caller (`runStepsParallel`) is what surfaces the outcome, via
+ * the checklist.
+ *
+ * @throws {@link AbortError} When `signal` is aborted mid-loop.
+ */
+const runToolCallLoop = async (params: {
+  taskId: string;
+  ollama: IOllamaClient;
+  agentModel: string;
+  agentTemperature: number;
+  configuredSupportsTools: boolean;
+  messages: Message[];
+  /** Re-invoked every iteration — lets the top-level turn's plan-mode gating flip mid-loop. */
+  getActiveRegistry: () => ToolHandler[];
+  buildToolContext: () => ToolHandlerContext;
+  emit: (frame: TaskFrame) => void;
+  emitToken: (text: string) => void;
+  reportStatus: ToolHandlerContext["emitSubagentStatus"];
+  signal: AbortSignal;
+}): Promise<AgentTurnResult> => {
+  const {
+    taskId,
+    ollama,
+    agentModel,
+    agentTemperature,
+    configuredSupportsTools,
+    messages,
+    getActiveRegistry,
+    buildToolContext,
+    emit,
+    emitToken,
+    reportStatus,
+    signal,
+  } = params;
+
+  const executeTool = async (
+    call: ParsedToolCall,
+    toolHandlers: Map<string, ToolHandler>,
+  ): Promise<{
+    done: boolean;
+    ok?: boolean;
+    summary: string;
+    feedback: string;
+  }> => {
+    const handler = toolHandlers.get(call.name);
+    if (!handler) {
+      return { done: false, summary: "", feedback: `Unknown tool: ${call.name}` };
+    }
+    return handler.execute(call.args, buildToolContext());
+  };
+
+  const appendToolTurnToHistory = (
+    content: string,
+    call: ParsedToolCall,
+    feedback: string,
+  ): void => {
+    if (configuredSupportsTools) {
+      messages.push({
+        role: "assistant",
+        content,
+        tool_calls: [{ function: { name: call.name, arguments: call.args } }],
+      });
+      messages.push({ role: "tool", tool_name: call.name, content: feedback });
+      return;
+    }
+    messages.push({
+      role: "assistant",
+      content: `${content}\n${formatLegacyToolBlock(call)}`,
+    });
+    messages.push({ role: "user", content: feedback });
+  };
+
+  reportStatus("thinking", "◌", "Thinking…");
+
+  for (
+    let iteration = 0;
+    iteration < MAX_AGENT_TURN_ITERATIONS;
+    iteration += 1
+  ) {
+    if (signal.aborted) {
+      throw new AbortError("Agent turn aborted");
+    }
+
+    const activeRegistry = getActiveRegistry();
+    const activeToolSchemas = getToolSchemas(activeRegistry);
+    const activeToolHandlers = getToolHandlerMap(activeRegistry);
+
+    let content = "";
+    let toolCalls: ParsedToolCall[] = [];
+
+    // Live-scans both channels for a recognized reasoning tag (see
+    // REASONING_TAG_NAMES) so any inline "<think>..." a model emits renders
+    // as a "thinking" block instead of leaking into the visible answer.
+    // Content is NOT streamed to emitToken live here — unlike a scanner
+    // that only extracts think text (discarding everything else, as
+    // subagent.ts's does), there's no cheap way to also pass through
+    // non-think text live without risking a partial tag prefix (e.g. "<th")
+    // reaching the user a moment before it turns out to be the start of
+    // "<think>". The full response is available as soon as the call
+    // resolves either way, so the answer is flushed once, cleaned, right
+    // below instead — see the toolCalls.length === 0 branch.
+    const contentThinkScanner = createThinkTagScanner(REASONING_TAG_NAMES);
+    const reasoningThinkScanner = createThinkTagScanner(REASONING_TAG_NAMES);
+    const thinkFrames = createThinkFrameEmitter({ emit, agent: true });
+    const pushThinkFrom =
+      (scanner: ThinkTagScanner) =>
+      (piece: string): void => {
+        const delta = scanner.push(piece);
+        if (delta.length > 0) {
+          thinkFrames.delta(delta);
+        }
+      };
+
+    try {
+      if (configuredSupportsTools) {
+        const result = await ollama.chatWithTools(
+          agentModel,
+          messages,
+          activeToolSchemas,
+          {
+            temperature: agentTemperature,
+            signal,
+            onThinkToken: pushThinkFrom(reasoningThinkScanner),
+          },
+          pushThinkFrom(contentThinkScanner),
+        );
+        content = result.content;
+        toolCalls = result.toolCalls.map((call) => ({ name: call.name, args: call.args }));
+      } else {
+        let raw = "";
+        for await (const token of ollama.chatStream(agentModel, messages, {
+          temperature: agentTemperature,
+          signal,
+        })) {
+          if (signal.aborted) {
+            throw new AbortError("Agent turn stream aborted");
+          }
+          raw += token;
+          pushThinkFrom(contentThinkScanner)(token);
+        }
+        const parsed = parseAllToolCalls(raw, activeRegistry);
+        if (parsed.calls.length === 0 && !parsed.hadMalformedBlock) {
+          // No tool syntax at all — this is the model's plain-text answer.
+          // Strip both markdown fences and any reasoning tag before it
+          // reaches the user — a legacy-mode response may otherwise
+          // contain an inline <<TOOL>>...<<END>> block or think tag that
+          // must never surface verbatim.
+          const answer = stripReasoningTags(
+            stripMarkdownFencesFromText(raw),
+          );
+          emitToken(answer);
+          reportStatus("done", "✓", "Done");
+          return { content: answer, ok: true };
+        }
+        content = raw;
+        toolCalls = parsed.calls;
+        if (parsed.calls.length === 0 && parsed.hadMalformedBlock) {
+          messages.push({ role: "assistant", content: raw });
+          messages.push({
+            role: "user",
+            content:
+              "Your tool call was not valid JSON. Re-emit it as a single-line <<TOOL>>{...}<<END>> block.",
+          });
+          continue;
+        }
+      }
+    } finally {
+      // Safety net for abort/error paths that never reach a normal close
+      // below — idempotent, so a no-op after one. Mirrors subagent.ts's
+      // per-iteration think-frame handling.
+      for (const scanner of [contentThinkScanner, reasoningThinkScanner]) {
+        const flushed = scanner.flush();
+        if (flushed.length > 0) {
+          thinkFrames.delta(flushed);
+        }
+      }
+      thinkFrames.finish(null);
+    }
+
+    if (toolCalls.length === 0) {
+      // Native mode's direct-answer path: no tool call this turn — flush
+      // the complete answer now, with any reasoning tag stripped as a
+      // defensive safety net (the live scanner above already caught the
+      // common case; this covers a tag it wasn't watching for or one that
+      // was never actually closed).
+      const answer = stripReasoningTags(content);
+      emitToken(answer);
+      reportStatus("done", "✓", "Done");
+      return { content: answer, ok: true };
+    }
+
+    if (toolCalls.length > 1) {
+      messages.push({ role: "assistant", content });
+      messages.push({
+        role: "user",
+        content: "You called more than one tool. Call exactly one tool per turn.",
+      });
+      continue;
+    }
+
+    const call = toolCalls[0];
+    if (!call) {
+      continue;
+    }
+
+    const result = await executeTool(call, activeToolHandlers);
+    if (result.done) {
+      reportStatus("done", result.ok === false ? "⚠" : "✓", "Done");
+      return { content: result.summary, ok: result.ok !== false };
+    }
+    appendToolTurnToHistory(content, call, result.feedback);
+  }
+
+  logger.warn({ taskId }, "[AgentTurn] exceeded maximum iterations");
+  return {
+    content:
+      "[agent stopped: exceeded the maximum number of tool calls for one turn]",
+    ok: false,
+  };
+};
+
+/**
  * Runs one unified agent turn to completion.
  *
  * @throws {@link AbortError} When `params.signal` is aborted mid-turn.
@@ -203,7 +435,7 @@ export const runAgentTurn = async (
     emitToken,
     signal,
   } = params;
-  const { ollama, config, subagent, experienceRecorder } = deps;
+  const { ollama, config, experienceRecorder } = deps;
 
   const { agentModel, agentTemperature, configuredSupportsTools } =
     await resolveTurnConfig(config, modelOverrides);
@@ -298,6 +530,98 @@ export const runAgentTurn = async (
       return { decision: "continue" };
     };
 
+  const emitSubagentStatus: ToolHandlerContext["emitSubagentStatus"] = (
+    stage,
+    icon,
+    message,
+  ) => {
+    emit({
+      kind: "status",
+      source: "agent",
+      stage: stage === "done" ? "ready" : "understanding",
+      icon,
+      message,
+    });
+  };
+
+  // Tools and system prompt for one concurrent step dispatched by
+  // run_steps_parallel — built once per turn, not per step, since neither
+  // depends on which steps end up running.
+  const workerRegistry = createWorkerToolRegistry(perConn.tokenSaveTools);
+  const workerSystemText = buildWorkerSystemText({
+    clientEnv,
+    toolSchemas: getToolSchemas(workerRegistry),
+    configuredSupportsTools,
+  });
+
+  /** Completes one concurrent step through the exact same loop as the top-level turn. */
+  const runWorkerStep = async (
+    subtask: PlannedSubtask,
+    sessionContext: string,
+  ): Promise<ToolResultSummary> => {
+    const workerMessages: Message[] = [
+      { role: "system", content: workerSystemText },
+      {
+        role: "user",
+        content:
+          sessionContext.length > 0
+            ? `${subtask.text}${sessionContext}`
+            : subtask.text,
+      },
+    ];
+    const workerTrackers: ToolHandlerContext["trackers"] = {
+      filesReadThisTask: new Set(),
+      filesWrittenThisTask: new Set(),
+      filesVerifiedThisTask: new Set(),
+      verifyCommandPassed: false,
+      completedSetupCommands: new Set(),
+      failedCommandAttempts: new Map(),
+    };
+    const buildWorkerToolContext = (): ToolHandlerContext => ({
+      taskId,
+      subtask: subtask.text,
+      agentSource: { agentId: subtask.agentId, agentLabel: subtask.agentLabel },
+      emitSubagentStatus: () => {},
+      messages: workerMessages,
+      workspace: perConn.workspace,
+      terminal: perConn.terminal,
+      recorder: experienceRecorder,
+      escalationCount: 0,
+      maxEscalations: 0,
+      modelOverrides,
+      trackers: workerTrackers,
+      thinkText: null,
+      commandPlan: emptyCommandPlan() as CommandPlan,
+      // No planTools — a step doesn't own the parent's checklist and can't
+      // recursively fan out its own parallel batch (see createWorkerToolRegistry).
+    });
+
+    // Fully hidden from the client: no think frames, no visible tokens, no
+    // status pings — the checklist update in `runStepsParallel` below is
+    // the only trace of this step that ever reaches the user.
+    const result = await runToolCallLoop({
+      taskId,
+      ollama,
+      agentModel,
+      agentTemperature,
+      configuredSupportsTools,
+      messages: workerMessages,
+      getActiveRegistry: () => workerRegistry,
+      buildToolContext: buildWorkerToolContext,
+      emit: () => {},
+      emitToken: () => {},
+      reportStatus: () => {},
+      signal,
+    });
+
+    return {
+      summary: result.content,
+      keyFindings: [],
+      filesTouched: Array.from(workerTrackers.filesWrittenThisTask),
+      ok: result.ok,
+    };
+  };
+
   const runStepsParallel: NonNullable<
     ToolHandlerContext["planTools"]
   >["runStepsParallel"] = async (stepIds) => {
@@ -311,10 +635,10 @@ export const runAgentTurn = async (
       };
     }
 
-    const subtasks = targetSteps.map((step, index) => ({
+    const subtasks: PlannedSubtask[] = targetSteps.map((step, index) => ({
       id: step.id,
       text: step.text,
-      dependsOn: [] as number[],
+      dependsOn: [],
       agentId: index + 1,
       agentLabel: `step-${step.id}`,
     }));
@@ -327,11 +651,17 @@ export const runAgentTurn = async (
     };
     const resultMap = new Map<number, ToolResultSummary>();
 
+    const applyResults = (): PlanStep[] =>
+      currentPlan.map((step) => {
+        const result = resultMap.get(step.id);
+        return result
+          ? { ...step, status: result.ok ? ("done" as const) : ("failed" as const) }
+          : step;
+      });
+
     try {
-      const ordered = await runAgentPool(subagent, {
-        taskId,
+      const ordered = await runAgentPool({
         plan,
-        skillBody,
         // Respects the session's ::focus/::collab/::max concurrency cap —
         // the same maxSubagents this turn was given (see runAgentTurn's
         // params) — rather than always maximizing. workerCountFor still
@@ -340,23 +670,14 @@ export const runAgentTurn = async (
         // to dispatch them, so ::focus mode is still honored even if the
         // model calls this tool.
         maxSubagents,
-        experienceRecorder,
-        perConn,
-        modelOverrides,
         resultMap,
-        // No frames from the hidden pool reach the client — the checklist
+        runSubtask: runWorkerStep,
+        // No frames from a running batch reach the client — the checklist
         // update below is the only visible trace of this batch running.
-        emit: () => {},
         emitStatus: () => {},
         signal,
       });
-      const updatedPlan = currentPlan.map((step) => {
-        const result = resultMap.get(step.id);
-        return result
-          ? { ...step, status: result.ok ? ("done" as const) : ("failed" as const) }
-          : step;
-      });
-      emitPlanUpdate(updatedPlan);
+      emitPlanUpdate(applyResults());
       return {
         ok: true,
         summary: ordered.map((r) => `Step ${r.id}: ${r.content}`).join("\n\n"),
@@ -365,33 +686,13 @@ export const runAgentTurn = async (
       // A subtask failure throws from runAgentPool — resultMap is still
       // mutated in place with whatever completed before the throw (see its
       // own docstring), so the checklist can still reflect partial progress.
-      const updatedPlan = currentPlan.map((step) => {
-        const result = resultMap.get(step.id);
-        return result
-          ? { ...step, status: result.ok ? ("done" as const) : ("failed" as const) }
-          : step;
-      });
-      emitPlanUpdate(updatedPlan);
+      emitPlanUpdate(applyResults());
       if (error instanceof AbortError) {
         throw error;
       }
       const message = error instanceof Error ? error.message : String(error);
       return { ok: false, summary: `Parallel batch failed: ${message}` };
     }
-  };
-
-  const emitSubagentStatus: ToolHandlerContext["emitSubagentStatus"] = (
-    stage,
-    icon,
-    message,
-  ) => {
-    emit({
-      kind: "status",
-      source: "agent",
-      stage: stage === "done" ? "ready" : "understanding",
-      icon,
-      message,
-    });
   };
 
   const buildToolContext = (): ToolHandlerContext => ({
@@ -412,192 +713,21 @@ export const runAgentTurn = async (
     planTools: { updatePlan, runStepsParallel },
   });
 
-  const executeTool = async (
-    call: ParsedToolCall,
-    toolHandlers: Map<string, ToolHandler>,
-  ): Promise<{
-    done: boolean;
-    ok?: boolean;
-    summary: string;
-    feedback: string;
-  }> => {
-    const handler = toolHandlers.get(call.name);
-    if (!handler) {
-      return { done: false, summary: "", feedback: `Unknown tool: ${call.name}` };
-    }
-    const result = await handler.execute(call.args, buildToolContext());
-    return result;
-  };
-
-  const appendToolTurnToHistory = (
-    content: string,
-    call: ParsedToolCall,
-    feedback: string,
-  ): void => {
-    if (configuredSupportsTools) {
-      messages.push({
-        role: "assistant",
-        content,
-        tool_calls: [{ function: { name: call.name, arguments: call.args } }],
-      });
-      messages.push({ role: "tool", tool_name: call.name, content: feedback });
-      return;
-    }
-    messages.push({
-      role: "assistant",
-      content: `${content}\n${formatLegacyToolBlock(call)}`,
-    });
-    messages.push({ role: "user", content: feedback });
-  };
-
-  emitSubagentStatus("thinking", "◌", "Thinking…");
-
-  for (
-    let iteration = 0;
-    iteration < MAX_AGENT_TURN_ITERATIONS;
-    iteration += 1
-  ) {
-    if (signal.aborted) {
-      throw new AbortError("Agent turn aborted");
-    }
-
-    // Recomputed each iteration — `planApproved` can flip mid-turn (the
+  return runToolCallLoop({
+    taskId,
+    ollama,
+    agentModel,
+    agentTemperature,
+    configuredSupportsTools,
+    messages,
+    // Recomputed every iteration — `planApproved` can flip mid-turn (the
     // model's previous update_plan call may have just been approved), so
     // the very next model call must see the unlocked toolset immediately.
-    const activeRegistry = planApproved ? fullRegistry : restrictedRegistry;
-    const activeToolSchemas = getToolSchemas(activeRegistry);
-    const activeToolHandlers = getToolHandlerMap(activeRegistry);
-
-    let content = "";
-    let toolCalls: ParsedToolCall[] = [];
-
-    // Live-scans both channels for a recognized reasoning tag (see
-    // REASONING_TAG_NAMES) so any inline "<think>..." a model emits renders
-    // as a "thinking" block instead of leaking into the visible answer.
-    // Content is NOT streamed to emitToken live here — unlike a scanner
-    // that only extracts think text (discarding everything else, as
-    // subagent.ts's does), there's no cheap way to also pass through
-    // non-think text live without risking a partial tag prefix (e.g. "<th")
-    // reaching the user a moment before it turns out to be the start of
-    // "<think>". The full response is available as soon as the call
-    // resolves either way, so the answer is flushed once, cleaned, right
-    // below instead — see the toolCalls.length === 0 branch.
-    const contentThinkScanner = createThinkTagScanner(REASONING_TAG_NAMES);
-    const reasoningThinkScanner = createThinkTagScanner(REASONING_TAG_NAMES);
-    const thinkFrames = createThinkFrameEmitter({ emit, agent: true });
-    const pushThinkFrom =
-      (scanner: ThinkTagScanner) =>
-      (piece: string): void => {
-        const delta = scanner.push(piece);
-        if (delta.length > 0) {
-          thinkFrames.delta(delta);
-        }
-      };
-
-    try {
-      if (configuredSupportsTools) {
-        const result = await ollama.chatWithTools(
-          agentModel,
-          messages,
-          activeToolSchemas,
-          {
-            temperature: agentTemperature,
-            signal,
-            onThinkToken: pushThinkFrom(reasoningThinkScanner),
-          },
-          pushThinkFrom(contentThinkScanner),
-        );
-        content = result.content;
-        toolCalls = result.toolCalls.map((call) => ({ name: call.name, args: call.args }));
-      } else {
-        let raw = "";
-        for await (const token of ollama.chatStream(agentModel, messages, {
-          temperature: agentTemperature,
-          signal,
-        })) {
-          if (signal.aborted) {
-            throw new AbortError("Agent turn stream aborted");
-          }
-          raw += token;
-          pushThinkFrom(contentThinkScanner)(token);
-        }
-        const parsed = parseAllToolCalls(raw, activeRegistry);
-        if (parsed.calls.length === 0 && !parsed.hadMalformedBlock) {
-          // No tool syntax at all — this is the model's plain-text answer.
-          // Strip both markdown fences and any reasoning tag before it
-          // reaches the user — a legacy-mode response may otherwise
-          // contain an inline <<TOOL>>...<<END>> block or think tag that
-          // must never surface verbatim.
-          const answer = stripReasoningTags(
-            stripMarkdownFencesFromText(raw),
-          );
-          emitToken(answer);
-          emitSubagentStatus("done", "✓", "Done");
-          return { content: answer, ok: true };
-        }
-        content = raw;
-        toolCalls = parsed.calls;
-        if (parsed.calls.length === 0 && parsed.hadMalformedBlock) {
-          messages.push({ role: "assistant", content: raw });
-          messages.push({
-            role: "user",
-            content:
-              "Your tool call was not valid JSON. Re-emit it as a single-line <<TOOL>>{...}<<END>> block.",
-          });
-          continue;
-        }
-      }
-    } finally {
-      // Safety net for abort/error paths that never reach a normal close
-      // below — idempotent, so a no-op after one. Mirrors subagent.ts's
-      // per-iteration think-frame handling.
-      for (const scanner of [contentThinkScanner, reasoningThinkScanner]) {
-        const flushed = scanner.flush();
-        if (flushed.length > 0) {
-          thinkFrames.delta(flushed);
-        }
-      }
-      thinkFrames.finish(null);
-    }
-
-    if (toolCalls.length === 0) {
-      // Native mode's direct-answer path: no tool call this turn — flush
-      // the complete answer now, with any reasoning tag stripped as a
-      // defensive safety net (the live scanner above already caught the
-      // common case; this covers a tag it wasn't watching for or one that
-      // was never actually closed).
-      const answer = stripReasoningTags(content);
-      emitToken(answer);
-      emitSubagentStatus("done", "✓", "Done");
-      return { content: answer, ok: true };
-    }
-
-    if (toolCalls.length > 1) {
-      messages.push({ role: "assistant", content });
-      messages.push({
-        role: "user",
-        content: "You called more than one tool. Call exactly one tool per turn.",
-      });
-      continue;
-    }
-
-    const call = toolCalls[0];
-    if (!call) {
-      continue;
-    }
-
-    const result = await executeTool(call, activeToolHandlers);
-    if (result.done) {
-      emitSubagentStatus("done", result.ok === false ? "⚠" : "✓", "Done");
-      return { content: result.summary, ok: result.ok !== false };
-    }
-    appendToolTurnToHistory(content, call, result.feedback);
-  }
-
-  logger.warn({ taskId }, "[AgentTurn] exceeded maximum iterations");
-  return {
-    content:
-      "[agent stopped: exceeded the maximum number of tool calls for one turn]",
-    ok: false,
-  };
+    getActiveRegistry: () => (planApproved ? fullRegistry : restrictedRegistry),
+    buildToolContext,
+    emit,
+    emitToken,
+    reportStatus: emitSubagentStatus,
+    signal,
+  });
 };

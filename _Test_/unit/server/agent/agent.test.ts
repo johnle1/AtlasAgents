@@ -3,10 +3,11 @@
  *
  * @remarks
  * Covers what remains of the `Agent` class now that planning lives in
- * `agentTurn.ts`: `advise()` (escalation guidance, still called live by
- * `escalateHandler.ts` for a subagent dispatched via `run_steps_parallel`)
- * and `combine()` (multi-result synthesis — not currently wired into the
- * default pipeline, but a tested, documented extension point).
+ * `agentTurn.ts`: `advise()` (escalation guidance for whatever caller wires
+ * up `escalateHandler.ts`'s `escalate` tool — not the default pipeline,
+ * since a `run_steps_parallel` step has no `escalate` tool) and `combine()`
+ * (multi-result synthesis — also not currently wired into the default
+ * pipeline, but a tested, documented extension point for both).
  */
 
 import { describe, expect, it, vi } from "vitest";

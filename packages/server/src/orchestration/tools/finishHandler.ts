@@ -1,5 +1,6 @@
 /**
- * The `finish` tool: the only way a subagent successfully completes a subtask.
+ * The `finish` tool: the only way an agent (top-level turn, or one
+ * concurrent step dispatched by `run_steps_parallel`) completes its work.
  *
  * @remarks
  * Gates completion behind two checks so the agent can't declare victory
@@ -11,7 +12,11 @@
  *
  * Either check failing returns corrective feedback instead of completing,
  * pushing the agent to close the gap rather than silently finishing with
- * unverified work.
+ * unverified work. Both checks are skipped when the caller passes
+ * `ok: false` — a step reporting it could NOT be done has nothing to
+ * verify, and gating that report behind a verification check would just
+ * trap it in the loop. This is the only way a concurrent step can report
+ * failure, since it has no `escalate` tool (see `createWorkerToolRegistry`).
  */
 
 import type {
@@ -36,20 +41,25 @@ export const finishTool: ToolHandler = {
     function: {
       name: "finish",
       description:
-        "Complete the subtask. Requires prior verification of any written files.",
+        "Complete the work. Requires prior verification of any written files. Pass ok: false instead if it could not be completed.",
       parameters: {
         type: "object",
         properties: {
           summary: {
             type: "string",
             description:
-              "What you accomplished. Markdown welcome: **bold** key results, `backticks` for file paths and commands, fenced blocks for code.",
+              "What you accomplished (or, if ok: false, why it could not be done). Markdown welcome: **bold** key results, `backticks` for file paths and commands, fenced blocks for code.",
           },
           keyFindings: {
             type: "array",
             items: { type: "string" },
             description:
               "Short bullet points a dependent subtask needs to know",
+          },
+          ok: {
+            type: "boolean",
+            description:
+              "Defaults to true. Set to false to report that this could not be completed — skips the verification checks below.",
           },
         },
         required: ["summary"],
@@ -67,7 +77,20 @@ export const finishTool: ToolHandler = {
           .map((finding) => String(finding).trim())
           .filter((finding) => finding.length > 0)
       : [];
+    const ok = finishArgs.ok !== false;
     const trackers = handlerContext.trackers;
+
+    if (!ok) {
+      handlerContext.emitSubagentStatus("done", "⚠", "Done");
+      return {
+        done: true,
+        summary,
+        keyFindings,
+        feedback: "",
+        escalationCount: handlerContext.escalationCount,
+        ok: false,
+      };
+    }
 
     // CHECK 1: If the subtask wrote nothing (e.g. a pure investigation or
     // setup task), it must still have run every planned setup command —

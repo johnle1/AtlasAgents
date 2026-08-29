@@ -20,29 +20,32 @@ export type { ApprovalModeDisplay } from "./types.js";
  * Session permission mode.
  *
  * @remarks
- * Shift+Tab cycles `default → accept_edits → plan`. `auto` and `bypass`
- * are set via `/set approval`. `bypass` is never written to disk.
+ * Shift+Tab cycles all four: `default → accept_edits → plan → auto`. This
+ * is the only way to change mode — there is no slash command for it.
+ * `auto` is never written to disk.
  */
 export type ApprovalMode =
   | "default"
   | "accept_edits"
   | "plan"
-  | "auto"
-  | "bypass";
+  | "auto";
 
 /**
  * Modes that may be persisted in `config.json`.
  *
  * @remarks
- * Excludes `bypass` — that mode is session-only by design.
+ * Excludes `auto` — that mode is session-only by design, since it skips
+ * every approval prompt unconditionally (file edits, shell commands —
+ * including dangerous ones — and plan review).
  */
-export type PersistedApprovalMode = Exclude<ApprovalMode, "bypass">;
+export type PersistedApprovalMode = Exclude<ApprovalMode, "auto">;
 
-/** Shift+Tab cycle. `auto` / `bypass` are absent on purpose. */
+/** Shift+Tab cycle — all four modes are reachable this way, and only this way. */
 export const CYCLE_MODES: readonly ApprovalMode[] = [
   "default",
   "accept_edits",
   "plan",
+  "auto",
 ];
 
 /**
@@ -54,7 +57,7 @@ export const CYCLE_MODES: readonly ApprovalMode[] = [
  * @example
  * ```ts
  * approvalModeDisplay("plan"); // { label: "⏸ Plan", color: "#60A5FA" }
- * approvalModeDisplay("bypass"); // { label: "⚠ BYPASS", color: "#FF5555", bold: true }
+ * approvalModeDisplay("auto"); // { label: "⚠ Auto", color: "#FF5555", bold: true }
  * ```
  */
 export const approvalModeDisplay = (mode: string): ApprovalModeDisplay =>
@@ -64,23 +67,25 @@ export const approvalModeDisplay = (mode: string): ApprovalModeDisplay =>
  * Footer / cheat-sheet label for a mode token.
  *
  * @param mode - Wire token or unknown string (unknown is shown as-is).
- * @returns Display label (`⏸ Plan`, `⚠ BYPASS`, …).
+ * @returns Display label (`⏸ Plan`, `⚠ Auto`, …).
  *
  * @example
  * ```ts
  * formatApprovalModeLabel("accept_edits"); // "⏵ Accept Edits"
- * formatApprovalModeLabel("bypass"); // "⚠ BYPASS"
+ * formatApprovalModeLabel("auto"); // "⚠ Auto"
  * ```
  */
 export const formatApprovalModeLabel = (mode: string): string =>
   approvalModeDisplay(mode).label;
 
 /**
- * Parses a user- or config-supplied mode string.
+ * Parses a mode string, e.g. one loaded from `config.json`.
  *
  * @remarks
  * Hyphens become underscores. Legacy `"auto_edit"` maps to
- * `"accept_edits"`. Unknown input returns `null`.
+ * `"accept_edits"`. Unknown input returns `null`. There is no slash
+ * command that calls this on live user input anymore — the only caller
+ * is {@link parsePersistedApprovalMode}, coercing a disk value.
  *
  * @param raw - Trimmed or untrimmed token.
  * @returns A mode, or `null` when unrecognized.
@@ -101,8 +106,7 @@ export const parseApprovalMode = (raw: string): ApprovalMode | null => {
     normalized === "default" ||
     normalized === "accept_edits" ||
     normalized === "plan" ||
-    normalized === "auto" ||
-    normalized === "bypass"
+    normalized === "auto"
   ) {
     return normalized;
   }
@@ -113,7 +117,7 @@ export const parseApprovalMode = (raw: string): ApprovalMode | null => {
  * Coerces a stored config value to a persistable mode.
  *
  * @remarks
- * `bypass` and unknown values become `"default"` so a hand-edited
+ * `auto` and unknown values become `"default"` so a hand-edited
  * config.json cannot boot into promptless mode.
  *
  * @param raw - Value from disk (any JSON type).
@@ -126,7 +130,7 @@ export const parsePersistedApprovalMode = (
     return "default";
   }
   const parsed = parseApprovalMode(raw);
-  if (parsed === null || parsed === "bypass") {
+  if (parsed === null || parsed === "auto") {
     return "default";
   }
   return parsed;

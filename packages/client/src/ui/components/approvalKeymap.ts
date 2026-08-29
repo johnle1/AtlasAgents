@@ -12,7 +12,12 @@ import type { ApprovalRequest, PlanDecision } from "../types.js";
 import type { ApprovalMenuOption as Option } from "./types.js";
 
 /** Decision value a menu option can resolve to. */
-export type ApprovalKeyValue = boolean | PlanDecision | "always";
+export type ApprovalKeyValue =
+  | boolean
+  | PlanDecision
+  | "always"
+  | "autoAcceptEdits"
+  | "manualApprove";
 
 /**
  * Result of mapping a keystroke onto the approval menu.
@@ -63,9 +68,9 @@ export const buildOptions = (
 ): Option<ApprovalKeyValue>[] =>
   request.type === "planReview"
     ? [
-        { label: "Implement", value: "implement", color: "green" },
-        { label: "Skip task", value: "skip" },
-        { label: "Revise", value: "edit", color: "cyan" },
+        { label: "Yes, and auto-accept edits", value: "autoAcceptEdits", color: "green" },
+        { label: "Yes, and manually approve edits", value: "manualApprove", color: "green" },
+        { label: "No, keep planning", value: "edit", color: "cyan" },
       ]
     : request.type === "runSkip"
       ? [

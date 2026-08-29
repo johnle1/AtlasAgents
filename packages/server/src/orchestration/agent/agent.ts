@@ -4,17 +4,20 @@
  * @remarks
  * The Agent class is what remains of the lead-agent role now that planning
  * and execution are unified into one loop (see `agentTurn.ts`, which is the
- * default entry point for a task). Two responsibilities are still genuinely
- * separate concerns worth keeping here:
- * 1. **Escalation guidance** — Provides blocking advice when a subagent
- *    dispatched by `run_steps_parallel` gets stuck (see `escalateHandler.ts`).
- * 2. **Result synthesis** — Streams a final user-facing answer that merges
- *    multiple subtask results into one coherent reply. Not currently called
- *    by the default pipeline (`run_steps_parallel` lets the top-level agent
- *    turn do its own synthesis in-loop, since — unlike the old planner —
- *    it's still there to read the results), but kept as a documented,
- *    tested extension point for a caller that wants an explicit synthesis
- *    pass over a batch of results.
+ * default entry point for a task). Neither responsibility below is called
+ * by that default pipeline — a `run_steps_parallel` step has no `escalate`
+ * tool (it reports failure via `finish`'s `ok: false` instead — see
+ * `finishHandler.ts`), and the top-level turn does its own synthesis
+ * in-loop, since it's still there to read the results, unlike the old
+ * planner. Both are kept as documented, tested extension points for a
+ * caller that wants a distinct escalation target or an explicit synthesis
+ * pass over a batch of results:
+ * 1. **Escalation guidance** — `advise()` gives blocking advice to whatever
+ *    caller wires up `escalateHandler.ts`'s `escalate` tool (e.g. the
+ *    standalone `Subagent` class, itself not currently constructed by the
+ *    default pipeline either).
+ * 2. **Result synthesis** — `combine()` streams a final user-facing answer
+ *    that merges multiple subtask results into one coherent reply.
  *
  * The agent uses the Ollama inference API and never manages RSocket or TCP
  * connections directly.

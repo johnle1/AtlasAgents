@@ -121,10 +121,10 @@ command only reports, it never deletes anything on its own.
 ### Using one model for both agent and subagent
 
 The agent (planning) and subagent (execution) roles are independent settings — nothing stops you
-from picking the same model for both, e.g. `/set agent` → `gemma3:12b` and `/set subagent` →
+from picking the same model for both, e.g. `/model` → `gemma3:12b` and `/set subagent` →
 `gemma3:12b`. This is fully supported and is actually the cheapest setup on limited VRAM: Ollama
 keys its loaded model by tag, so a shared tag loads into memory **once**, not twice. The
-`/set agent|subagent` picker marks your current selections (`← current agent`, `← current
+`/model` / `/set subagent` picker marks your current selections (`← current agent`, `← current
 subagent`, or `← current agent + subagent` when they match) so you can see at a glance which
 model each role is already using.
 
@@ -195,7 +195,8 @@ atlas-server --regen-cert
 
 | Command                                           | Purpose                                                 |
 | ------------------------------------------------- | ------------------------------------------------------- |
-| `/set password\|server\|port\|agent\|subagent`    | Change connection/role settings for the current session |
+| `/set password\|server\|port\|subagent`           | Change connection/role settings for the current session |
+| `/model`                                          | Choose the agent's model                                |
 | `/agent`                                          | Inspect/control the lead agent                          |
 | `/config`                                         | Show current configuration                              |
 | `/skills list\|add\|sync`                         | Manage skill files                                      |
@@ -229,7 +230,7 @@ atlas-server --regen-cert
 | `Enter`  | Submit input; while a task runs, queue the line |
 | `Shift+Enter` / `Alt+Enter` / `Ctrl+J` | Insert a newline in the prompt     |
 | `Alt+M`  | Toggle raw markdown source for assistant text   |
-| `Shift+Tab` | Cycle approval mode (default / accept-edits / plan) |
+| `Shift+Tab` | Cycle approval mode (default / accept-edits / plan / auto) |
 | `?`      | Toggle the shortcuts cheat-sheet (empty input)  |
 
 A trailing `\` before Enter also continues the line (shell-style). Pastes
@@ -241,20 +242,19 @@ The footer (always visible, including during approvals) shows
 Context % updates from the server during a task; before the first sample it
 shows `—`.
 
-Approval modes (Shift+Tab): `default` asks every time; `accept_edits`
-automatically accepts file edits — shell commands and other risky actions
-still prompt; `plan` withholds file edits, shell commands, and parallel
-execution until the agent's proposed checklist is reviewed and approved —
-it can still read files and search freely to investigate first. Once
-approved, the same agent turn continues (no separate re-plan-from-scratch
-step). `/set approval auto` approves a much broader set of actions so the agent runs
-with much less interruption: the plan review is auto-implemented, file edits
-are accepted, safe shell commands run free, and cautious commands run inside a
-sandbox when one is available (macOS Seatbelt this release; otherwise those
-commands still prompt). Dangerous commands and background daemons always
-prompt. `/set approval bypass` skips every prompt for this
-session only — it is never saved. "Always allow (session)" on a command or
-file prompt auto-approves matching requests until you quit.
+Approval modes — Shift+Tab is the only way to change mode, no slash command:
+`default` asks every time; `accept_edits` automatically accepts file
+edits — shell commands and other risky actions still prompt; `plan`
+withholds file edits, shell commands, and parallel execution until the
+agent's proposed checklist is reviewed and approved — it can still read
+files and search freely to investigate first. Once approved, the same
+agent turn continues (no separate re-plan-from-scratch step). `auto` skips
+every prompt — file edits, shell commands (including dangerous ones and
+background daemons), and plan review are all auto-approved. It is
+session-only (never saved to `config.json`) and switching into it, like
+every mode, takes a single Shift+Tab press with no confirmation. "Always
+allow (session)" on a command or file prompt auto-approves matching
+requests until you quit.
 
 While a task is running, type the next prompt and press Enter to queue it
 (FIFO, cap 20). It runs automatically when the current task finishes; Esc
@@ -284,7 +284,7 @@ refused). A line starting with `!` runs the rest as a local shell command
 | `atlasagents-server`  | `packages/server` | The `atlas-server` agent runtime: task orchestration, memory, skills, provider routing, TLS/auth. |
 | `@atlasagents/shared` | `packages/shared` | Shared diff/type utilities used by both.                                                          |
 
-- **Orchestration** (`packages/server/src/orchestration`): a single unified agent loop (`agent/agentTurn.ts`) handles every task — it answers directly, calls a tool (`read_file`, `run_command`, ...), or, for genuinely multi-step work, maintains a live checklist via an `update_plan` tool call. Independent checklist steps can be fanned out to a hidden pool of background workers via `run_steps_parallel`, which escalate back to the lead agent when stuck — this pool is an implementation detail the agent chooses to use, not something the UI exposes. An in-progress checklist survives a mid-session model switch (`/set agent`), so a newly selected model picks up where the last one left off.
+- **Orchestration** (`packages/server/src/orchestration`): a single unified agent loop (`agent/agentTurn.ts`) handles every task — it answers directly, calls a tool (`read_file`, `run_command`, ...), or, for genuinely multi-step work, maintains a live checklist via an `update_plan` tool call. Independent checklist steps can run concurrently via `run_steps_parallel`, each completed by the same unified agent loop rather than a separate subagent persona — this is an implementation detail the agent chooses to use, not something the UI exposes. An in-progress checklist survives a mid-session model switch (`/model`), so a newly selected model picks up where the last one left off.
 - **Memory** (`packages/server/src/memory`): session continuity, learned preferences, and reusable patterns are extracted from past tasks and consolidated periodically, so the agent improves within a given `atlas-server` data directory over time.
 - **Skills** (`user-data/skills/` server-side, `~/.atlasagents/skills/` client-side): markdown instruction files the client syncs to the server; the server picks the most relevant one per task.
 - **Providers**: any role (agent/subagent) can be pointed at `ollama` or at a named OpenAI-compatible backend. `atlas-detect-hardware` inspects the host (NVIDIA GPU / AWS Trainium / GCP TPU / CPU) and suggests a `vllm serve` provider configuration.

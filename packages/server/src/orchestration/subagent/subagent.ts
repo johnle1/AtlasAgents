@@ -14,6 +14,14 @@
  * The agent enforces mandatory thinking (planning before action), accepts only one
  * tool per turn, and recovers gracefully from recoverable errors (malformed JSON).
  *
+ * Not currently constructed by the default pipeline — the unified agent
+ * turn (`agentTurn.ts`) completes every concurrent `run_steps_parallel`
+ * step through its own loop instead, with no separate persona or
+ * escalation ceremony (see `runToolCallLoop`). This class remains as a
+ * tested, documented extension point for a caller that wants that
+ * heavier ceremony (mandatory thinking, retry-then-escalate) for a
+ * distinct worker role.
+ *
  * @example
  * ```ts
  * const subagent = new Subagent({ ollama, config, agent });

@@ -53,13 +53,13 @@ describe("mergeConfigFromDisk", () => {
     expect(merged.ui.showSpinner).toBe(DEFAULT_CONFIG.ui.showSpinner);
   });
 
-  it("persists default / accept_edits / plan / auto and migrates auto_edit (normal)", () => {
-    expect(mergeConfigFromDisk({ approvalMode: "auto" }).approvalMode).toBe(
-      "auto",
-    );
+  it("persists default / accept_edits / plan and migrates auto_edit (normal)", () => {
     expect(
       mergeConfigFromDisk({ approvalMode: "accept_edits" }).approvalMode,
     ).toBe("accept_edits");
+    expect(
+      mergeConfigFromDisk({ approvalMode: "plan" }).approvalMode,
+    ).toBe("plan");
     expect(
       mergeConfigFromDisk({
         approvalMode: "auto_edit" as unknown as "accept_edits",
@@ -67,7 +67,12 @@ describe("mergeConfigFromDisk", () => {
     ).toBe("accept_edits");
   });
 
-  it("drops bypass and unknown approvalMode (error)", () => {
+  it("drops auto (session-only full bypass), bypass, and unknown approvalMode (error)", () => {
+    expect(
+      mergeConfigFromDisk({
+        approvalMode: "auto" as unknown as "default",
+      }).approvalMode,
+    ).toBe("default");
     expect(
       mergeConfigFromDisk({
         approvalMode: "bypass" as unknown as "default",

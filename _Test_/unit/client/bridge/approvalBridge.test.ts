@@ -3,7 +3,7 @@
  *
  * Covers the pending-approval queue, Esc/disconnect defaults, notifications,
  * session allowlist short-circuits, and approval-mode short-circuits
- * (`accept_edits` / `auto` / `bypass`).
+ * (`accept_edits` / `auto`, where `auto` is full bypass).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -156,24 +156,14 @@ describe("requestApproval mode short-circuits (WS-B)", () => {
     modeLabel: null,
   };
 
-  it("bypass auto-approves every request type without notifying (normal)", async () => {
+  it("auto (full bypass) auto-approves every request type without notifying (normal)", async () => {
     setInkUIActiveValue(true);
-    setSessionApprovalMode("bypass");
+    setSessionApprovalMode("auto");
 
     expect(await requestApproval(keepUndo)).toBe(true);
     expect(await requestApproval(runSkip)).toBe(true);
     // planReview resolves a PlanDecision — the server rejects boolean true.
     expect(await requestApproval(planReview)).toBe("implement");
-    expect(mockNotifyUser).not.toHaveBeenCalled();
-  });
-
-  it("auto auto-approves keepUndo without notifying (normal)", async () => {
-    setInkUIActiveValue(true);
-    setSessionApprovalMode("auto");
-
-    expect(
-      await requestApproval({ type: "keepUndo", contextLabel: "d.ts" }),
-    ).toBe(true);
     expect(mockNotifyUser).not.toHaveBeenCalled();
   });
 
@@ -185,24 +175,6 @@ describe("requestApproval mode short-circuits (WS-B)", () => {
     expect(mockNotifyUser).toHaveBeenCalledOnce();
     resolveApproval(false);
     expect(await pending).toBe(false);
-  });
-
-  it("auto still prompts runSkip — the command layer gates shell (boundary)", async () => {
-    setInkUIActiveValue(true);
-    setSessionApprovalMode("auto");
-
-    const pending = requestApproval(runSkip);
-    expect(mockNotifyUser).toHaveBeenCalledOnce();
-    resolveApproval(true);
-    expect(await pending).toBe(true);
-  });
-
-  it("auto auto-approves planReview with implement (normal)", async () => {
-    setInkUIActiveValue(true);
-    setSessionApprovalMode("auto");
-
-    expect(await requestApproval(planReview)).toBe("implement");
-    expect(mockNotifyUser).not.toHaveBeenCalled();
   });
 
   it("accept_edits still prompts planReview (boundary)", async () => {

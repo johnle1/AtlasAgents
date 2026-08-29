@@ -6,7 +6,6 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { AbortError } from "../../../../packages/server/src/errors/index.js";
 import { OrchestrationError } from "../../../../packages/server/src/errors/orchestrationError.js";
 import { emptyCommandPlan } from "../../../../packages/server/src/orchestration/types.js";
-import type { Subagent } from "../../../../packages/server/src/orchestration/subagent/subagent.js";
 import type { TaskFrame } from "../../../../packages/server/src/transport/frames.js";
 
 const exploreCodebaseMock = vi.hoisted(() =>
@@ -163,34 +162,27 @@ describe("preparePlanningContext", () => {
 });
 
 describe("runAgentPool", () => {
-  it("runs subtasks and fills resultMap", async () => {
+  it("runs subtasks through runSubtask and fills resultMap", async () => {
     const plan = basePlan();
     const resultMap = new Map();
-    const subagent = {
-      run: vi.fn(async () => ({
-        ok: true,
-        summary: "done",
-        keyFindings: ["finding"],
-        filesTouched: ["a.ts"],
-      })),
-    } as unknown as Subagent;
+    const runSubtask = vi.fn(async () => ({
+      ok: true,
+      summary: "done",
+      keyFindings: ["finding"],
+      filesTouched: ["a.ts"],
+    }));
     const statusFrames: TaskFrame[] = [];
 
-    const ordered = await runAgentPool(subagent, {
-      taskId: "task-1",
+    const ordered = await runAgentPool({
       plan,
-      skillBody: "",
       maxSubagents: 1,
-      experienceRecorder: {} as never,
-      perConn: { workspace: {}, terminal: {} } as never,
-      modelOverrides: undefined,
       resultMap,
-      emit: vi.fn(),
+      runSubtask,
       emitStatus: (frame) => statusFrames.push(frame),
       signal: new AbortController().signal,
     });
 
-    expect(subagent.run).toHaveBeenCalledOnce();
+    expect(runSubtask).toHaveBeenCalledOnce();
     expect(resultMap.get(1)?.summary).toBe("done");
     expect(ordered).toHaveLength(1);
     expect(ordered[0]?.content).toContain("done");
@@ -200,26 +192,19 @@ describe("runAgentPool", () => {
   });
 
   it("throws OrchestrationError when a subtask fails", async () => {
-    const subagent = {
-      run: vi.fn(async () => ({
-        ok: false,
-        summary: "boom",
-        keyFindings: [],
-        filesTouched: [],
-      })),
-    } as unknown as Subagent;
+    const runSubtask = vi.fn(async () => ({
+      ok: false,
+      summary: "boom",
+      keyFindings: [],
+      filesTouched: [],
+    }));
 
     await expect(
-      runAgentPool(subagent, {
-        taskId: "t",
+      runAgentPool({
         plan: basePlan(),
-        skillBody: "",
         maxSubagents: 1,
-        experienceRecorder: {} as never,
-        perConn: { workspace: {}, terminal: {} } as never,
-        modelOverrides: undefined,
         resultMap: new Map(),
-        emit: vi.fn(),
+        runSubtask,
         emitStatus: vi.fn(),
         signal: new AbortController().signal,
       }),
@@ -229,19 +214,14 @@ describe("runAgentPool", () => {
   it("throws AbortError when signal is aborted", async () => {
     const controller = new AbortController();
     controller.abort("stop");
-    const subagent = { run: vi.fn() } as unknown as Subagent;
+    const runSubtask = vi.fn();
 
     await expect(
-      runAgentPool(subagent, {
-        taskId: "t",
+      runAgentPool({
         plan: basePlan(),
-        skillBody: "",
         maxSubagents: 1,
-        experienceRecorder: {} as never,
-        perConn: { workspace: {}, terminal: {} } as never,
-        modelOverrides: undefined,
         resultMap: new Map(),
-        emit: vi.fn(),
+        runSubtask,
         emitStatus: vi.fn(),
         signal: controller.signal,
       }),

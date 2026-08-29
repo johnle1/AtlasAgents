@@ -42,18 +42,6 @@ export const COMMAND_CATALOG: CommandEntry[] = [
     requiresArgs: true,
   },
   {
-    command: "/set agent",
-    description:
-      "Choose agent model (from any configured provider) — same model as subagent is fine",
-  },
-  {
-    command: "/set approval",
-    label: "/set approval [mode]",
-    description:
-      "Set permission mode (default / accept_edits / plan / auto / bypass)",
-    requiresArgs: true,
-  },
-  {
     command: "/providers list",
     description: "List configured providers and their role assignment",
   },
@@ -83,6 +71,11 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   {
     command: "/theme",
     description: "Choose terminal color theme",
+  },
+  {
+    command: "/model",
+    description:
+      "Choose agent model (from any configured provider) — same model as subagent is fine",
   },
   {
     command: "/skills list",

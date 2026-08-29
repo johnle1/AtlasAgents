@@ -94,6 +94,10 @@ describe("context-backed components", () => {
       // gone — plan mode's checklist no longer surfaces per-agent grouping.
       expect(rendered).not.toContain("agent");
       expect(rendered).not.toContain("sequential");
+      // Claude-Code-style option rows.
+      expect(rendered).toContain("Yes, and auto-accept edits");
+      expect(rendered).toContain("Yes, and manually approve edits");
+      expect(rendered).toContain("No, keep planning");
       tree.unmount();
     } finally {
       mockContext.approval = previousApproval;

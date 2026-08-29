@@ -38,9 +38,7 @@ describe("getCommandSuggestions — normal cases", () => {
     expect(commands).toContain("/set password");
     expect(commands).toContain("/set server");
     expect(commands).toContain("/set port");
-    expect(commands).toContain("/set agent");
     expect(commands).toContain("/set subagent");
-    expect(commands).toContain("/set approval");
   });
 
   it("narrows to /set subagent when typing '/set sub' (normal — regression, was missing from the catalog)", () => {
@@ -251,14 +249,7 @@ describe("COMMAND_CATALOG — /set drift guard", () => {
     // Mirrors the usage string in configHandlers.ts's handleSetConfig — keep
     // this list in lockstep with that switch statement's case labels so a
     // new /set subcommand can't ship without also being autocomplete-visible.
-    const subcommands = [
-      "password",
-      "server",
-      "port",
-      "agent",
-      "subagent",
-      "approval",
-    ];
+    const subcommands = ["password", "server", "port", "subagent"];
     const commands = COMMAND_CATALOG.map((entry) => entry.command);
     for (const subcommand of subcommands) {
       expect(commands).toContain(`/set ${subcommand}`);
@@ -285,5 +276,14 @@ describe("COMMAND_CATALOG — Phase 1 entries", () => {
     const description = getCommandDescription("/exit");
     expect(description).not.toMatch(/Ctrl\+L/i);
     expect(description).toMatch(/Ctrl\+C/);
+  });
+});
+
+describe("COMMAND_CATALOG — /model (replaces /set agent)", () => {
+  it("has a top-level /model entry and no /set agent or /set approval entries (normal)", () => {
+    const commands = COMMAND_CATALOG.map((entry) => entry.command);
+    expect(commands).toContain("/model");
+    expect(commands).not.toContain("/set agent");
+    expect(commands).not.toContain("/set approval");
   });
 });

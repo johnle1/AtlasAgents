@@ -110,8 +110,9 @@ export type ToolHandlerContext = {
   commandPlan: CommandPlan;
   /**
    * Present only in the top-level agent turn (never for a dispatched
-   * subagent) — backs the `update_plan` and `run_steps_parallel` tools.
-   * Absent from a subagent's context, since neither tool is offered there.
+   * parallel step) — backs the `update_plan` and `run_steps_parallel`
+   * tools. Absent from a parallel step's own context, since neither tool
+   * is offered there.
    */
   planTools?: {
     /**
@@ -124,8 +125,9 @@ export type ToolHandlerContext = {
       note?: string,
     ) => Promise<PlanToolDecision>;
     /**
-     * Runs a batch of independent step ids through the hidden subagent pool
-     * and marks them done/failed on the live checklist.
+     * Runs a batch of independent step ids concurrently (each completed by
+     * the same unified agent loop as the top-level turn, not a distinct
+     * subagent) and marks them done/failed on the live checklist.
      */
     runStepsParallel: (stepIds: number[]) => Promise<{
       ok: boolean;

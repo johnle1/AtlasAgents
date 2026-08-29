@@ -21,7 +21,7 @@ export type ApprovalModeDisplay = {
   label: string;
   /** Ink `color` hex when the mode should stand out; omit for dim default. */
   color?: string;
-  /** When true, render the label bold (bypass). */
+  /** When true, render the label bold (auto). */
   bold?: boolean;
 };
 
@@ -33,8 +33,7 @@ export const APPROVAL_MODE_DISPLAY: Record<ApprovalMode, ApprovalModeDisplay> =
     default: { label: "default" },
     accept_edits: { label: "⏵ Accept Edits", color: "#FB923C" },
     plan: { label: "⏸ Plan", color: "#60A5FA" },
-    auto: { label: "⏵⏵ Auto", color: "#A78BFA" },
-    bypass: { label: "⚠ BYPASS", color: "#FF5555", bold: true },
+    auto: { label: "⏵⏵ Auto", color: "#FF5555", bold: true },
   };
 
 /** The `Config` fields sensitive enough to encrypt at rest. */
@@ -343,8 +342,8 @@ export interface Config {
    * Session permission mode persisted across launches.
    *
    * @remarks
-   * `"default"` | `"accept_edits"` | `"plan"` | `"auto"`. `"bypass"` is
-   * session-only and is never stored here — a hand-edited `"bypass"` value
+   * `"default"` | `"accept_edits"` | `"plan"`. `"auto"` (full bypass) is
+   * session-only and is never stored here — a hand-edited `"auto"` value
    * is coerced to `"default"` on load.
    */
   approvalMode: PersistedApprovalMode;

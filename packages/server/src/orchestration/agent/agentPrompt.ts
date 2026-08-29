@@ -22,9 +22,9 @@ const AGENT_TURN_RULES = `
 - If the answer depends on this workspace (a file's contents, git history, test output, project structure), call the one tool that gets it — read_file for a known path, run_command for things like git log/grep/ls/tests. Prefer a single targeted call over a sweep.
 - Call update_plan only when the work is genuinely multi-step (roughly 3+ steps, or several independent surfaces). Skip it for a question or a single small edit — most turns need no plan at all.
 - When you do use update_plan: lay out the steps once, mark a step in_progress before you start it, mark it done right after, and call it again whenever status changes. The user sees your checklist update live.
-- Use run_steps_parallel only for steps you have marked independent (no dependsOn between them) in the checklist — it runs them concurrently via hidden background workers and reports back. Most work does not need this; do it yourself in-loop by default.
+- Use run_steps_parallel only for steps you have marked independent (no dependsOn between them) in the checklist — it runs them concurrently and reports back once every step finishes. Most work does not need this; do it yourself in-loop by default.
 - Before finishing a turn that edited files, verify the change (re-read the file, or run a test/build command) — finish will reject an unverified write. A conversational answer needs no verification.
-- Call finish to end a multi-step turn with a summary. For a direct answer or a quick lookup, just reply with text — no finish call needed.
+- Call finish to end a multi-step turn with a summary (add ok: false if it could not be completed). For a direct answer or a quick lookup, just reply with text — no finish call needed.
 - One tool call per turn, then stop and wait for its result.
 `.trim();
 
@@ -32,6 +32,24 @@ const AGENT_TURN_RULES = `
 const PLAN_MODE_NOTICE = `
 [PLAN MODE]
 The user is reviewing plans before anything runs. You may read_file and search freely to investigate, but write_file, edit_file, run_command, and run_steps_parallel are not offered until your plan is approved. For any non-trivial task: investigate, then call update_plan with your proposed steps and wait for approval before doing anything else. A pure question still needs no plan — just answer it.
+`.trim();
+
+/**
+ * Rules for one concurrent step dispatched by `run_steps_parallel`.
+ *
+ * @remarks
+ * Deliberately much shorter than {@link AGENT_TURN_RULES} — a step is one
+ * declared-independent unit of work, not a full conversational turn, so it
+ * skips the "answer directly" framing, the checklist rules (the checklist
+ * belongs to the parent turn, not to one of its steps), and carried-over
+ * plan handling.
+ */
+const WORKER_TURN_RULES = `
+[HOW TO WORK]
+- Use tools as needed to complete the step described below. Other independent steps may be running concurrently — work only on the step you were given.
+- Before finishing a step that edited files, verify the change (re-read the file, or run a test/build command).
+- Call finish with a concise summary once the step is complete, or with ok: false and a short explanation if it cannot be completed.
+- One tool call per turn, then stop and wait for its result.
 `.trim();
 
 /**
@@ -96,4 +114,35 @@ export const buildAgentTurnSystemText = (params: {
     parts.push(PLAN_MODE_NOTICE);
   }
   return parts.join("\n\n");
+};
+
+/**
+ * Builds the system prompt for one concurrent step dispatched by
+ * `run_steps_parallel` (see `agentTurn.ts`'s `runWorkerStep`).
+ *
+ * @remarks
+ * No skill content, memory context, or resume block — those belong to the
+ * parent turn. A step gets only the environment, its own tool catalog
+ * (narrower than the parent's — see `createWorkerToolRegistry`), and a
+ * short rule set for completing one focused unit of work.
+ *
+ * @param params.clientEnv - Client platform info for the environment block.
+ * @param params.toolSchemas - The worker registry's schemas for the catalog/teaching block.
+ * @param params.configuredSupportsTools - Same meaning as in {@link buildAgentTurnSystemText}.
+ * @returns Complete system prompt string for one concurrent step.
+ */
+export const buildWorkerSystemText = (params: {
+  clientEnv: ClientEnv | undefined;
+  toolSchemas: ToolSchema[];
+  configuredSupportsTools: boolean;
+}): string => {
+  const { clientEnv, toolSchemas, configuredSupportsTools } = params;
+  return [
+    "You are Atlas, completing one focused step of a larger task in the user's workspace.",
+    buildEnvironmentBlock(clientEnv),
+    configuredSupportsTools
+      ? buildToolCatalogBlock(toolSchemas)
+      : buildLegacyToolBlock(toolSchemas),
+    WORKER_TURN_RULES,
+  ].join("\n\n");
 };

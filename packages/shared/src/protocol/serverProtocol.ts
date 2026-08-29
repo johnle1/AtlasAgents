@@ -250,8 +250,8 @@ export type TaskStreamPayload = {
 
   /**
    * Session approval mode. `"plan"` stops after confirm-plan; other values
-   * execute. `"accept_edits"` / `"auto"` / `"bypass"` are client-side
-   * permission policies the server does not enforce.
+   * execute. `"accept_edits"` / `"auto"` are client-side permission
+   * policies the server does not enforce.
    */
   approvalMode?: TaskApprovalMode;
 
@@ -285,7 +285,6 @@ export type TaskApprovalMode =
   | "accept_edits"
   | "plan"
   | "auto"
-  | "bypass"
   | "auto_edit";
 
 /**
@@ -313,8 +312,7 @@ export const normalizeTaskApprovalMode = (raw: unknown): TaskApprovalMode => {
     raw === "default" ||
     raw === "accept_edits" ||
     raw === "plan" ||
-    raw === "auto" ||
-    raw === "bypass"
+    raw === "auto"
   ) {
     return raw;
   }

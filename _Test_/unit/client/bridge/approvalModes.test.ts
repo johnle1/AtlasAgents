@@ -1,14 +1,15 @@
 /**
  * Unit tests — client ui/bridge/allowlist.ts approval-mode model (WS-A).
  *
- * Five modes exist; Shift+Tab cycles only the safe three. `auto` and
- * `bypass` are reachable solely via `/set approval`. Labels are what the
- * footer shows.
+ * Four modes exist; Shift+Tab cycles all of them — it is the only way to
+ * change mode, there is no slash command. `auto` (full bypass, renamed
+ * from the old `bypass`) is session-only and is never persisted. Labels
+ * are what the footer shows.
  *
  * Category checklist:
- * - Normal: 3-cycle idle; labels for every mode
- * - Boundary: plan skipped while busy; auto/bypass never enter the cycle
- * - Error: unknown / bypass input is not persistable
+ * - Normal: 4-cycle idle; labels for every mode
+ * - Boundary: plan skipped while busy, auto is not
+ * - Error: unknown input is not persistable; auto is not persistable
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -27,10 +28,11 @@ afterEach(() => {
 });
 
 describe("cycleApprovalMode (normal)", () => {
-  it("cycles default → accept_edits → plan → default when idle", () => {
+  it("cycles default → accept_edits → plan → auto → default when idle", () => {
     expect(cycleApprovalMode("default", false)).toBe("accept_edits");
     expect(cycleApprovalMode("accept_edits", false)).toBe("plan");
-    expect(cycleApprovalMode("plan", false)).toBe("default");
+    expect(cycleApprovalMode("plan", false)).toBe("auto");
+    expect(cycleApprovalMode("auto", false)).toBe("default");
   });
 });
 
@@ -39,22 +41,12 @@ describe("cycleApprovalMode (boundary)", () => {
     expect(cycleApprovalMode("accept_edits", true)).toBe("default");
   });
 
-  it("never lands on auto or bypass from any cycle start", () => {
-    const starts = ["default", "accept_edits", "plan", "auto", "bypass"] as const;
-    for (const start of starts) {
-      const idle = cycleApprovalMode(start, false);
-      const busy = cycleApprovalMode(start, true);
-      expect(idle).not.toBe("auto");
-      expect(idle).not.toBe("bypass");
-      expect(busy).not.toBe("auto");
-      expect(busy).not.toBe("bypass");
-      expect(busy).not.toBe("plan");
-    }
+  it("does not skip auto while busy — useful for un-sticking a stuck prompt", () => {
+    expect(cycleApprovalMode("plan", true)).toBe("auto");
   });
 
-  it("returns default when cycling out of auto or bypass", () => {
-    expect(cycleApprovalMode("auto", false)).toBe("default");
-    expect(cycleApprovalMode("bypass", false)).toBe("default");
+  it("still cycles auto → default while busy (no special-casing beyond plan)", () => {
+    expect(cycleApprovalMode("auto", true)).toBe("default");
   });
 });
 
@@ -63,13 +55,12 @@ describe("formatApprovalModeLabel", () => {
     expect(formatApprovalModeLabel("default")).toBe("default");
     expect(formatApprovalModeLabel("accept_edits")).toBe("⏵ Accept Edits");
     expect(formatApprovalModeLabel("plan")).toBe("⏸ Plan");
-    expect(formatApprovalModeLabel("auto")).toBe("⏵⏵ Auto");
-    expect(formatApprovalModeLabel("bypass")).toBe("⚠ BYPASS");
+    expect(formatApprovalModeLabel("auto")).toBe("⚠ Auto");
   });
 });
 
 describe("approvalModeDisplay", () => {
-  it("attaches footer colors and bypass bold (normal)", () => {
+  it("attaches footer colors and auto's bold warning styling (normal)", () => {
     expect(approvalModeDisplay("plan")).toEqual({
       label: "⏸ Plan",
       color: "#60A5FA",
@@ -79,11 +70,7 @@ describe("approvalModeDisplay", () => {
       color: "#FB923C",
     });
     expect(approvalModeDisplay("auto")).toEqual({
-      label: "⏵⏵ Auto",
-      color: "#A78BFA",
-    });
-    expect(approvalModeDisplay("bypass")).toEqual({
-      label: "⚠ BYPASS",
+      label: "⚠ Auto",
       color: "#FF5555",
       bold: true,
     });
@@ -97,24 +84,25 @@ describe("parseApprovalMode", () => {
     expect(parseApprovalMode("accept_edits")).toBe("accept_edits");
     expect(parseApprovalMode("auto_edit")).toBe("accept_edits");
     expect(parseApprovalMode("AUTO")).toBe("auto");
-    expect(parseApprovalMode("bypass")).toBe("bypass");
   });
 
-  it("returns null for unknown input (error)", () => {
+  it("returns null for unknown input, including the removed bypass alias (error)", () => {
     expect(parseApprovalMode("nope")).toBeNull();
     expect(parseApprovalMode("")).toBeNull();
+    expect(parseApprovalMode("bypass")).toBeNull();
   });
 });
 
 describe("parsePersistedApprovalMode", () => {
   it("keeps persistable modes and migrates auto_edit (normal)", () => {
-    expect(parsePersistedApprovalMode("auto")).toBe("auto");
     expect(parsePersistedApprovalMode("accept_edits")).toBe("accept_edits");
     expect(parsePersistedApprovalMode("auto_edit")).toBe("accept_edits");
     expect(parsePersistedApprovalMode("plan")).toBe("plan");
+    expect(parsePersistedApprovalMode("default")).toBe("default");
   });
 
-  it("rejects bypass and unknown values (error)", () => {
+  it("rejects auto and unknown values (error)", () => {
+    expect(parsePersistedApprovalMode("auto")).toBe("default");
     expect(parsePersistedApprovalMode("bypass")).toBe("default");
     expect(parsePersistedApprovalMode("nope")).toBe("default");
     expect(parsePersistedApprovalMode(undefined)).toBe("default");

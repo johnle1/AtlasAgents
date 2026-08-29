@@ -1,14 +1,17 @@
 /**
- * The `run_steps_parallel` tool: dispatches a batch of independent checklist
- * steps to the hidden subagent worker pool.
+ * The `run_steps_parallel` tool: runs a batch of independent checklist steps
+ * concurrently.
  *
  * @remarks
- * This is the *only* way the unified agent loop uses subagents — it is a
- * capability the agent chooses for genuinely independent steps, never
+ * This is the *only* way the unified agent loop runs work concurrently — it
+ * is a capability the agent chooses for genuinely independent steps, never
  * something the user configures or sees directly. There is no per-agent
  * board or progress UI for it; the client only sees the checklist entries
  * for the given step ids move to `done` (or `failed`) once the batch
- * finishes, via the same `update_plan` snapshot mechanism.
+ * finishes, via the same `update_plan` snapshot mechanism. Each concurrent
+ * step is completed by the same unified agent loop the top-level turn
+ * uses — see `agentTurn.ts`'s `runStepsParallel` closure — never a
+ * separate subagent persona or model.
  */
 
 import type {
@@ -41,7 +44,7 @@ const parseStepIds = (raw: unknown): number[] => {
  * @example
  * Agent calls `run_steps_parallel({ stepIds: [2, 3] })` after `update_plan`
  * declared steps 2 and 3 as independent (no `dependsOn` between them) — both
- * run concurrently via the hidden subagent pool.
+ * run concurrently.
  */
 export const runStepsParallelTool: ToolHandler = {
   schema: {
@@ -49,7 +52,7 @@ export const runStepsParallelTool: ToolHandler = {
     function: {
       name: "run_steps_parallel",
       description:
-        "Run 2+ independent checklist steps concurrently via hidden background workers. Only for steps with no dependency between them (declared via update_plan). Blocks until all finish; the checklist reflects the result.",
+        "Run 2+ independent checklist steps concurrently. Only for steps with no dependency between them (declared via update_plan). Blocks until all finish; the checklist reflects the result.",
       parameters: {
         type: "object",
         properties: {
