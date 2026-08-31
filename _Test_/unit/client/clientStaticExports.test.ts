@@ -8,9 +8,16 @@ vi.hoisted(() => {
   const fs = require("node:fs") as typeof import("node:fs");
   const os = require("node:os") as typeof import("node:os");
   const path = require("node:path") as typeof import("node:path");
-  process.env.HOME = fs.mkdtempSync(
+  const dir = fs.mkdtempSync(
     path.join(os.tmpdir(), "atlas-client-static-exports-"),
   );
+  // os.homedir() reads HOME on POSIX but USERPROFILE on Windows — both must
+  // be set or Windows CI operates on the real home directory instead of this
+  // temp one. Duplicated here (rather than using helpers/tempHome.ts)
+  // because vi.hoisted() runs before ESM imports are bound, so it can't
+  // import that helper.
+  process.env.HOME = dir;
+  process.env.USERPROFILE = dir;
 });
 
 import { runConfigRepair } from "../../../packages/client/src/cli/configRepair.js";

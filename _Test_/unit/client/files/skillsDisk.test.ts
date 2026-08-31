@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createTempHome, type TempHome } from "../../../helpers/tempHome.js";
 
 describe("skills disk helpers", () => {
   let listSkills: typeof import("../../../../packages/client/src/skills/skills.js").listSkills;
@@ -14,15 +15,12 @@ describe("skills disk helpers", () => {
   let ensureSkillsDir: typeof import("../../../../packages/client/src/skills/skills.js").ensureSkillsDir;
   let installDefaultSkills: typeof import("../../../../packages/client/src/skills/skills.js").installDefaultSkills;
   let SkillManager: typeof import("../../../../packages/client/src/skills/skills.js").SkillManager;
-  let originalHome: string | undefined;
-  let tempHome: string;
+  let tempHome: TempHome;
   let skillsDir: string;
 
   beforeAll(async () => {
-    originalHome = process.env.HOME;
-    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-skills-test-"));
-    process.env.HOME = tempHome;
-    skillsDir = path.join(tempHome, ".atlasagents", "skills");
+    tempHome = createTempHome("atlas-skills-test-");
+    skillsDir = path.join(tempHome.dir, ".atlasagents", "skills");
 
     const mod = await import("../../../../packages/client/src/skills/skills.js");
     listSkills = mod.listSkills;
@@ -34,8 +32,7 @@ describe("skills disk helpers", () => {
   });
 
   afterAll(() => {
-    process.env.HOME = originalHome;
-    fs.rmSync(tempHome, { recursive: true, force: true });
+    tempHome.restore();
   });
 
   it("ensureSkillsDir creates the skills directory", () => {

@@ -47,6 +47,7 @@ import { ConfigManager } from "../../../packages/server/src/config/index.js";
 import { lockCipher } from "@atlasagents/shared";
 import { OllamaClient } from "../../../packages/server/src/ollama/client.js";
 import { ProviderRegistry } from "../../../packages/server/src/providers/providerRegistry.js";
+import { McpToolsCacheStore } from "../../../packages/server/src/orchestration/mcp/mcpToolsCacheStore.js";
 
 const tempRoots: string[] = [];
 
@@ -101,6 +102,9 @@ const makeRouter = (config: ConfigManager) => {
       runTask: async () => {},
     },
     brokerByRequester: new Map(),
+    mcpToolsCacheStore: new McpToolsCacheStore({
+      rootDir: path.join(os.tmpdir(), "atlas-provider-secrets-flow-mcp-cache"),
+    }),
     createPerConnection: () => {
       throw new Error("not used by these tests");
     },

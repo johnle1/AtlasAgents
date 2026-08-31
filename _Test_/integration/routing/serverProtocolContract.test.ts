@@ -61,6 +61,7 @@ import { ConfigManager } from "../../../packages/server/src/config/index.js";
 import { lockCipher } from "@atlasagents/shared";
 import { OllamaClient } from "../../../packages/server/src/ollama/client.js";
 import { ProviderRegistry } from "../../../packages/server/src/providers/providerRegistry.js";
+import { McpToolsCacheStore } from "../../../packages/server/src/orchestration/mcp/mcpToolsCacheStore.js";
 
 const tempRoots: string[] = [];
 
@@ -103,6 +104,7 @@ const makeRouter = async () => {
     },
     orchestrator: { runTask: async () => {} },
     brokerByRequester: new Map(),
+    mcpToolsCacheStore: new McpToolsCacheStore({ rootDir: root }),
     createPerConnection: () => {
       throw new Error("no per-connection container in this suite");
     },

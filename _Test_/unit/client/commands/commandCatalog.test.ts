@@ -38,12 +38,6 @@ describe("getCommandSuggestions — normal cases", () => {
     expect(commands).toContain("/set password");
     expect(commands).toContain("/set server");
     expect(commands).toContain("/set port");
-    expect(commands).toContain("/set subagent");
-  });
-
-  it("narrows to /set subagent when typing '/set sub' (normal — regression, was missing from the catalog)", () => {
-    const suggestions = getCommandSuggestions("/set sub");
-    expect(suggestions.map((s) => s.command)).toEqual(["/set subagent"]);
   });
 
   it("returns all /models sub-commands when typing '/models' (normal)", () => {
@@ -224,10 +218,6 @@ describe("getCommandDescription — normal cases", () => {
     expect(desc.length).toBeGreaterThan(0);
   });
 
-  it("returns a subagent-specific description for /set subagent (normal — regression, was missing from the catalog)", () => {
-    const desc = getCommandDescription("/set subagent");
-    expect(desc).toContain("subagent");
-  });
 });
 
 describe("getCommandDescription — boundary / error cases", () => {
@@ -245,11 +235,13 @@ describe("getCommandDescription — boundary / error cases", () => {
 // ---------------------------------------------------------------------------
 
 describe("COMMAND_CATALOG — /set drift guard", () => {
-  it("has a catalog entry for every /set subcommand handleSetConfig accepts (regression — /set subagent was silently missing)", () => {
+  it("has a catalog entry for every /set subcommand handleSetConfig accepts", () => {
     // Mirrors the usage string in configHandlers.ts's handleSetConfig — keep
     // this list in lockstep with that switch statement's case labels so a
     // new /set subcommand can't ship without also being autocomplete-visible.
-    const subcommands = ["password", "server", "port", "subagent"];
+    // `subagent` is deliberately excluded: it's still a valid /set subcommand
+    // (see configHandlers.ts), just not surfaced in autocomplete.
+    const subcommands = ["password", "server", "port"];
     const commands = COMMAND_CATALOG.map((entry) => entry.command);
     for (const subcommand of subcommands) {
       expect(commands).toContain(`/set ${subcommand}`);

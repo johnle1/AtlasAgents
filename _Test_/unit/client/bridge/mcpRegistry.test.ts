@@ -16,6 +16,7 @@ import {
   getToolMetadata,
   namespaceToolName,
   parseNamespacedTool,
+  rebuildToolRegistry,
   registerToolMetadata,
   resetToolRegistryForTests,
   resolveToolReadOnly,
@@ -109,6 +110,65 @@ describe("tool metadata registry", () => {
 
   it("returns undefined for a tool never registered (error)", () => {
     expect(getToolMetadata("mcp__unknown__tool")).toBeUndefined();
+  });
+});
+
+describe("rebuildToolRegistry", () => {
+  beforeEach(() => {
+    resetToolRegistryForTests();
+  });
+
+  it("populates the registry from cache entries with no discovery call (normal — the warm-cache-bug fix)", () => {
+    rebuildToolRegistry({
+      github: {
+        tools: [{ name: "create_issue", inputSchema: {}, readOnly: false }],
+      },
+    });
+    expect(getToolMetadata("mcp__github__create_issue")).toEqual({
+      serverId: "github",
+      toolName: "create_issue",
+      readOnly: false,
+    });
+  });
+
+  it("clears any previously-registered tool not present in the new entries (normal — prunes removed servers)", () => {
+    registerToolMetadata("stale", "old_tool", false);
+    rebuildToolRegistry({
+      github: {
+        tools: [{ name: "create_issue", inputSchema: {}, readOnly: false }],
+      },
+    });
+    expect(getToolMetadata("mcp__stale__old_tool")).toBeUndefined();
+    expect(getToolMetadata("mcp__github__create_issue")).toBeDefined();
+  });
+
+  it("skips an inactive (disabled) entry's tools entirely (boundary)", () => {
+    rebuildToolRegistry({
+      github: {
+        inactive: true,
+        tools: [{ name: "create_issue", inputSchema: {}, readOnly: false }],
+      },
+    });
+    expect(getToolMetadata("mcp__github__create_issue")).toBeUndefined();
+  });
+
+  it("registers multiple servers' tools in one call (normal)", () => {
+    rebuildToolRegistry({
+      github: { tools: [{ name: "create_issue", inputSchema: {}, readOnly: false }] },
+      jira: { tools: [{ name: "search", inputSchema: {}, readOnly: true }] },
+    });
+    expect(getToolMetadata("mcp__github__create_issue")).toBeDefined();
+    expect(getToolMetadata("mcp__jira__search")).toEqual({
+      serverId: "jira",
+      toolName: "search",
+      readOnly: true,
+    });
+  });
+
+  it("an empty entries map clears the registry (error — a wiped cache disables every tool)", () => {
+    registerToolMetadata("github", "create_issue", false);
+    rebuildToolRegistry({});
+    expect(getToolMetadata("mcp__github__create_issue")).toBeUndefined();
   });
 });
 

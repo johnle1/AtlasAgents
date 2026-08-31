@@ -96,7 +96,7 @@ describe("buildFooterLine", () => {
         contextPct: null,
         width: 80,
       }),
-    ).toContain("⚠ Auto");
+    ).toContain("⏵⏵ Auto");
   });
 
   it("truncates with an ellipsis when the terminal is narrower than the line (boundary)", () => {

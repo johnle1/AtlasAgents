@@ -38,6 +38,7 @@ import { OllamaClient } from "../../../packages/server/src/ollama/client.js";
 import { ProviderRegistry } from "../../../packages/server/src/providers/providerRegistry.js";
 import { SkillManager } from "../../../packages/server/src/skills/skillManager.js";
 import { SKILLS_REL_DIR } from "../../../packages/server/src/skills/skillConstants.js";
+import { McpToolsCacheStore } from "../../../packages/server/src/orchestration/mcp/mcpToolsCacheStore.js";
 
 const tempRoots: string[] = [];
 
@@ -201,6 +202,9 @@ const makeRouter = (config: ConfigManager, skills: SkillManager) => {
     },
     orchestrator: { runTask: async () => {} },
     brokerByRequester: new Map(),
+    mcpToolsCacheStore: new McpToolsCacheStore({
+      rootDir: path.join(os.tmpdir(), "atlas-skill-flow-mcp-cache"),
+    }),
     createPerConnection: () => {
       throw new Error("not used by these tests");
     },

@@ -61,7 +61,6 @@ describe("ConfigManager provider defaults — back-compat", () => {
       configPath,
       JSON.stringify({
         subagentModel: "gemma3:27b",
-        subsubagentModel: "gemma3:4b",
       }),
     );
 

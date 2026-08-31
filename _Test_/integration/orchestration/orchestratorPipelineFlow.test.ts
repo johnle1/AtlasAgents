@@ -407,3 +407,69 @@ describe("orchestrator pipeline — model placement warning", () => {
     expect(frames.some((frame) => frame.kind === "warning")).toBe(true);
   });
 });
+
+describe("orchestrator pipeline — regression guard: override short-circuits an unset server model", () => {
+  it("uses the override without ever calling getAgentModel when a per-task override is supplied (normal)", async () => {
+    // Reproduces the real ConfigManager.getAgentModel() contract (throws on
+    // an empty server-side model) rather than makeConfig()'s always-succeeds
+    // fake — the bug this guards against was `await config.getAgentModel()`
+    // running unconditionally *before* the override was consulted, so an
+    // empty server config hard-failed every task even with a valid override.
+    const getAgentModel = vi.fn(async () => {
+      throw new Error("No agent model configured. Run /model to choose one.");
+    });
+    let capturedModel: string | undefined;
+    const config = {
+      ...makeConfig(),
+      getAgentModel,
+    };
+
+    const outcome = await runOrchestratorPipeline(
+      makeDeps({
+        config,
+        contextBuilder: makeContextBuilder((_taskText, modelOverride) => {
+          capturedModel = modelOverride;
+        }),
+        agentClient: makeAgentFinishClient("did the thing"),
+      }),
+      {
+        session: { userId: "u1", requesterId: "r1" },
+        taskText: "do the thing",
+        emit: () => {},
+        signal: new AbortController().signal,
+        perConn: makePerConnection(),
+        modelOverrides: { agentModel: "override-model" },
+      },
+    );
+
+    expect(outcome.ok).toBe(true);
+    expect(capturedModel).toBe("override-model");
+    expect(getAgentModel).not.toHaveBeenCalled();
+  });
+
+  it("still throws the real error when there is no override and the server model is unset (normal — no regression the other way)", async () => {
+    const config = {
+      ...makeConfig(),
+      getAgentModel: async () => {
+        throw new Error("No agent model configured. Run /model to choose one.");
+      },
+    };
+
+    await expect(
+      runOrchestratorPipeline(
+        makeDeps({
+          config,
+          contextBuilder: makeContextBuilder(),
+          agentClient: makeAgentFinishClient("did the thing"),
+        }),
+        {
+          session: { userId: "u1", requesterId: "r1" },
+          taskText: "do the thing",
+          emit: () => {},
+          signal: new AbortController().signal,
+          perConn: makePerConnection(),
+        },
+      ),
+    ).rejects.toThrow("No agent model configured");
+  });
+});

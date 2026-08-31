@@ -143,10 +143,13 @@ describe("handleMcp — add (preset)", () => {
     expect(mockPrintSuccess).toHaveBeenCalled();
   });
 
-  it("syncs tools to the server after adding a preset", async () => {
+  it("syncs tools to the server after adding a preset, passing the mutation (normal — skips the network round trip)", async () => {
     mockSyncAllMcpTools.mockResolvedValue(3);
     await handleMcp("add", "slack", conn, fileProxy, prompts);
-    expect(mockSyncAllMcpTools).toHaveBeenCalledWith(conn, "/workspace");
+    expect(mockSyncAllMcpTools).toHaveBeenCalledWith(conn, "/workspace", {
+      op: "add",
+      serverId: "slack",
+    });
     expect(mockPrintSuccess).toHaveBeenCalledWith(
       expect.stringContaining("Synced 3"),
     );
@@ -246,6 +249,10 @@ describe("handleMcp — remove", () => {
       mcpSecrets: {},
     });
     expect(mockDisconnectMcpClient).toHaveBeenCalledWith("github");
+    expect(mockSyncAllMcpTools).toHaveBeenCalledWith(conn, "/workspace", {
+      op: "remove",
+      serverId: "github",
+    });
   });
 
   it("rejects removing an unconfigured server (error)", async () => {
@@ -276,7 +283,10 @@ describe("handleMcp — enable/disable", () => {
         github: { transport: "http", url: "https://x", enabled: false },
       },
     });
-    expect(mockSyncAllMcpTools).toHaveBeenCalledWith(conn, "/workspace");
+    expect(mockSyncAllMcpTools).toHaveBeenCalledWith(conn, "/workspace", {
+      op: "toggle",
+      serverId: "github",
+    });
     expect(mockPrintSuccess).toHaveBeenCalledWith(
       expect.stringContaining("Disabled"),
     );
@@ -296,6 +306,10 @@ describe("handleMcp — enable/disable", () => {
       mcpServers: {
         github: { transport: "http", url: "https://x", enabled: true },
       },
+    });
+    expect(mockSyncAllMcpTools).toHaveBeenCalledWith(conn, "/workspace", {
+      op: "toggle",
+      serverId: "github",
     });
     expect(mockPrintSuccess).toHaveBeenCalledWith(
       expect.stringContaining("Enabled"),
@@ -442,6 +456,31 @@ describe("handleMcp — check", () => {
     await handleMcp("check", "nonexistent", conn, fileProxy, prompts);
     expect(mockPrintError).toHaveBeenCalledWith(
       expect.stringContaining("nonexistent"),
+    );
+  });
+});
+
+describe("handleMcp — refresh", () => {
+  it("forces a refresh of one named server (normal)", async () => {
+    mockSyncAllMcpTools.mockResolvedValue(2);
+    await handleMcp("refresh", "github", conn, fileProxy, prompts);
+    expect(mockSyncAllMcpTools).toHaveBeenCalledWith(conn, "/workspace", {
+      op: "refresh",
+      serverId: "github",
+    });
+    expect(mockPrintSuccess).toHaveBeenCalledWith(
+      expect.stringContaining('Refreshed "github"'),
+    );
+  });
+
+  it("forces a refresh of every server when no name is given (normal)", async () => {
+    mockSyncAllMcpTools.mockResolvedValue(5);
+    await handleMcp("refresh", "", conn, fileProxy, prompts);
+    expect(mockSyncAllMcpTools).toHaveBeenCalledWith(conn, "/workspace", {
+      op: "refresh",
+    });
+    expect(mockPrintSuccess).toHaveBeenCalledWith(
+      expect.stringContaining("Refreshed all MCP servers"),
     );
   });
 });

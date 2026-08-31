@@ -55,7 +55,7 @@ describe("formatApprovalModeLabel", () => {
     expect(formatApprovalModeLabel("default")).toBe("default");
     expect(formatApprovalModeLabel("accept_edits")).toBe("⏵ Accept Edits");
     expect(formatApprovalModeLabel("plan")).toBe("⏸ Plan");
-    expect(formatApprovalModeLabel("auto")).toBe("⚠ Auto");
+    expect(formatApprovalModeLabel("auto")).toBe("⏵⏵ Auto");
   });
 });
 
@@ -70,7 +70,7 @@ describe("approvalModeDisplay", () => {
       color: "#FB923C",
     });
     expect(approvalModeDisplay("auto")).toEqual({
-      label: "⚠ Auto",
+      label: "⏵⏵ Auto",
       color: "#FF5555",
       bold: true,
     });
