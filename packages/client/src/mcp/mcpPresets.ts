@@ -61,7 +61,7 @@ export const MCP_PRESETS: Record<string, McpPresetDefinition> = {
     config: {
       transport: "stdio",
       command: "npx",
-      args: ["-y", "mcp-remote", "https://mcp.atlassian.com/v1/sse"],
+      args: ["-y", "mcp-remote", "https://mcp.atlassian.com/v1/mcp/authv2"],
     },
     // mcp-remote opens a browser for OAuth on first connect — no static
     // token to collect up front.
@@ -76,7 +76,11 @@ export const MCP_PRESETS: Record<string, McpPresetDefinition> = {
       args: ["-y", "@modelcontextprotocol/server-slack"],
     },
     secretFields: [
-      { key: "SLACK_BOT_TOKEN", prompt: "Slack bot token (xoxb-...)", mask: true },
+      {
+        key: "SLACK_BOT_TOKEN",
+        prompt: "Slack bot token (xoxb-...)",
+        mask: true,
+      },
       { key: "SLACK_TEAM_ID", prompt: "Slack team/workspace ID" },
     ],
   },

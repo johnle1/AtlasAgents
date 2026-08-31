@@ -18,6 +18,7 @@ import type { TaskFrame } from "../transport/frames.js";
 // ===== ORCHESTRATION TYPE IMPORTS =====
 import type { PlanReviewResponse, PlanStep } from "../orchestration/types.js";
 import type { Agent } from "../orchestration/agent/agent.js";
+import type { ConversationExchange } from "../orchestration/agent/conversationMemory.js";
 import type { IModelPlacementReporter } from "../ollama/modelPlacement.js";
 import type { AgentOrchestrator } from "../orchestration/orchestrator/orchestrator.js";
 
@@ -163,6 +164,15 @@ export type PerConnection = {
    * `session.clear` (`/new`).
    */
   activePlan?: PlanStep[];
+
+  /**
+   * Short, bounded history of past task/answer exchanges on this
+   * connection — see `agent/conversationMemory.ts`. Each `runAgentTurn`
+   * seeds its `messages` fresh, so without this a follow-up like "implement
+   * that plan for me" has no prior turn to refer to. Same lifecycle as
+   * `activePlan`: survives across tasks, cleared by `session.clear` (`/new`).
+   */
+  conversation?: ConversationExchange[];
 };
 
 /**

@@ -33,7 +33,11 @@ const SENSITIVE_ENV_NAME_PATTERN =
  * device, not credential material — so stripping them would break normal
  * `ssh`/`git`/`gpg` operation for no security benefit.
  */
-const ENV_SCRUB_EXCEPTIONS = new Set(["SSH_AUTH_SOCK", "GPG_AGENT_INFO", "GPG_TTY"]);
+const ENV_SCRUB_EXCEPTIONS = new Set([
+  "SSH_AUTH_SOCK",
+  "GPG_AGENT_INFO",
+  "GPG_TTY",
+]);
 
 /**
  * Returns a copy of `env` with every credential-shaped variable removed.
@@ -55,7 +59,10 @@ export const scrubEnv = (
     if (value === undefined) {
       continue;
     }
-    if (ENV_SCRUB_EXCEPTIONS.has(key) || !SENSITIVE_ENV_NAME_PATTERN.test(key)) {
+    if (
+      ENV_SCRUB_EXCEPTIONS.has(key) ||
+      !SENSITIVE_ENV_NAME_PATTERN.test(key)
+    ) {
       scrubbed[key] = value;
     }
   }

@@ -235,7 +235,7 @@ export interface UiConfig {
  *   subagentTemp: 0.4,
  *   retries: 3,
  *   timeout: 600000,
- *   shellTimeoutMs: 120000,
+ *   shellTimeoutMs: 300000,
  *   maxContextBudget: 0.2,
  *   workspace: "/home/user/projects",
  *   showThinkOutput: false,
@@ -352,8 +352,10 @@ export interface Config {
    *
    * @remarks
    * Shell commands initiated by the server through the file proxy will be killed
-   * after this duration. Default is 120000ms (2 minutes). Increase for long-running
-   * operations, decrease for faster failure detection.
+   * after this duration. Default is 300000ms (5 minutes) — scaffold/install
+   * commands (`npm create`, `npm install`, …) routinely take longer than the
+   * old 2-minute default. Increase further for long-running operations,
+   * decrease for faster failure detection.
    */
   shellTimeoutMs: number;
 
@@ -382,8 +384,9 @@ export interface Config {
    *
    * @remarks
    * When true, the CLI shows the internal reasoning process of the agent and
-   * subagent models. When false, only the final output is displayed. Default is false
-   * to reduce noise in the terminal.
+   * subagent models. When false, only the final output is displayed. Default
+   * is true — seeing what the agent is doing mid-task (especially during a
+   * multi-step turn) is the normal expectation; `/think off` opts back out.
    */
   showThinkOutput: boolean;
 
@@ -501,8 +504,8 @@ export const DEFAULT_CONFIG: Config = {
   // Prevents CLI hanging on slow or unresponsive models (10 minutes)
   timeout: 600_000,
 
-  // Kill shell commands after 2 minutes by default (npm create/install often need longer)
-  shellTimeoutMs: 120_000,
+  // Kill shell commands after 5 minutes by default (npm create/install often need longer)
+  shellTimeoutMs: 300_000,
 
   // Caps how much of the context window memory injection can consume (20%)
   maxContextBudget: 0.2,
@@ -510,8 +513,8 @@ export const DEFAULT_CONFIG: Config = {
   // Empty until set via `/workspace set <path>` or editing config.json
   workspace: "",
 
-  // Disable think output by default (shows agent/subagent think boxes when true)
-  showThinkOutput: false,
+  // Show agent/subagent think boxes by default; `/think off` opts out
+  showThinkOutput: true,
 
   // Allow 3 parallel subagent groups by default (minimum 1)
   subagentCap: 3,

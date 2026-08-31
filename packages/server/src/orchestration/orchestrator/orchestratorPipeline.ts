@@ -177,6 +177,7 @@ export const runOrchestratorPipeline = async (
         emit,
         emitToken,
         signal,
+        contextWindow,
       },
     );
 

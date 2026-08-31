@@ -47,12 +47,57 @@ export const userReviseMessage = (
   ].join("\n");
 
 /**
+ * Total characters kept from a tool observation body before truncation
+ * kicks in — split between {@link OBSERVATION_HEAD_CHARS} and
+ * {@link OBSERVATION_TAIL_CHARS}.
+ *
+ * @remarks
+ * A single `read_file` on an ordinary source file, or a verbose command's
+ * stdout, can otherwise land in `messages` in full — easily enough on its
+ * own to exhaust a small local model's context window (commonly 4096
+ * tokens) before the agent loop's own conversation-level compaction ever
+ * gets a chance to run. This cap is unconditional and independent of the
+ * model's actual window size, so it always bounds the worst case.
+ */
+const MAX_OBSERVATION_CHARS = 4000;
+/** Chars kept from the start of an oversized observation body. */
+const OBSERVATION_HEAD_CHARS = 2800;
+/** Chars kept from the end — errors, exit codes, and summaries commonly land here. */
+const OBSERVATION_TAIL_CHARS = 1000;
+
+/**
+ * Truncates an oversized tool-result body to a head+tail window, eliding the
+ * middle rather than dropping the whole thing or cutting it off blind.
+ *
+ * @remarks
+ * Keeps more from the head (where identifying structure — imports, a
+ * function's opening, a command's first lines — usually lives) than the
+ * tail, but the tail is always kept too, not dropped, since errors and exit
+ * status commonly appear at the end.
+ *
+ * @param content - The raw tool-result body.
+ * @returns `content` unchanged if it's within budget, otherwise a
+ *   head+elision+tail string of bounded length.
+ */
+export const truncateObservationBody = (content: string): string => {
+  if (content.length <= MAX_OBSERVATION_CHARS) {
+    return content;
+  }
+  const head = content.slice(0, OBSERVATION_HEAD_CHARS);
+  const tail = content.slice(content.length - OBSERVATION_TAIL_CHARS);
+  const elidedChars = content.length - OBSERVATION_HEAD_CHARS - OBSERVATION_TAIL_CHARS;
+  return `${head}\n…[${elidedChars} chars elided]…\n${tail}`;
+};
+
+/**
  * Formats a tool's result as observation text appended to conversation history.
  *
  * @remarks
  * Every handler funnels its `feedback` field through this so the agent sees a
  * consistent shape: the tool name and echoed arguments (so the agent can
- * confirm what it called), followed by the actual result content.
+ * confirm what it called), followed by the actual result content — capped via
+ * {@link truncateObservationBody} so one oversized result can't blow the
+ * context budget on its own.
  *
  * @param name - Tool name, e.g. `"read_file"`.
  * @param args - The arguments the agent passed, echoed back for context.
@@ -63,7 +108,8 @@ export const formatObservation = (
   name: string,
   args: Record<string, unknown>,
   content: string,
-): string => `[${name}] ${JSON.stringify({ tool: name, ...args })}\n${content}`;
+): string =>
+  `[${name}] ${JSON.stringify({ tool: name, ...args })}\n${truncateObservationBody(content)}`;
 
 /**
  * Converts a caught error into a {@link ToolExecutionResult} the agent can see and react to.

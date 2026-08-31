@@ -159,8 +159,8 @@ export const useSubmitLine = ({
             // Without these models configured, the server cannot execute the task, so we
             // fail fast with a helpful error message instead of attempting to connect.
             if (
-              !(taskConfiguration.subagentModel ?? "").trim() ||
-              !(taskConfiguration.subsubagentModel ?? "").trim()
+              !(taskConfiguration.agentModel ?? "").trim() ||
+              !(taskConfiguration.subagentModel ?? "").trim()
             ) {
               setHistory((previousHistory) => [
                 ...previousHistory,

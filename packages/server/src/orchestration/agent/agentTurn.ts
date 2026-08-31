@@ -41,7 +41,7 @@ import type {
 import { emptyCommandPlan } from "../types.js";
 import type { PerConnection } from "../../container/types.js";
 import type { MaxSubagentsParam } from "../maxSubagents.js";
-import type { TaskApprovalMode } from "@atlasagents/shared";
+import { clampUsage, type TaskApprovalMode } from "@atlasagents/shared";
 import type { TaskFrame } from "../../transport/frames.js";
 import { modeLabelFromMaxAgents } from "../planHelpers.js";
 import {
@@ -58,18 +58,50 @@ import {
   getToolSchemas,
 } from "../tools/registry.js";
 import type { ToolHandler, ToolHandlerContext } from "../tools/types.js";
-import { buildAgentTurnSystemText, buildWorkerSystemText } from "./agentPrompt.js";
-import { createThinkFrameEmitter, createThinkTagScanner } from "../thinkStream.js";
+import {
+  buildAgentTurnSystemText,
+  buildWorkerSystemText,
+} from "./agentPrompt.js";
+import {
+  createThinkFrameEmitter,
+  createThinkTagScanner,
+} from "../thinkStream.js";
 import type { ThinkTagScanner } from "../thinkStream.js";
 import { runAgentPool } from "../orchestrator/orchestratorPipelineHelpers.js";
 import { AbortError } from "../../errors/index.js";
 import { logger } from "../../utils/logger.js";
+import { completionGap } from "./completionGate.js";
+import {
+  applyCompaction,
+  applyElisionFallback,
+  buildCompactionRequest,
+  DEFAULT_COMPACTION_BUDGET,
+  estimateMessagesTokens,
+  selectCompactionRange,
+  shouldCompact,
+} from "./contextCompaction.js";
+import { recordExchange, toHistoryMessages } from "./conversationMemory.js";
 
 /** Safety ceiling on tool-call turns in one agent turn. Most turns finish well under this. */
 const MAX_AGENT_TURN_ITERATIONS = 60;
+/** Cap on tool calls run from a single model response — extras are deferred back to the model. */
+const MAX_TOOL_CALLS_PER_ITERATION = 5;
+/** How many times `finish` may be rejected by its own verification gate before the loop gives up. */
+const MAX_FINISH_REJECTIONS = 3;
+/** Consecutive iterations that executed no tool (malformed block, unknown tool) before the loop gives up. Mirrors the old (now-dead) subagent.ts's MAX_UNPRODUCTIVE_TURNS. Empty-turn stalls (the model replying with no tool call despite outstanding work) are tracked separately — see MAX_CONSECUTIVE_STALLS. */
+const MAX_UNPRODUCTIVE_ITERATIONS = 100;
+/**
+ * How many times in a row the model may reply with no tool call while a
+ * completion gap is still open before the loop gives up. Resets to 0
+ * whenever any tool actually executes — a model that keeps making real
+ * progress gets unlimited check-ins; a model that keeps replying with
+ * nothing to show for it is escalated (see `resolveEmptyTurn`) and then
+ * stopped, never left to loop.
+ */
+const MAX_CONSECUTIVE_STALLS = 3;
 
 /**
- * Recognized reasoning-tag names to scan for in model output.
+ * Recognized reasoning-tag names to scan for in the model's CONTENT channel.
  *
  * @remarks
  * Unlike the subagent, agentTurn's system prompt never instructs the model
@@ -80,6 +112,14 @@ const MAX_AGENT_TURN_ITERATIONS = 60;
  * instead of leaking into the visible answer. `redacted_thinking` and
  * `agent-think` are included too, matching the tags the subagent/old
  * planner used — harmless to also recognize here.
+ *
+ * This only applies to the content channel. A provider's separate native
+ * reasoning channel (Ollama `message.thinking`, OpenAI-compatible
+ * `delta.reasoning_content`, surfaced via `onThinkToken`) is passed through
+ * to the client raw, with no tag scanning — see `runToolCallLoop` below.
+ * Nothing in this loop's prompt asks a model to wrap that channel in a tag,
+ * so scanning it for one only means silently dropping every reasoning token
+ * a model that doesn't happen to use one emits.
  */
 const REASONING_TAG_NAMES = ["think", "agent-think", "redacted_thinking"];
 
@@ -159,6 +199,13 @@ export type AgentTurnParams = {
   emit: (frame: TaskFrame) => void;
   emitToken: (text: string) => void;
   signal: AbortSignal;
+  /**
+   * The agent model's resolved context window (Ollama `num_ctx`), or `0`
+   * when unresolved (an OpenAI-compatible role — that concept doesn't apply
+   * there). Lets the loop bound its own conversation growth instead of
+   * silently outgrowing the window mid-turn — see `contextCompaction.ts`.
+   */
+  contextWindow: number;
 };
 
 /** Resolves agent model/temperature/capability config, honoring per-task overrides. */
@@ -170,7 +217,8 @@ const resolveTurnConfig = async (
   agentTemperature: number;
   configuredSupportsTools: boolean;
 }> => {
-  const agentModel = overrides?.agentModel?.trim() || (await config.getAgentModel());
+  const agentModel =
+    overrides?.agentModel?.trim() || (await config.getAgentModel());
   const agentTemperature =
     overrides?.agentTemp ?? (await config.getAgentTemperature());
   const configuredSupportsTools =
@@ -210,6 +258,26 @@ const runToolCallLoop = async (params: {
   emitToken: (text: string) => void;
   reportStatus: ToolHandlerContext["emitSubagentStatus"];
   signal: AbortSignal;
+  /**
+   * Consulted whenever the model tries to end the turn with plain text and
+   * no tool call. Returns a corrective message naming what's still
+   * outstanding (unfinished checklist step, unverified write), or `null`
+   * when the turn is genuinely done. Omitted entirely for a
+   * `run_steps_parallel` worker step — a step owns no checklist and gets no
+   * gate, so its behavior here is unchanged from before this was added.
+   */
+  checkCompletion?: () => string | null;
+  /** See `AgentTurnParams.contextWindow` — same meaning, threaded through to both the top-level turn and every worker step. */
+  contextWindow: number;
+  /**
+   * How many messages at the START of `messages` are the seed (system
+   * prompt, any carried-over conversation history, and the current task)
+   * and must never be compacted away — see `contextCompaction.ts`'s
+   * `selectCompactionRange`. The top-level turn passes the seed's actual
+   * length (2 plus however many history messages were spliced in); a
+   * worker step always passes 2 (`[system, task]`, no history).
+   */
+  protectedPrefixCount: number;
 }): Promise<AgentTurnResult> => {
   const {
     taskId,
@@ -224,23 +292,49 @@ const runToolCallLoop = async (params: {
     emitToken,
     reportStatus,
     signal,
+    checkCompletion,
+    contextWindow,
+    protectedPrefixCount,
   } = params;
 
-  const executeTool = async (
-    call: ParsedToolCall,
-    toolHandlers: Map<string, ToolHandler>,
-  ): Promise<{
-    done: boolean;
-    ok?: boolean;
-    summary: string;
-    feedback: string;
-  }> => {
-    const handler = toolHandlers.get(call.name);
-    if (!handler) {
-      return { done: false, summary: "", feedback: `Unknown tool: ${call.name}` };
-    }
-    return handler.execute(call.args, buildToolContext());
-  };
+  // Governs ONLY when compaction kicks in (below) — a generous, documented
+  // fallback for the OpenAI-compatible case where the real window isn't
+  // known (contextWindow === 0). The `usage` frame emitted per iteration
+  // still uses the real `contextWindow` (via `clampUsage`, which returns
+  // `null` — nothing emitted — for a non-positive window), so an unknown
+  // window never gets reported to the user as a fabricated number.
+  const compactionBudget =
+    contextWindow > 0 ? contextWindow : DEFAULT_COMPACTION_BUDGET;
+
+  // Cumulative across the whole turn — a turn that never executes a tool
+  // (a greeting, or a resumed turn whose new model answers without acting)
+  // cannot have unverified writes or an unfinished checklist, so the
+  // completion gate short-circuits to "no gap" whenever this is still 0.
+  // This is what keeps the "hello" regression guard (and the plan-resume
+  // test whose fake model never calls a tool) at exactly one model call.
+  let toolCallsExecuted = 0;
+  // Consecutive empty turns (model replies with plain text, no tool call)
+  // while a completion gap is still open — see `resolveEmptyTurn`, the
+  // "Continue automatically" driver. Resets to 0 the moment any tool
+  // actually executes, alongside `unproductiveStreak` below, so a model
+  // that keeps making real progress gets unlimited check-ins; a model that
+  // keeps replying with nothing to show for it is escalated, then stopped.
+  let stallsSinceProgress = 0;
+  // Resets whenever a tool OTHER than `finish` executes successfully, so
+  // this measures "rejections in a row without fixing anything" rather than
+  // "rejections this turn" — a long task that legitimately calls finish
+  // several times, fixing something in between each time, must not die on
+  // the 3rd attempt just because it also failed twice earlier.
+  let finishRejections = 0;
+  // Consecutive iterations that executed no tool due to a PROTOCOL error
+  // (malformed legacy block, unknown tool name) — distinct from
+  // `stallsSinceProgress`, which tracks empty turns specifically. Reset on
+  // any iteration that runs at least one real tool handler.
+  let unproductiveStreak = 0;
+  // The most recent gap reported by resolveEmptyTurn/stopIfUnproductive's
+  // caller-side check, so a stop can still say what was left outstanding
+  // instead of just "no progress" — see stopIfUnproductive below.
+  let lastKnownGap: string | null = null;
 
   const appendToolTurnToHistory = (
     content: string,
@@ -263,6 +357,154 @@ const runToolCallLoop = async (params: {
     messages.push({ role: "user", content: feedback });
   };
 
+  /**
+   * Runs every tool call the model emitted in one response, in order,
+   * appending one assistant/tool (or assistant+`<<TOOL>>` in legacy mode)
+   * pair per call — never one assistant turn carrying every `tool_calls`
+   * entry. `providers/messageTranslation.ts` correlates a tool result back
+   * to its call BY TOOL NAME, keeping only the most recent id per name; one
+   * assistant message with two same-named calls (e.g. two `read_file`s)
+   * followed by two results would map both results to the last id under
+   * that scheme. Sequential pairs sidestep this entirely — the name→id map
+   * is rebuilt fresh before each lookup — with zero changes needed to the
+   * translator. `content` (the model's prose) is attached to the first pair
+   * only so it isn't duplicated into history for every call in the batch.
+   *
+   * Stops early on the first `done` result. Also enforces the `finish`
+   * rejection budget: `finish` failing its own verification gate
+   * `MAX_FINISH_REJECTIONS` times *in a row, with nothing else fixed in
+   * between* ends the turn honestly instead of letting the model spend the
+   * rest of the iteration ceiling retrying a gate it keeps failing. Any
+   * other tool call running resets that counter — a long task that legitimately
+   * calls `finish` several times, fixing something in between each time,
+   * must not die just because it also failed earlier.
+   */
+  const runToolCalls = async (
+    content: string,
+    calls: ParsedToolCall[],
+    toolHandlers: Map<string, ToolHandler>,
+  ): Promise<{
+    done: boolean;
+    ok?: boolean;
+    summary: string;
+    executed: number;
+  }> => {
+    let executed = 0;
+    for (let index = 0; index < calls.length; index += 1) {
+      if (signal.aborted) {
+        throw new AbortError("Agent turn aborted");
+      }
+      const call = calls[index];
+      if (!call) {
+        continue;
+      }
+      const pairContent = index === 0 ? content : "";
+      const handler = toolHandlers.get(call.name);
+      if (!handler) {
+        appendToolTurnToHistory(
+          pairContent,
+          call,
+          `Unknown tool: ${call.name}`,
+        );
+        continue;
+      }
+      const result = await handler.execute(call.args, buildToolContext());
+      executed += 1;
+      if (call.name === "finish") {
+        if (!result.done) {
+          finishRejections += 1;
+          if (finishRejections >= MAX_FINISH_REJECTIONS) {
+            return {
+              done: true,
+              ok: false,
+              summary: `[agent stopped after ${MAX_FINISH_REJECTIONS} unmet finish conditions]\n${result.feedback}`,
+              executed,
+            };
+          }
+        }
+      } else {
+        finishRejections = 0;
+      }
+      if (result.done) {
+        return { done: true, ok: result.ok, summary: result.summary, executed };
+      }
+      appendToolTurnToHistory(pairContent, call, result.feedback);
+    }
+    return { done: false, summary: "", executed };
+  };
+
+  type EmptyTurnOutcome =
+    | { kind: "continue" }
+    | { kind: "final"; content: string; ok: boolean };
+
+  /**
+   * Decides what happens when the model tries to end the turn with plain
+   * text and no tool call. `historyContent` is what gets pushed to
+   * conversation history if the turn continues (raw model output);
+   * `displayContent` is the cleaned text shown to the user if it doesn't.
+   *
+   * @remarks
+   * The "Continue automatically" edge: a completion gap (unfinished
+   * checklist step, unverified write) is not accepted as a reason to stop.
+   * `stallsSinceProgress` escalates rather than repeats the same nudge,
+   * since a small local model tends to need a sharper instruction the
+   * second time, not the same sentence again:
+   * - 1st stall: the plain gap message (what's outstanding).
+   * - 2nd stall: a directive to act now, try a different approach if the
+   *   obvious one won't work, and only mark the step failed (via
+   *   `update_plan`) and move on once alternatives are exhausted.
+   * - 3rd stall: stop, honestly reporting what remains — this is the
+   *   turn's own escape hatch from a genuinely stuck state; the counter
+   *   resets to 0 the instant any tool actually executes, so a model that
+   *   keeps making real progress is never walled off by it.
+   */
+  const resolveEmptyTurn = (
+    historyContent: string,
+    displayContent: string,
+  ): EmptyTurnOutcome => {
+    const gap =
+      toolCallsExecuted > 0 && checkCompletion ? checkCompletion() : null;
+    if (!gap) {
+      return { kind: "final", content: displayContent, ok: true };
+    }
+    lastKnownGap = gap;
+    stallsSinceProgress += 1;
+
+    if (stallsSinceProgress >= MAX_CONSECUTIVE_STALLS) {
+      return {
+        kind: "final",
+        content:
+          `${displayContent}\n\n[stopped: ${MAX_CONSECUTIVE_STALLS} replies in a row took no action — ${gap}]`.trim(),
+        ok: false,
+      };
+    }
+
+    const followUp =
+      stallsSinceProgress === 1
+        ? gap
+        : [
+            "You replied without taking any action. Do not describe what you will do — call the tool for the next outstanding step now.",
+            "If it will not work, try a different approach. Only once alternatives are exhausted, call update_plan marking that step failed with a one-line reason, then continue with the remaining steps.",
+            "",
+            gap,
+          ].join("\n");
+    messages.push({ role: "assistant", content: historyContent });
+    messages.push({ role: "user", content: followUp });
+    return { kind: "continue" };
+  };
+
+  /** Ends the turn with an honest failure once too many iterations in a row made no progress. */
+  const stopIfUnproductive = (): AgentTurnResult | null => {
+    if (unproductiveStreak < MAX_UNPRODUCTIVE_ITERATIONS) {
+      return null;
+    }
+    const gapSuffix = lastKnownGap ? `\n${lastKnownGap}` : "";
+    const message = `[agent stopped: ${MAX_UNPRODUCTIVE_ITERATIONS} turns in a row made no progress]${gapSuffix}`;
+    emitToken(message);
+    reportStatus("done", "⚠", "Done");
+    return { content: message, ok: false };
+  };
+
   reportStatus("thinking", "◌", "Thinking…");
 
   for (
@@ -274,6 +516,52 @@ const runToolCallLoop = async (params: {
       throw new AbortError("Agent turn aborted");
     }
 
+    // Real usage, reported once per iteration from what's ABOUT to be sent
+    // to the model — replaces the pipeline's coarse, loop-blind estimate
+    // (taskText + contextHeader + skillBody + final content only) with a
+    // number that actually reflects a long tool-calling turn. `clampUsage`
+    // itself returns `null` (nothing emitted) when `contextWindow` isn't a
+    // positive number, so an unresolved window is never reported as a
+    // fabricated one.
+    const estimatedTokens = estimateMessagesTokens(messages);
+    const usage = clampUsage(estimatedTokens, contextWindow);
+    if (usage) {
+      emit({ kind: "usage", ...usage });
+    }
+
+    // Compact before the model call that would otherwise exceed its window.
+    // See contextCompaction.ts's module doc for why this exists: an
+    // uncompacted turn risks the provider silently truncating the PROMPT
+    // FROM THE FRONT once it overflows — dropping the system message that
+    // holds the tool catalog — which is what turned "does step 1, keeps
+    // going" into "does step 1, drops".
+    if (shouldCompact(estimatedTokens, compactionBudget)) {
+      const range = selectCompactionRange(messages, protectedPrefixCount);
+      if (range) {
+        const middle = messages.slice(range.start, range.end);
+        try {
+          const summary = await ollama.chat(
+            agentModel,
+            buildCompactionRequest(middle),
+            { temperature: 0, signal },
+          );
+          if (summary.trim().length > 0) {
+            applyCompaction(messages, range, summary.trim());
+          } else {
+            applyElisionFallback(messages, range);
+          }
+        } catch (error) {
+          // Compaction must never be what ends a turn early — that would
+          // reintroduce the exact bug this exists to fix. Fall back to
+          // plain elision and keep going, aborting only on real cancellation.
+          if (error instanceof AbortError) {
+            throw error;
+          }
+          applyElisionFallback(messages, range);
+        }
+      }
+    }
+
     const activeRegistry = getActiveRegistry();
     const activeToolSchemas = getToolSchemas(activeRegistry);
     const activeToolHandlers = getToolHandlerMap(activeRegistry);
@@ -281,19 +569,27 @@ const runToolCallLoop = async (params: {
     let content = "";
     let toolCalls: ParsedToolCall[] = [];
 
-    // Live-scans both channels for a recognized reasoning tag (see
-    // REASONING_TAG_NAMES) so any inline "<think>..." a model emits renders
-    // as a "thinking" block instead of leaking into the visible answer.
-    // Content is NOT streamed to emitToken live here — unlike a scanner
-    // that only extracts think text (discarding everything else, as
-    // subagent.ts's does), there's no cheap way to also pass through
-    // non-think text live without risking a partial tag prefix (e.g. "<th")
-    // reaching the user a moment before it turns out to be the start of
-    // "<think>". The full response is available as soon as the call
-    // resolves either way, so the answer is flushed once, cleaned, right
-    // below instead — see the toolCalls.length === 0 branch.
+    // Live-scans the CONTENT channel only for a recognized reasoning tag
+    // (see REASONING_TAG_NAMES) so any inline "<think>..." a model emits
+    // renders as a "thinking" block instead of leaking into the visible
+    // answer. Content is NOT streamed to emitToken live, mid-generation,
+    // here — unlike a scanner that only extracts think text (discarding
+    // everything else, as subagent.ts's does), there's no cheap way to also
+    // pass through non-think text live without risking a partial tag prefix
+    // (e.g. "<th") reaching the user a moment before it turns out to be the
+    // start of "<think>". The full response is available as soon as the
+    // call resolves either way, so the cleaned text is flushed once,
+    // immediately after — either as the final answer (toolCalls.length===0
+    // branch below) or, in native mode, as narration ahead of the tool
+    // call(s) it accompanies (further down, right before runToolCalls).
+    //
+    // The native REASONING channel (onThinkToken below) is NOT scanned —
+    // it's passed straight through to thinkFrames. It's a separate wire
+    // channel from the provider (not embedded in content), so there is no
+    // tag to find: this loop's prompt never asks a model to wrap it in one,
+    // and scanning it the same way as content would just discard every
+    // reasoning token from a model that doesn't happen to emit a tag.
     const contentThinkScanner = createThinkTagScanner(REASONING_TAG_NAMES);
-    const reasoningThinkScanner = createThinkTagScanner(REASONING_TAG_NAMES);
     const thinkFrames = createThinkFrameEmitter({ emit, agent: true });
     const pushThinkFrom =
       (scanner: ThinkTagScanner) =>
@@ -313,12 +609,15 @@ const runToolCallLoop = async (params: {
           {
             temperature: agentTemperature,
             signal,
-            onThinkToken: pushThinkFrom(reasoningThinkScanner),
+            onThinkToken: (piece) => thinkFrames.delta(piece),
           },
           pushThinkFrom(contentThinkScanner),
         );
         content = result.content;
-        toolCalls = result.toolCalls.map((call) => ({ name: call.name, args: call.args }));
+        toolCalls = result.toolCalls.map((call) => ({
+          name: call.name,
+          args: call.args,
+        }));
       } else {
         let raw = "";
         for await (const token of ollama.chatStream(agentModel, messages, {
@@ -337,23 +636,35 @@ const runToolCallLoop = async (params: {
           // Strip both markdown fences and any reasoning tag before it
           // reaches the user — a legacy-mode response may otherwise
           // contain an inline <<TOOL>>...<<END>> block or think tag that
-          // must never surface verbatim.
-          const answer = stripReasoningTags(
-            stripMarkdownFencesFromText(raw),
-          );
-          emitToken(answer);
-          reportStatus("done", "✓", "Done");
-          return { content: answer, ok: true };
+          // must never surface verbatim. Still runs through the completion
+          // gate below, same as native mode.
+          const answer = stripReasoningTags(stripMarkdownFencesFromText(raw));
+          const outcome = resolveEmptyTurn(raw, answer);
+          if (outcome.kind === "continue") {
+            const stopped = stopIfUnproductive();
+            if (stopped) {
+              return stopped;
+            }
+            continue;
+          }
+          emitToken(outcome.content);
+          reportStatus("done", outcome.ok ? "✓" : "⚠", "Done");
+          return { content: outcome.content, ok: outcome.ok };
         }
         content = raw;
         toolCalls = parsed.calls;
         if (parsed.calls.length === 0 && parsed.hadMalformedBlock) {
+          unproductiveStreak += 1;
           messages.push({ role: "assistant", content: raw });
           messages.push({
             role: "user",
             content:
               "Your tool call was not valid JSON. Re-emit it as a single-line <<TOOL>>{...}<<END>> block.",
           });
+          const stopped = stopIfUnproductive();
+          if (stopped) {
+            return stopped;
+          }
           continue;
         }
       }
@@ -361,53 +672,105 @@ const runToolCallLoop = async (params: {
       // Safety net for abort/error paths that never reach a normal close
       // below — idempotent, so a no-op after one. Mirrors subagent.ts's
       // per-iteration think-frame handling.
-      for (const scanner of [contentThinkScanner, reasoningThinkScanner]) {
-        const flushed = scanner.flush();
-        if (flushed.length > 0) {
-          thinkFrames.delta(flushed);
-        }
+      const flushed = contentThinkScanner.flush();
+      if (flushed.length > 0) {
+        thinkFrames.delta(flushed);
       }
       thinkFrames.finish(null);
     }
 
     if (toolCalls.length === 0) {
-      // Native mode's direct-answer path: no tool call this turn — flush
-      // the complete answer now, with any reasoning tag stripped as a
-      // defensive safety net (the live scanner above already caught the
-      // common case; this covers a tag it wasn't watching for or one that
-      // was never actually closed).
+      // Native mode's direct-answer path: no tool call this turn. Runs
+      // through the same completion gate the legacy branch above uses —
+      // "no tool call" alone no longer means "the turn is finished".
       const answer = stripReasoningTags(content);
-      emitToken(answer);
-      reportStatus("done", "✓", "Done");
-      return { content: answer, ok: true };
+      const outcome = resolveEmptyTurn(content, answer);
+      if (outcome.kind === "continue") {
+        const stopped = stopIfUnproductive();
+        if (stopped) {
+          return stopped;
+        }
+        continue;
+      }
+      emitToken(outcome.content);
+      reportStatus("done", outcome.ok ? "✓" : "⚠", "Done");
+      return { content: outcome.content, ok: outcome.ok };
     }
 
-    if (toolCalls.length > 1) {
-      messages.push({ role: "assistant", content });
+    // Run every tool call the model emitted this turn, in order — see
+    // runToolCalls's docstring for why this is NOT one assistant turn
+    // carrying every `tool_calls` entry. A response with more calls than
+    // the cap has the excess deferred back to the model instead of run.
+    let callsToRun = toolCalls;
+    let deferredCallNames: string[] = [];
+    if (toolCalls.length > MAX_TOOL_CALLS_PER_ITERATION) {
+      deferredCallNames = toolCalls
+        .slice(MAX_TOOL_CALLS_PER_ITERATION)
+        .map((call) => call.name);
+      callsToRun = toolCalls.slice(0, MAX_TOOL_CALLS_PER_ITERATION);
+    }
+
+    // Narrate before acting. In native tool-calling mode `content` is pure
+    // prose — tool calls are structured separately, never embedded in it —
+    // so it's safe to show immediately instead of only at the final answer,
+    // which is what previously made everything between tool calls invisible.
+    // Legacy/text mode is deliberately excluded: there, `content` is the raw
+    // response and still contains the <<TOOL>>...<<END>> block this
+    // iteration is about to execute, so emitting it would leak that syntax.
+    //
+    // Skipped when the batch contains `finish`: its summary IS the
+    // user-facing answer (emitted below once the batch resolves), so any
+    // prose here would just be the same answer printed twice. Keyed on
+    // `finish` specifically, not on `done` generally — `update_plan`'s
+    // user-skip path also returns done:true but yields a fixed one-liner,
+    // where narration ahead of it is still useful context.
+    const batchEndsTurn = callsToRun.some((call) => call.name === "finish");
+    if (configuredSupportsTools && !batchEndsTurn) {
+      const narration = stripReasoningTags(content).trim();
+      if (narration.length > 0) {
+        emitToken(`${narration}\n\n`);
+      }
+    }
+
+    const batchResult = await runToolCalls(
+      content,
+      callsToRun,
+      activeToolHandlers,
+    );
+    toolCallsExecuted += batchResult.executed;
+    unproductiveStreak =
+      batchResult.executed === 0 ? unproductiveStreak + 1 : 0;
+    if (batchResult.executed > 0) {
+      stallsSinceProgress = 0;
+    }
+
+    if (batchResult.done) {
+      const summary = stripReasoningTags(batchResult.summary);
+      emitToken(summary);
+      reportStatus("done", batchResult.ok === false ? "⚠" : "✓", "Done");
+      return { content: summary, ok: batchResult.ok !== false };
+    }
+
+    if (deferredCallNames.length > 0) {
       messages.push({
         role: "user",
-        content: "You called more than one tool. Call exactly one tool per turn.",
+        content: `Only the first ${MAX_TOOL_CALLS_PER_ITERATION} tool calls in that response were run this turn. Skipped: ${deferredCallNames.join(", ")}. Re-issue any of those that are still needed.`,
       });
-      continue;
     }
 
-    const call = toolCalls[0];
-    if (!call) {
-      continue;
+    const stopped = stopIfUnproductive();
+    if (stopped) {
+      return stopped;
     }
-
-    const result = await executeTool(call, activeToolHandlers);
-    if (result.done) {
-      reportStatus("done", result.ok === false ? "⚠" : "✓", "Done");
-      return { content: result.summary, ok: result.ok !== false };
-    }
-    appendToolTurnToHistory(content, call, result.feedback);
   }
 
   logger.warn({ taskId }, "[AgentTurn] exceeded maximum iterations");
+  const ceilingMessage =
+    "[agent stopped: exceeded the maximum number of tool calls for one turn]";
+  emitToken(ceilingMessage);
+  reportStatus("done", "⚠", "Done");
   return {
-    content:
-      "[agent stopped: exceeded the maximum number of tool calls for one turn]",
+    content: ceilingMessage,
     ok: false,
   };
 };
@@ -434,6 +797,7 @@ export const runAgentTurn = async (
     emit,
     emitToken,
     signal,
+    contextWindow,
   } = params;
   const { ollama, config, experienceRecorder } = deps;
 
@@ -449,7 +813,11 @@ export const runAgentTurn = async (
   // than relying on the model to volunteer not to call those tools.
   const mcpSchemas = perConn.mcpTools?.map((entry) => entry.schema);
   const fullRegistry = createAgentTurnToolRegistry(mcpSchemas);
-  const PLAN_MODE_ALLOWED_TOOLS = new Set(["read_file", "update_plan", "finish"]);
+  const PLAN_MODE_ALLOWED_TOOLS = new Set([
+    "read_file",
+    "update_plan",
+    "finish",
+  ]);
   // MCP tools are read-only-eligible per-tool, not per-name-prefix — each
   // one's readOnly flag is resolved client-side (from the MCP spec's
   // annotations.readOnlyHint, or the server's configured default) and
@@ -485,8 +853,18 @@ export const runAgentTurn = async (
 
   const messages: Message[] = [
     { role: "system", content: systemText },
+    // Short, bounded history of past turns on this connection — see
+    // conversationMemory.ts. Empty when there's no prior history (a fresh
+    // connection, or right after `/new`), so this is a no-op in that case
+    // and `messages` is exactly `[system, task]` as before.
+    ...toHistoryMessages(perConn.conversation),
     { role: "user", content: taskText },
   ];
+  // How much of `messages` is the seed (system + history + current task),
+  // never eligible for compaction — see contextCompaction.ts's
+  // selectCompactionRange. Captured right after the seed is built, before
+  // any tool-call turn appends to it.
+  const protectedPrefixCount = messages.length;
 
   const trackers: ToolHandlerContext["trackers"] = {
     filesReadThisTask: new Set(),
@@ -504,44 +882,64 @@ export const runAgentTurn = async (
   // in_progress/done) just update state without re-prompting.
   let planApproved = approvalMode !== "plan";
 
+  // The completion gate's own turn-local view of the checklist. Distinct
+  // from `perConn.activePlan`: that field is cleared only by `/new` and
+  // survives across unrelated tasks, so gating on it directly would nag a
+  // later, unconnected message with a stale checklist. `planThisTurn` starts
+  // seeded ONLY when this turn was actually told (via `resumeBlock`, in the
+  // system prompt above) to continue a carried-over plan — otherwise it
+  // starts `null` and is populated the first time this turn calls
+  // `update_plan` itself, via `emitPlanUpdate`, the single write point both
+  // `updatePlan` and `runStepsParallel` share.
+  let planThisTurn: PlanStep[] | null = resumeBlock
+    ? (perConn.activePlan ?? null)
+    : null;
+
   const emitPlanUpdate = (steps: PlanStep[], note?: string): void => {
     perConn.activePlan = steps;
+    planThisTurn = steps;
     emit({ kind: "plan-update", steps, note });
   };
 
-  const updatePlan: NonNullable<ToolHandlerContext["planTools"]>["updatePlan"] =
-    async (inputSteps, note) => {
-      const steps: PlanStep[] = inputSteps.map((step) => ({
-        id: step.id,
-        text: step.text,
-        status: step.status ?? "pending",
-        dependsOn: step.dependsOn,
-      }));
-      emitPlanUpdate(steps, note);
+  const updatePlan: NonNullable<
+    ToolHandlerContext["planTools"]
+  >["updatePlan"] = async (inputSteps, note) => {
+    const steps: PlanStep[] = inputSteps.map((step) => ({
+      id: step.id,
+      text: step.text,
+      status: step.status ?? "pending",
+      dependsOn: step.dependsOn,
+    }));
+    emitPlanUpdate(steps, note);
 
-      if (planApproved) {
-        return { decision: "continue" };
-      }
-      const response = await perConn.planBroker.request({
-        task: taskText,
-        steps: steps.map((step) => step.text),
-        risks: [],
-        agents: [
-          { id: 1, label: "plan", steps: steps.map((step) => step.text), dependsOn: [] },
-        ],
-        agentCount: 1,
-        execution: "sequential",
-        modeLabel: modeLabelFromMaxAgents(maxSubagents),
-      });
-      if (response.decision === "skip") {
-        return { decision: "stop" };
-      }
-      if (response.decision === "edit") {
-        return { decision: "revise", feedback: response.feedback ?? "" };
-      }
-      planApproved = true;
+    if (planApproved) {
       return { decision: "continue" };
-    };
+    }
+    const response = await perConn.planBroker.request({
+      task: taskText,
+      steps: steps.map((step) => step.text),
+      risks: [],
+      agents: [
+        {
+          id: 1,
+          label: "plan",
+          steps: steps.map((step) => step.text),
+          dependsOn: [],
+        },
+      ],
+      agentCount: 1,
+      execution: "sequential",
+      modeLabel: modeLabelFromMaxAgents(maxSubagents),
+    });
+    if (response.decision === "skip") {
+      return { decision: "stop" };
+    }
+    if (response.decision === "edit") {
+      return { decision: "revise", feedback: response.feedback ?? "" };
+    }
+    planApproved = true;
+    return { decision: "continue" };
+  };
 
   const emitSubagentStatus: ToolHandlerContext["emitSubagentStatus"] = (
     stage,
@@ -625,6 +1023,8 @@ export const runAgentTurn = async (
       emitToken: () => {},
       reportStatus: () => {},
       signal,
+      contextWindow,
+      protectedPrefixCount: workerMessages.length,
     });
 
     return {
@@ -668,7 +1068,10 @@ export const runAgentTurn = async (
       currentPlan.map((step) => {
         const result = resultMap.get(step.id);
         return result
-          ? { ...step, status: result.ok ? ("done" as const) : ("failed" as const) }
+          ? {
+              ...step,
+              status: result.ok ? ("done" as const) : ("failed" as const),
+            }
           : step;
       });
 
@@ -726,7 +1129,7 @@ export const runAgentTurn = async (
     planTools: { updatePlan, runStepsParallel },
   });
 
-  return runToolCallLoop({
+  const result = await runToolCallLoop({
     taskId,
     ollama,
     agentModel,
@@ -742,5 +1145,19 @@ export const runAgentTurn = async (
     emitToken,
     reportStatus: emitSubagentStatus,
     signal,
+    checkCompletion: () => completionGap({ planSteps: planThisTurn, trackers }),
+    contextWindow,
+    protectedPrefixCount,
   });
+
+  // Record this exchange for the next turn on this connection — see
+  // conversationMemory.ts. Stored regardless of `ok`, so a follow-up like
+  // "try that again" or "implement that plan" still has the failed attempt
+  // to refer back to.
+  perConn.conversation = recordExchange(
+    perConn.conversation ?? [],
+    taskText,
+    result.content,
+  );
+  return result;
 };

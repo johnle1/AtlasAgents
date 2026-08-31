@@ -25,7 +25,8 @@ import type {
   ToolExecutionResult,
 } from "./types.js";
 import { formatObservation } from "./toolHandler.js";
-import { VERIFY_REQUIRED_MESSAGE, normalizeCommand } from "../commandClassifier.js";
+import { normalizeCommand } from "../commandClassifier.js";
+import { unverifiedWriteGap } from "../agent/completionGate.js";
 
 /**
  * Tool handler for `finish`.
@@ -121,22 +122,16 @@ export const finishTool: ToolHandler = {
     // CHECK 2: If files were written, at least one verification signal is
     // required — either a written file was read back (file verification) or
     // a `purpose: "verify"` command passed (command verification). Prevents
-    // the agent from finishing with unverified changes.
-    if (trackers.filesWrittenThisTask.size > 0) {
-      const hasFileVerification = trackers.filesVerifiedThisTask.size > 0;
-      const hasCommandVerification = trackers.verifyCommandPassed;
-      if (!hasFileVerification && !hasCommandVerification) {
-        return {
-          done: false,
-          summary: "",
-          feedback: formatObservation(
-            "finish",
-            finishArgs,
-            VERIFY_REQUIRED_MESSAGE(trackers.filesWrittenThisTask),
-          ),
-          escalationCount: handlerContext.escalationCount,
-        };
-      }
+    // the agent from finishing with unverified changes. Shared with the
+    // loop's implicit no-tool-call exit — see completionGate.ts.
+    const writeGap = unverifiedWriteGap(trackers);
+    if (writeGap) {
+      return {
+        done: false,
+        summary: "",
+        feedback: formatObservation("finish", finishArgs, writeGap),
+        escalationCount: handlerContext.escalationCount,
+      };
     }
 
     handlerContext.emitSubagentStatus("done", "✓", "Done");
