@@ -116,8 +116,12 @@ export const runOrchestratorPipeline = async (
 
     // Model resolution: per-task overrides take precedence over server config.
     // This allows callers to experiment with different model endpoints/versions per-task.
-    const serverAgent = await config.getAgentModel();
-    agentModel = modelOverrides?.agentModel?.trim() || serverAgent;
+    // Short-circuit BEFORE calling getAgentModel() — it throws on an empty
+    // server config, which previously hard-failed every task even when a
+    // valid client override was supplied (see agentTurn.ts/subagent.ts,
+    // which already short-circuit this way).
+    agentModel =
+      modelOverrides?.agentModel?.trim() || (await config.getAgentModel());
 
     // Resolve num_ctx/keep_alive once per task, up front — the model tag is
     // fixed for this task's lifetime, so this doesn't need to happen per

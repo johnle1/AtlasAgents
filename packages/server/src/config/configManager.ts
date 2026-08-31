@@ -574,7 +574,7 @@ export class ConfigManager implements IConfigManager {
     // Validate that a model is actually configured (not empty string)
     if (modelName.length === 0) {
       throw new ConfigError(
-        "No agent model configured. Run /set agent to choose one.",
+        "No agent model configured. Run /model to choose one.",
       );
     }
 
@@ -1093,7 +1093,18 @@ export class ConfigManager implements IConfigManager {
       // Uses object spread: {...config} copies all current values, then [key]: value
       // overwrites just the key we're modifying. All other keys stay unchanged.
       // Cast to ServerConfig to satisfy TypeScript (the key/value pair is valid by validation above)
-      const nextConfig = { ...config, [key]: value } as ServerConfig;
+      // agentTemp/subagentTemp are the two WRITABLE_CONFIG_KEYS the client
+      // also tracks — stamp configChangedAt only for those, only on a real
+      // change, so an unrelated /set (retries, numCtx, ...) doesn't falsely
+      // outrank a real config difference in the newest-wins comparison.
+      const isTrackedTempChange =
+        (key === "agentTemp" || key === "subagentTemp") &&
+        config[key] !== value;
+      const nextConfig = {
+        ...config,
+        [key]: value,
+        ...(isTrackedTempChange ? { configChangedAt: Date.now() } : {}),
+      } as ServerConfig;
 
       // Step 5: Persist the updated configuration atomically to disk
       // We use _saveRaw directly for the same reason as _loadRaw above
@@ -1204,10 +1215,14 @@ export class ConfigManager implements IConfigManager {
       // Step 5: Create new config object with the updated model name
       // Uses conditional to select which field to update (agentModel or subagentModel)
       // Spreads all other config values unchanged
+      const configChangedAt =
+        previousModel !== trimmedModelName
+          ? Date.now()
+          : config.configChangedAt;
       const nextConfig: ServerConfig =
         role === "agent"
-          ? { ...config, agentModel: trimmedModelName }
-          : { ...config, subagentModel: trimmedModelName };
+          ? { ...config, agentModel: trimmedModelName, configChangedAt }
+          : { ...config, subagentModel: trimmedModelName, configChangedAt };
 
       // Step 6: Persist the new configuration to disk atomically
       // We use _saveRaw directly for the same reason as _loadRaw above
@@ -1362,10 +1377,16 @@ export class ConfigManager implements IConfigManager {
           `Provider '${trimmedProvider}' is not configured. Run /providers add ${trimmedProvider} first.`,
         );
       }
+      const previousProvider =
+        role === "agent" ? config.agentProvider : config.subagentProvider;
+      const configChangedAt =
+        previousProvider !== trimmedProvider
+          ? Date.now()
+          : config.configChangedAt;
       const nextConfig: ServerConfig =
         role === "agent"
-          ? { ...config, agentProvider: trimmedProvider }
-          : { ...config, subagentProvider: trimmedProvider };
+          ? { ...config, agentProvider: trimmedProvider, configChangedAt }
+          : { ...config, subagentProvider: trimmedProvider, configChangedAt };
       await this._saveRaw(nextConfig);
     });
   };
@@ -1407,6 +1428,11 @@ export class ConfigManager implements IConfigManager {
 
       const previousModel =
         role === "agent" ? config.agentModel : config.subagentModel;
+      const previousProvider =
+        role === "agent" ? config.agentProvider : config.subagentProvider;
+      const changed =
+        previousModel !== trimmedModelName ||
+        previousProvider !== trimmedProvider;
 
       const nextConfig: ServerConfig =
         role === "agent"
@@ -1414,17 +1440,70 @@ export class ConfigManager implements IConfigManager {
               ...config,
               agentModel: trimmedModelName,
               agentProvider: trimmedProvider,
+              configChangedAt: changed ? Date.now() : config.configChangedAt,
             }
           : {
               ...config,
               subagentModel: trimmedModelName,
               subagentProvider: trimmedProvider,
+              configChangedAt: changed ? Date.now() : config.configChangedAt,
             };
 
       await this._saveRaw(nextConfig);
 
       if (previousModel !== trimmedModelName) {
         this.onModelChanged?.(previousModel, role);
+      }
+    });
+  };
+
+  /**
+   * Overwrites every overlapping config field in one atomic write, stamping
+   * `configChangedAt` to the caller-supplied value rather than `Date.now()`.
+   *
+   * @remarks
+   * Used exclusively by the `sync.check` route's "client wins" branch. The
+   * explicit `changedAt` (the client's own timestamp) is what lets both
+   * sides converge to an *identical* `configChangedAt` after reconciling —
+   * stamping `Date.now()` here instead would make the server's value always
+   * look newer than the client's on the very next check, incorrectly
+   * flipping the winner every time even though nothing new changed.
+   *
+   * No provider-existence validation (unlike {@link setRoleModel}) — this is
+   * reconciling from an already-authenticated client's own config, and
+   * rejecting it here would just leave the two sides diverged with no
+   * remedy. A provider unknown to this server surfaces the same way an
+   * already-existing stale-provider mismatch does: the next task's provider
+   * resolution fails with a clear error.
+   */
+  applySyncedConfig = async (
+    values: {
+      agentModel: string;
+      subagentModel: string;
+      agentProvider: string;
+      subagentProvider: string;
+      agentTemp: number;
+      subagentTemp: number;
+    },
+    changedAt: number,
+  ): Promise<void> => {
+    return this.mutex.run(async () => {
+      const config = await this._loadRaw();
+      const previousAgentModel = config.agentModel;
+      const previousSubagentModel = config.subagentModel;
+
+      const nextConfig: ServerConfig = {
+        ...config,
+        ...values,
+        configChangedAt: changedAt,
+      };
+      await this._saveRaw(nextConfig);
+
+      if (previousAgentModel !== values.agentModel) {
+        this.onModelChanged?.(previousAgentModel, "agent");
+      }
+      if (previousSubagentModel !== values.subagentModel) {
+        this.onModelChanged?.(previousSubagentModel, "subagent");
       }
     });
   };

@@ -102,18 +102,12 @@ export const handleSetModel = async (
     return;
   }
 
-  // Config's on-disk field names are shifted by one role relative to their
-  // meaning: `subagentModel`/`agentProvider` hold the *agent's* selection,
-  // `subsubagentModel`/`subagentProvider` hold the *subagent's* — see the
-  // wire translation in requestStream.ts. Building `current` here (rather
-  // than trusting field names at the call site) keeps that footgun local.
-  //
   // Trim before the presence check — whitespace-only strings are truthy but
   // mean "not set" everywhere else (Banner, useSubmitLine). Passing them
   // through would mark the wrong picker rows (or mark none usefully).
   const existingConfig = loadConfig();
-  const agentModel = (existingConfig.subagentModel ?? "").trim();
-  const subagentModel = (existingConfig.subsubagentModel ?? "").trim();
+  const agentModel = (existingConfig.agentModel ?? "").trim();
+  const subagentModel = (existingConfig.subagentModel ?? "").trim();
   const current: CurrentModelSelection = {
     ...(agentModel
       ? {
@@ -154,7 +148,7 @@ export const handleSetModel = async (
 
   const { provider: selectedProvider, model: selectedModelName } =
     entries[entryIndex];
-  const modelKey = modelRole === "agent" ? "subagentModel" : "subsubagentModel";
+  const modelKey = modelRole === "agent" ? "agentModel" : "subagentModel";
   const providerKey =
     modelRole === "agent" ? "agentProvider" : "subagentProvider";
 
@@ -162,12 +156,18 @@ export const handleSetModel = async (
   const previousConfig = loadConfig();
   const previousModelName = previousConfig[modelKey] ?? "";
   const previousProvider = previousConfig[providerKey] ?? "ollama";
+  const previousConfigChangedAt = previousConfig.configChangedAt;
 
   let updatedConfig;
   try {
     updatedConfig = updateConfig({
       [modelKey]: selectedModelName,
       [providerKey]: selectedProvider,
+      // Stamped here (not by updateConfig generically) because this is the
+      // one client-side write site that touches a field the server's
+      // sync.check reconciliation also tracks — see config/types.ts's
+      // configChangedAt doc comment.
+      configChangedAt: Date.now(),
     });
   } catch (error) {
     printError(`Failed to save configuration: ${formatErrorMessage(error)}`);
@@ -227,6 +227,7 @@ export const handleSetModel = async (
     updateConfig({
       [modelKey]: previousModelName,
       [providerKey]: previousProvider,
+      configChangedAt: previousConfigChangedAt,
     });
     printError(
       `Failed to set ${modelRole} model on server: ${formatErrorMessage(error)}`,

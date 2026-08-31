@@ -58,8 +58,8 @@ export const createRequestStreamHandler =
       text?: string;
       name?: string;
       maxSubagents?: unknown;
+      agentModel?: string;
       subagentModel?: string;
-      subsubagentModel?: string;
       agentProvider?: string;
       subagentProvider?: string;
       agentTemp?: number;
@@ -114,17 +114,13 @@ export const createRequestStreamHandler =
           : {
               text: String(parsed.text ?? ""),
               maxSubagents: parsed.maxSubagents,
-              // The client's on-the-wire field names are shifted by one role
-              // (its "subagentModel" is the lead agent's model, "subsubagentModel"
-              // is the subagent's model) — translate to the server's own
-              // agentModel/subagentModel naming here, at the boundary.
               agentModel:
-                typeof parsed.subagentModel === "string"
-                  ? parsed.subagentModel
+                typeof parsed.agentModel === "string"
+                  ? parsed.agentModel
                   : undefined,
               subagentModel:
-                typeof parsed.subsubagentModel === "string"
-                  ? parsed.subsubagentModel
+                typeof parsed.subagentModel === "string"
+                  ? parsed.subagentModel
                   : undefined,
               agentProvider:
                 typeof parsed.agentProvider === "string"

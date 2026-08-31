@@ -22,11 +22,12 @@ import {
 } from "../mcp/mcpRegistry.js";
 import { isTokenSaveOnPath } from "../mcp/tokenSaveClient.js";
 import { syncAllMcpTools } from "./tokenSaveHandlers.js";
+import type { McpSyncMutation } from "../mcp/mcpSyncPlan.js";
 import { printError, printLine, printSuccess } from "../renderer.js";
 import { formatErrorMessage } from "./utils.js";
 
 const USAGE =
-  "Usage: /mcp list | add <github|jira|slack|name> [--command <cmd> [--args a,b] | --url <url>] [--readonly] | remove <name> | enable <name> | disable <name> | tools [name] | check <name>";
+  "Usage: /mcp list | add <github|jira|slack|name> [--command <cmd> [--args a,b] | --url <url>] [--readonly] | remove <name> | enable <name> | disable <name> | tools [name] | check <name> | refresh [name]";
 
 /** Parses `/mcp add <name> --command <cmd> [--args a,b] | --url <url> [--readonly]`. */
 const parseCustomAdd = (argument: string): { name: string; config: McpServerConfig } | null => {
@@ -103,7 +104,10 @@ const addPreset = async (
   });
   printSuccess(`Added MCP server "${preset.id}" (${preset.label}).`);
 
-  const synced = await syncAllMcpTools(conn, workspaceRoot);
+  const synced = await syncAllMcpTools(conn, workspaceRoot, {
+    op: "add",
+    serverId: preset.id,
+  });
   if (synced > 0) {
     printSuccess(`Synced ${synced} tool(s) to server.`);
   }
@@ -177,7 +181,10 @@ export const handleMcp = async (
       });
       printSuccess(`Added MCP server "${parsed.name}".`);
 
-      const synced = await syncAllMcpTools(conn, workspaceRoot);
+      const synced = await syncAllMcpTools(conn, workspaceRoot, {
+        op: "add",
+        serverId: parsed.name,
+      });
       if (synced > 0) {
         printSuccess(`Synced ${synced} tool(s) to server.`);
       }
@@ -206,7 +213,7 @@ export const handleMcp = async (
       await disconnectMcpClient(name);
       printSuccess(`Removed MCP server "${name}".`);
 
-      await syncAllMcpTools(conn, workspaceRoot);
+      await syncAllMcpTools(conn, workspaceRoot, { op: "remove", serverId: name });
       return;
     }
 
@@ -234,10 +241,11 @@ export const handleMcp = async (
       });
       printSuccess(`${enabled ? "Enabled" : "Disabled"} MCP server "${name}".`);
 
-      // Re-sync either way: enabling should pick its tools back up
-      // immediately, disabling should drop them and tear down the
-      // connection — see the `enabled === false` skip in syncAllMcpTools.
-      await syncAllMcpTools(conn, workspaceRoot);
+      // Re-sync either way: enabling reuses its cached tools with no
+      // spawn when its config hasn't changed and its cache hasn't expired;
+      // disabling retains the cache (marked inactive) and tears down the
+      // live connection — see `planMcpMutation` in mcpSyncPlan.ts.
+      await syncAllMcpTools(conn, workspaceRoot, { op: "toggle", serverId: name });
       return;
     }
 
@@ -298,6 +306,20 @@ export const handleMcp = async (
       } catch (error) {
         printError(`Failed to connect to "${name}": ${formatErrorMessage(error)}`);
       }
+      return;
+    }
+
+    case "refresh": {
+      const name = argument.trim();
+      const mutation: McpSyncMutation = name
+        ? { op: "refresh", serverId: name }
+        : { op: "refresh" };
+      const synced = await syncAllMcpTools(conn, workspaceRoot, mutation);
+      printSuccess(
+        name
+          ? `Refreshed "${name}" — ${synced} tool(s) synced.`
+          : `Refreshed all MCP servers — ${synced} tool(s) synced.`,
+      );
       return;
     }
 

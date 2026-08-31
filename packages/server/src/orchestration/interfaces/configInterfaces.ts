@@ -408,4 +408,29 @@ export interface IConfigManager {
     providerName: string,
     modelName: string,
   ): Promise<void>;
+
+  /**
+   * Overwrites every client-overlapping config field in one atomic write,
+   * stamping `configChangedAt` to `changedAt` rather than the current time.
+   *
+   * @remarks
+   * Used by the `sync.check` route's "client wins" reconciliation branch —
+   * see {@link "../../config/configManager.js".ConfigManager.applySyncedConfig}
+   * for why the caller-supplied timestamp matters.
+   *
+   * @param values - The six fields the client and server both track.
+   * @param changedAt - The winning side's `configChangedAt`, so both sides
+   *   converge to an identical value.
+   */
+  applySyncedConfig(
+    values: {
+      agentModel: string;
+      subagentModel: string;
+      agentProvider: string;
+      subagentProvider: string;
+      agentTemp: number;
+      subagentTemp: number;
+    },
+    changedAt: number,
+  ): Promise<void>;
 }

@@ -113,6 +113,39 @@ export const resetToolRegistryForTests = (): void => {
   toolRegistry.clear();
 };
 
+/**
+ * Rebuilds the tool-metadata registry from scratch using cached discovery
+ * results, with no network/spawn activity.
+ *
+ * @remarks
+ * `toolRegistry` is normally populated as a side effect of {@link listMcpTools}
+ * during real discovery. A cache hit skips discovery entirely, which used to
+ * leave the registry empty — a cached tool would round-trip to the model
+ * fine (the server already had it), but calling it failed closed at the
+ * approval gate with "not allowed — it was not discovered from a connected
+ * MCP server." Call this after every sync (cache hit or not) so the
+ * registry always reflects the full set of tools actually available this
+ * session.
+ *
+ * Synchronous, clear-then-rebuild: safe against the approval gate's
+ * synchronous {@link getToolMetadata} read, which can never observe a
+ * partially-rebuilt registry. An `inactive` entry (disabled server, cache
+ * retained) is skipped, so its tools are neither callable nor listed.
+ */
+export const rebuildToolRegistry = (
+  entries: Record<string, { tools: McpToolDef[]; inactive?: boolean }>,
+): void => {
+  toolRegistry.clear();
+  for (const [serverId, entry] of Object.entries(entries)) {
+    if (entry.inactive) {
+      continue;
+    }
+    for (const tool of entry.tools) {
+      registerToolMetadata(serverId, tool.name, tool.readOnly);
+    }
+  }
+};
+
 type ServerConnection = {
   client: Client;
 };

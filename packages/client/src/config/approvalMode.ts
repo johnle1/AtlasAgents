@@ -57,7 +57,7 @@ export const CYCLE_MODES: readonly ApprovalMode[] = [
  * @example
  * ```ts
  * approvalModeDisplay("plan"); // { label: "⏸ Plan", color: "#60A5FA" }
- * approvalModeDisplay("auto"); // { label: "⚠ Auto", color: "#FF5555", bold: true }
+ * approvalModeDisplay("auto"); // { label: "⏵⏵ Auto", color: "#FF5555", bold: true }
  * ```
  */
 export const approvalModeDisplay = (mode: string): ApprovalModeDisplay =>
@@ -67,12 +67,12 @@ export const approvalModeDisplay = (mode: string): ApprovalModeDisplay =>
  * Footer / cheat-sheet label for a mode token.
  *
  * @param mode - Wire token or unknown string (unknown is shown as-is).
- * @returns Display label (`⏸ Plan`, `⚠ Auto`, …).
+ * @returns Display label (`⏸ Plan`, `⏵⏵ Auto`, …).
  *
  * @example
  * ```ts
  * formatApprovalModeLabel("accept_edits"); // "⏵ Accept Edits"
- * formatApprovalModeLabel("auto"); // "⚠ Auto"
+ * formatApprovalModeLabel("auto"); // "⏵⏵ Auto"
  * ```
  */
 export const formatApprovalModeLabel = (mode: string): string =>

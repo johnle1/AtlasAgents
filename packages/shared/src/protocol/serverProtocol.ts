@@ -7,8 +7,8 @@
  * (server→client requests, e.g. the server asking the client to read a file
  * or run a shell command). The two protocols share no route names — this
  * file covers `models.*`, `config.*`, `providers.*`, `skills.sync`,
- * `memory.*`, `session.*`, `plan.respond`, `mcp.tools.sync` (commands) and
- * `task`/`models.pull`/`explore` (streams).
+ * `memory.*`, `session.*`, `plan.respond`, `mcp.tools.sync`, `sync.check`
+ * (commands) and `task`/`models.pull`/`explore` (streams).
  */
 
 /**
@@ -28,6 +28,8 @@
  * - `session.*`: Session management
  * - `plan.*`: Plan-related operations
  * - `mcp.tools.*`: MCP tool synchronization
+ * - `sync.check`: Unified startup reconciliation — MCP tool cache freshness
+ *   plus newest-timestamp-wins config reconciliation, in one round trip
  *
  * @example
  * ```ts
@@ -54,7 +56,8 @@ export type RouteId =
   | "session.exists"
   | "session.clear"
   | "plan.respond"
-  | "mcp.tools.sync";
+  | "mcp.tools.sync"
+  | "sync.check";
 
 /**
  * Fixed list of all RouteId values for runtime validation.
@@ -95,6 +98,7 @@ export const ROUTE_IDS: readonly RouteId[] = [
   "session.clear",
   "plan.respond",
   "mcp.tools.sync",
+  "sync.check",
 ] as const;
 
 // Pre-computed Set for O(1) membership testing in isRouteId
@@ -211,8 +215,8 @@ export const isStreamKind = (value: string): value is StreamKind => {
  * const payload: TaskStreamPayload = {
  *   kind: "task",
  *   text: "Add unit tests for the banner layout helpers",
- *   subagentModel: "gemma3:27b",
- *   subsubagentModel: "gemma3:4b",
+ *   agentModel: "gemma3:27b",
+ *   subagentModel: "gemma3:4b",
  *   agentProvider: "ollama",
  *   subagentProvider: "ollama",
  *   agentTemp: 0.2,
@@ -231,10 +235,10 @@ export type TaskStreamPayload = {
   maxSubagents?: 1 | 2 | "max" | number;
 
   /** Model id for the agent role (planning / orchestration). */
-  subagentModel: string;
+  agentModel: string;
 
   /** Model id for the subagent role (tool use / edits). */
-  subsubagentModel: string;
+  subagentModel: string;
 
   /** Provider serving the agent role (e.g. "ollama", "lmstudio"). */
   agentProvider: string;

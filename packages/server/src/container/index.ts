@@ -67,6 +67,9 @@ import type { PerConnection } from "./types.js";
 import { createServices } from "./serviceFactory.js";
 import { createPerConnection as createPerConnectionFromDeps } from "./perConnectionFactory.js";
 
+// ===== MCP IMPORTS =====
+import { McpToolsCacheStore } from "../orchestration/mcp/mcpToolsCacheStore.js";
+
 export type { PerConnection } from "./types.js";
 
 /**
@@ -264,6 +267,16 @@ export type AppContainer = {
   brokerByRequester: Map<string, PerConnection>;
 
   /**
+   * Disk-persisted cache of discovered MCP tools, keyed by client + workspace.
+   *
+   * @remarks
+   * Unlike `brokerByRequester`, this survives both a client reconnect and a
+   * server restart — see `orchestration/mcp/mcpToolsCacheStore.ts`. Lets a
+   * reconnecting client skip re-discovering identical MCP tools.
+   */
+  mcpToolsCacheStore: McpToolsCacheStore;
+
+  /**
    * Factory function for creating per-connection resources.
    *
    * @remarks
@@ -407,6 +420,12 @@ export const createContainer = (
   // Track per-connection resources by requester ID for proper isolation
   const brokerByRequester = new Map<string, PerConnection>();
 
+  // Disk-persisted MCP tool-sync cache — survives reconnects and restarts,
+  // unlike brokerByRequester above.
+  const mcpToolsCacheStore = new McpToolsCacheStore({
+    rootDir: options.dataRoot ?? process.cwd(),
+  });
+
   // Client bridge enables bidirectional communication with connected clients
   const clientBridge = new ClientBridge((requesterId) =>
     options.getClientPeer?.(requesterId),
@@ -451,6 +470,7 @@ export const createContainer = (
       // Connection management
       brokerByRequester,
       createPerConnection,
+      mcpToolsCacheStore,
 
       // Utilities
       preferenceRulesToMemoryEntries,
@@ -494,6 +514,7 @@ export const createContainer = (
 
     // Connection management
     brokerByRequester,
+    mcpToolsCacheStore,
 
     // Factory functions
     createPerConnection,

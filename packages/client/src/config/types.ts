@@ -229,8 +229,8 @@ export interface UiConfig {
  *   server: "localhost",
  *   port: 7000,
  *   password: "secret",
- *   subagentModel: "gemma3:27b",
- *   subsubagentModel: "gemma3:4b",
+ *   agentModel: "gemma3:27b",
+ *   subagentModel: "gemma3:4b",
  *   agentTemp: 0.1,
  *   subagentTemp: 0.4,
  *   retries: 3,
@@ -282,7 +282,7 @@ export interface Config {
    * for better reasoning. Example values: "gemma3:27b", "llama3:70b".
    * Empty until set by user or first-run prompts.
    */
-  subagentModel: string;
+  agentModel: string;
 
   /**
    * Ollama model name for the subagent role.
@@ -292,7 +292,7 @@ export interface Config {
    * typically sufficient for faster response times. Example values: "gemma3:4b",
    * "llama3:8b". Empty until set by user or first-run prompts.
    */
-  subsubagentModel: string;
+  subagentModel: string;
 
   /**
    * Provider serving the agent role.
@@ -453,6 +453,18 @@ export interface Config {
    * Not a secret — safe to store in plaintext even in an encrypted config.
    */
   serverFingerprints: Record<string, string>;
+
+  /**
+   * `Date.now()` epoch ms of the last write to a model/provider/temperature
+   * field the server also tracks — NOT a general file-write timestamp (the
+   * config file's own mtime is unusable for this, since it bumps on every
+   * unrelated write: theme, sandbox, `/mcp`, `/workspace`, …). Compared
+   * against the server's own `configChangedAt`
+   * (`packages/server/src/config/types.ts`) by the `sync.check` route to
+   * decide which side's overlapping values win on startup: whichever
+   * changed more recently.
+   */
+  configChangedAt: number;
 }
 
 /**
@@ -472,8 +484,8 @@ export const DEFAULT_CONFIG: Config = {
   password: "",
 
   // Model names (empty until set by user or first-run prompts)
+  agentModel: "",
   subagentModel: "",
-  subsubagentModel: "",
 
   // Native Ollama by default; switched via /providers + /set agent|subagent
   agentProvider: "ollama",
@@ -527,6 +539,10 @@ export const DEFAULT_CONFIG: Config = {
 
   // No servers trusted yet — populated on first connect to each host:port (TOFU)
   serverFingerprints: {},
+
+  // 0 means "never explicitly changed" — always loses a newest-wins
+  // comparison against a server that has ever had a model set.
+  configChangedAt: 0,
 };
 
 /** Config directory path (~/.atlasagents) where config, history, and skills live. */

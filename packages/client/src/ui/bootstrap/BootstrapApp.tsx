@@ -183,6 +183,7 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
     // This is critical because the connection effect can run for several seconds
     // while the user might dismiss the error screen and trigger unmount.
     let connectionCancelled = false;
+    let unsubscribeReconnectSync: (() => void) | undefined;
 
     const { connection: rsocketConnection, fileProxy: localFileProxy } =
       connectionServices;
@@ -235,6 +236,27 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
         );
       }
 
+      // Re-run the same sync after a reconnect (network blip, server
+      // restart, …) — the server's perConnection.mcpTools is keyed by a
+      // per-connection id that's destroyed on disconnect, so without this a
+      // reconnected session would silently have zero MCP tools until the
+      // client process itself restarts. Skips the immediate synchronous
+      // callback every subscribe fires with the *current* status (already
+      // handled by the syncAllMcpTools call above) — only later transitions
+      // back to "Connected" are a genuine reconnect.
+      let sawInitialStatus = false;
+      unsubscribeReconnectSync = rsocketConnection.onConnectionStatus(
+        (status) => {
+          if (!sawInitialStatus) {
+            sawInitialStatus = true;
+            return;
+          }
+          if (status === "Connected") {
+            void syncAllMcpTools(rsocketConnection, workspaceRootDirectory);
+          }
+        },
+      );
+
       // Inform the user if a server session already exists; ignore RPC errors.
       // This is agenty only — startup continues without the hint if the RPC fails.
       // The hint helps users avoid confusing state where two clients share one session.
@@ -279,6 +301,7 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
       // Set the flag to prevent state updates if the effect cleanup runs
       // after async operations complete but before the component fully unmounts.
       connectionCancelled = true;
+      unsubscribeReconnectSync?.();
     };
   }, [bootstrapPhase, appConfig, connectionServices]);
 

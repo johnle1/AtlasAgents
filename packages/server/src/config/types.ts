@@ -177,6 +177,11 @@ export const SERVER_DEFAULTS = {
    * fails the request with a 400.
    */
   keepAlive: "30m",
+
+  // 0 means "never explicitly changed" — always loses a newest-wins
+  // comparison against any client that has ever set a model, which is
+  // correct: an unconfigured server should adopt the client's config.
+  configChangedAt: 0,
 } as const;
 
 /**
@@ -320,6 +325,18 @@ export type ServerConfig = {
    * `"-1"` to the number for exactly that reason.
    */
   keepAlive: string | number;
+
+  /**
+   * `Date.now()` epoch ms of the last write to any field the client also
+   * tracks (agent/subagent model, provider, or temperature) — NOT a general
+   * file-write timestamp. Compared against the client's own
+   * `configChangedAt` (`packages/client/src/config/types.ts`) by the
+   * `sync.check` route to decide which side's overlapping config values win
+   * on startup: whichever changed more recently. Deliberately excludes
+   * unrelated writes (e.g. `numCtx`, `retries`) so an unrelated `/set` call
+   * doesn't falsely look newer than a real model change on the other side.
+   */
+  configChangedAt: number;
 };
 
 /**

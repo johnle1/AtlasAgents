@@ -472,6 +472,14 @@ export const mergeConfig = (storedConfig: Record<string, unknown>): ServerConfig
     // load instead of failing every request.
     keepAlive:
       normaliseKeepAlive(storedConfig.keepAlive) ?? SERVER_DEFAULTS.keepAlive,
+
+    // Newest-wins config reconciliation marker — see the field's doc comment
+    // in types.ts. Not in WRITABLE_CONFIG_KEYS: only the dedicated setters
+    // that touch an overlapping field are allowed to stamp it.
+    configChangedAt: asNumber(
+      storedConfig.configChangedAt,
+      SERVER_DEFAULTS.configChangedAt,
+    ),
   };
 };
 

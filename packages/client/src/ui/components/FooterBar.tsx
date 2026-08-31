@@ -63,7 +63,7 @@ export const FooterBar: React.FC = () => {
         }
       })(),
     );
-    const model = (loadConfig().subagentModel ?? "").trim() || "—";
+    const model = (loadConfig().agentModel ?? "").trim() || "—";
     const contextPct =
       contextUsage === null
         ? null
