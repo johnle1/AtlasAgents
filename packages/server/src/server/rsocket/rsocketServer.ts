@@ -170,6 +170,25 @@ export class RSocketServer {
   };
 
   /**
+   * Aborts every in-flight stream on every currently connected session.
+   *
+   * @remarks
+   * Used on process shutdown so a mid-task Ctrl+C doesn't wait on a slow
+   * model call: {@link stop} only stops accepting new connections (Node's
+   * `net.Server.close()` does not drop already-open sockets), so cancelling
+   * outstanding work has to be done explicitly and first. Mirrors the
+   * per-connection `onClose` cleanup in {@link onAccept} but applied to every
+   * live session at once rather than one closing connection.
+   */
+  abortAll = (): void => {
+    for (const session of this.activeSessions.values()) {
+      for (const ac of session.abortControllers) {
+        ac.abort();
+      }
+    }
+  };
+
+  /**
    * Accepts a new RSocket connection and wires up its session and handlers.
    *
    * @remarks

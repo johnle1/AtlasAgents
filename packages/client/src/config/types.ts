@@ -385,8 +385,7 @@ export interface Config {
    * @remarks
    * When true, the CLI shows the internal reasoning process of the agent and
    * subagent models. When false, only the final output is displayed. Default
-   * is true — seeing what the agent is doing mid-task (especially during a
-   * multi-step turn) is the normal expectation; `/think off` opts back out.
+   * is false — thinking is noisy for everyday use; `/think on` opts back in.
    */
   showThinkOutput: boolean;
 
@@ -513,8 +512,8 @@ export const DEFAULT_CONFIG: Config = {
   // Empty until set via `/workspace set <path>` or editing config.json
   workspace: "",
 
-  // Show agent/subagent think boxes by default; `/think off` opts out
-  showThinkOutput: true,
+  // Hide agent/subagent think boxes by default; `/think on` opts in
+  showThinkOutput: false,
 
   // Allow 3 parallel subagent groups by default (minimum 1)
   subagentCap: 3,

@@ -26,7 +26,7 @@ import type {
 } from "./types.js";
 import { formatObservation } from "./toolHandler.js";
 import { normalizeCommand } from "../commandClassifier.js";
-import { unverifiedWriteGap } from "../agent/completionGate.js";
+import { unverifiedWriteGap } from "../agent/terminationManager.js";
 
 /**
  * Tool handler for `finish`.
@@ -123,7 +123,7 @@ export const finishTool: ToolHandler = {
     // required — either a written file was read back (file verification) or
     // a `purpose: "verify"` command passed (command verification). Prevents
     // the agent from finishing with unverified changes. Shared with the
-    // loop's implicit no-tool-call exit — see completionGate.ts.
+    // loop's implicit no-tool-call exit — see terminationManager.ts.
     const writeGap = unverifiedWriteGap(trackers);
     if (writeGap) {
       return {
