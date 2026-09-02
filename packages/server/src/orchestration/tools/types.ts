@@ -199,6 +199,22 @@ export interface ToolHandler {
     args: Record<string, unknown>,
     ctx: ToolHandlerContext,
   ): Promise<ToolExecutionResult>;
+  /**
+   * Whether this handler only reads — never mutates the workspace, the
+   * checklist, or the turn's own control flow (never returns `done: true`).
+   *
+   * @remarks
+   * Lets `agentTurn.ts`'s `runToolCalls` execute a run of consecutive
+   * read-only calls concurrently instead of one at a time — safe because
+   * nothing about the workspace or conversation state a read observes can
+   * change from another read running alongside it. Omitted (`undefined`) is
+   * treated as `false`: every built-in tool defaults to sequential unless
+   * explicitly marked otherwise (currently only `readFileTool`). MCP tools
+   * carry the same concept under `readOnly` on their own schema
+   * (`mcp/mcpToolSchema.ts`) — see `agentTurn.ts`'s `getEffectiveReadOnly`
+   * helper, which checks both.
+   */
+  readOnly?: boolean;
 }
 
 /**

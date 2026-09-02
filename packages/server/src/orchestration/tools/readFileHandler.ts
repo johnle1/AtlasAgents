@@ -26,6 +26,13 @@ import { formatObservation, toolExecutionErrorResult } from "./toolHandler.js";
  * so a later `edit_file` on the same path is permitted.
  */
 export const readFileTool: ToolHandler = {
+  // Lets agentTurn.ts's runToolCalls run a batch of consecutive read_file
+  // calls concurrently — safe because every mutation this handler makes
+  // (trackers.filesReadThisTask/filesVerifiedThisTask, both plain Set.add
+  // calls) is synchronous around its one await, so nothing here can
+  // corrupt state when several reads run alongside each other. See
+  // ToolHandler.readOnly's doc comment in types.ts.
+  readOnly: true,
   schema: {
     type: "function",
     function: {
