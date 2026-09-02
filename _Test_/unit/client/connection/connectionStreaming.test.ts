@@ -121,6 +121,11 @@ describe("sendTask", () => {
       text: "do work",
       maxSubagents: 2,
       agentModel: "m1",
+      clientEnv: {
+        platform: process.platform,
+        shell: expect.any(String),
+        osRelease: expect.any(String),
+      },
     });
   });
 

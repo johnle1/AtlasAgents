@@ -16,15 +16,29 @@ import {
 import type { ToolSchema } from "../../../../packages/server/src/orchestration/tools/types.js";
 
 describe("buildEnvironmentBlock", () => {
-  it("emits cmd.exe / dir / findstr for win32", () => {
-    const block = buildEnvironmentBlock({ platform: "win32" });
+  it("emits cmd.exe / dir / findstr for win32 with cmd.exe shell", () => {
+    const block = buildEnvironmentBlock({
+      platform: "win32",
+      shell: "cmd.exe",
+    });
     expect(block).toContain("Windows");
     expect(block).toContain("cmd.exe");
     expect(block).toContain("dir");
     expect(block).toContain("findstr");
-    // Never suggests POSIX-only syntax for a Windows client.
     expect(block).not.toContain("ls -la");
     expect(block).not.toContain("grep -rn");
+  });
+
+  it("emits POSIX ls/grep for win32 when execution shell is /bin/sh (container)", () => {
+    const block = buildEnvironmentBlock({
+      platform: "win32",
+      shell: "/bin/sh",
+    });
+    expect(block).toContain("Windows");
+    expect(block).toContain("/bin/sh");
+    expect(block).toContain("ls -la");
+    expect(block).toContain("grep -rn");
+    expect(block).not.toContain("findstr");
   });
 
   it("emits POSIX ls/grep for darwin", () => {

@@ -7,7 +7,11 @@
  * proxy), not the server's — so the agent must be told the client's platform
  * explicitly rather than reading `process.platform` locally. Without this,
  * a model defaults to POSIX syntax and produces broken commands (`dir`,
- * `findstr`) on a Windows client.
+ * `findstr`) on a Windows client running unsandboxed `cmd.exe`.
+ *
+ * Command examples follow the reported *execution shell* (`cmd.exe` vs
+ * POSIX `/bin/sh`), not the host OS alone — a Windows machine using a
+ * container sandbox still runs commands through `/bin/sh` inside the image.
  */
 
 import type { ToolSchema } from "../tools/types.js";
@@ -16,56 +20,43 @@ import type { ClientEnv } from "../types.js";
 
 export type { ClientEnv } from "../types.js";
 
-type ShellProfile = {
-  osLabel: string;
-  shellLabel: string;
-  examples: string[];
-};
+const WINDOWS_SHELL_LABEL = "cmd.exe";
+const POSIX_EXAMPLES = [
+  "ls -la",
+  'grep -rn "foo" src',
+  "git log --oneline -5",
+  "git show <sha>",
+];
+const WINDOWS_EXAMPLES = [
+  "dir",
+  'findstr /s /n "foo" *.ts',
+  "git log --oneline -5",
+  "git show <sha>",
+];
 
-const WINDOWS_PROFILE: ShellProfile = {
-  osLabel: "Windows",
-  shellLabel: "cmd.exe",
-  examples: [
-    "dir",
-    'findstr /s /n "foo" *.ts',
-    "git log --oneline -5",
-    "git show <sha>",
-  ],
-};
-
-const MAC_PROFILE: ShellProfile = {
-  osLabel: "macOS",
-  shellLabel: "/bin/zsh",
-  examples: [
-    "ls -la",
-    'grep -rn "foo" src',
-    "git log --oneline -5",
-    "git show <sha>",
-  ],
-};
-
-const LINUX_PROFILE: ShellProfile = {
-  osLabel: "Linux",
-  shellLabel: "/bin/bash",
-  examples: [
-    "ls -la",
-    'grep -rn "foo" src',
-    "git log --oneline -5",
-    "git show <sha>",
-  ],
-};
-
-const profileForPlatform = (platform: string | undefined): ShellProfile => {
+const osLabelForPlatform = (platform: string | undefined): string => {
   if (platform === "win32") {
-    return WINDOWS_PROFILE;
+    return "Windows";
   }
   if (platform === "darwin") {
-    return MAC_PROFILE;
+    return "macOS";
   }
-  // Default to the POSIX/Linux profile — also covers an absent/unknown
-  // platform, since POSIX syntax is the safer guess than cmd.exe.
-  return LINUX_PROFILE;
+  return "Linux";
 };
+
+const defaultShellForPlatform = (platform: string | undefined): string => {
+  if (platform === "win32") {
+    return WINDOWS_SHELL_LABEL;
+  }
+  if (platform === "darwin") {
+    return "/bin/zsh";
+  }
+  return "/bin/bash";
+};
+
+/** True when the reported shell is Windows `cmd.exe` (unsandboxed Windows). */
+const isCmdExecutionShell = (shell: string | undefined): boolean =>
+  shell?.trim().toLowerCase() === WINDOWS_SHELL_LABEL;
 
 /**
  * Builds the `[ENVIRONMENT]` prompt block describing the client's OS and
@@ -76,17 +67,20 @@ const profileForPlatform = (platform: string | undefined): ShellProfile => {
  * @returns A short prompt block, ready to join into the system prompt.
  */
 export const buildEnvironmentBlock = (env: ClientEnv | undefined): string => {
-  const profile = profileForPlatform(env?.platform);
-  const shellLabel = env?.shell?.trim() || profile.shellLabel;
+  const osLabel = osLabelForPlatform(env?.platform);
+  const shellLabel = env?.shell?.trim() || defaultShellForPlatform(env?.platform);
+  const examples = isCmdExecutionShell(shellLabel)
+    ? WINDOWS_EXAMPLES
+    : POSIX_EXAMPLES;
   const osDetail = env?.osRelease?.trim();
   const osLine = osDetail
-    ? `os: ${profile.osLabel} (${osDetail})`
-    : `os: ${profile.osLabel}`;
+    ? `os: ${osLabel} (${osDetail})`
+    : `os: ${osLabel}`;
   return [
     "[ENVIRONMENT]",
     `${osLine}   shell: ${shellLabel}`,
     "run_command executes on the user's machine — use syntax native to this shell.",
-    `Examples: ${profile.examples.join(" · ")}`,
+    `Examples: ${examples.join(" · ")}`,
   ].join("\n");
 };
 

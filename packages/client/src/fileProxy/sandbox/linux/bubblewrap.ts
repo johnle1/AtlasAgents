@@ -13,6 +13,7 @@
  */
 
 import type { SandboxProvider } from "../types.js";
+import { POSIX_EXECUTION_SHELL } from "../types.js";
 
 /**
  * bubblewrap denial signatures in stderr.
@@ -32,6 +33,7 @@ export const BUBBLEWRAP_DENIAL_PATTERN =
  */
 export const createBubblewrapProvider = (): SandboxProvider => ({
   id: "bubblewrap",
+  executionShell: POSIX_EXECUTION_SHELL,
   denialPattern: BUBBLEWRAP_DENIAL_PATTERN,
   wrapCommand: (command, ctx) => {
     const args: string[] = [

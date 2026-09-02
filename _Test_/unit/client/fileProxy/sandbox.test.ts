@@ -181,6 +181,7 @@ describe("resolveSandbox — memoization", () => {
 describe("detectSandboxDenial", () => {
   const provider: SandboxProvider = {
     id: "test",
+    executionShell: "/bin/sh",
     wrapCommand: (command) => ({ argv: ["/bin/sh", "-c", command] }),
     denialPattern: /sandbox deny|Operation not permitted/i,
   };

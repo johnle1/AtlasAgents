@@ -38,6 +38,7 @@ describe("runShell — sandbox wrapping", () => {
     let capturedCwd: string | undefined;
     const sandbox = {
       id: "test-sandbox",
+      executionShell: "/bin/sh",
       denialPattern: /never-matches/,
       wrapCommand: (command: string, ctx: { cwd: string }) => {
         capturedCwd = ctx.cwd;
@@ -61,7 +62,7 @@ describe("runShell — sandbox wrapping", () => {
 
   it("falls back to the bare shell when a sandbox is supplied without a policy", async () => {
     const wrapCommand = () => ({ argv: ["/bin/sh", "-c", "echo should-not-run"] });
-    const sandbox = { id: "test-sandbox", denialPattern: /x/, wrapCommand };
+    const sandbox = { id: "test-sandbox", executionShell: "/bin/sh", denialPattern: /x/, wrapCommand };
 
     // No `policy` — shellRunner requires both together, so this must behave
     // exactly like no sandbox at all rather than crashing on a missing policy.

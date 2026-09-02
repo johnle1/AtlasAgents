@@ -42,7 +42,7 @@ describe("createContainerProvider — docker", () => {
     expect(argv.slice(-3)).toEqual(["/bin/sh", "-c", "npm test"]);
   });
 
-  it("mounts an extra write root outside cwd under /mnt (boundary)", () => {
+  it("does not bind-mount host temp directories (boundary)", () => {
     const provider = createContainerProvider("docker", "atlas-sandbox:latest");
     const { argv } = provider.wrapCommand("ls", {
       cwd: "/home/dev/project",
@@ -52,7 +52,11 @@ describe("createContainerProvider — docker", () => {
         network: "allow",
       },
     });
-    expect(argv).toEqual(expect.arrayContaining(["-v", "/tmp:/mnt/extra-0"]));
+    expect(argv).toEqual(
+      expect.arrayContaining(["-v", `/home/dev/project:${CONTAINER_WORKDIR}`]),
+    );
+    expect(argv).not.toEqual(expect.arrayContaining(["-v", "/tmp:/mnt/extra-0"]));
+    expect(argv).not.toEqual(expect.arrayContaining(["/mnt/extra-"]));
   });
 
   it("passes --network none when the policy denies network (normal — auto mode)", () => {

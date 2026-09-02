@@ -31,6 +31,10 @@ export type {
   SandboxProvider,
   RunShellOptions,
 } from "./types.js";
+export {
+  POSIX_EXECUTION_SHELL,
+  WINDOWS_EXECUTION_SHELL,
+} from "./types.js";
 export { buildSandboxPolicy, type SandboxPolicyInput } from "./policy.js";
 export { DEFAULT_SANDBOX_IMAGE } from "./container/docker.js";
 export type { ContainerRuntime } from "./capability.js";

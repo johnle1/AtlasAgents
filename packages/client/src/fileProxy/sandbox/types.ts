@@ -50,6 +50,12 @@ export type SandboxContext = {
   policy: SandboxPolicy;
 };
 
+/** POSIX shell dialect used inside every sandbox backend. */
+export const POSIX_EXECUTION_SHELL = "/bin/sh";
+
+/** Shell dialect used for unsandboxed commands on Windows. */
+export const WINDOWS_EXECUTION_SHELL = "cmd.exe";
+
 /**
  * One OS sandbox backend.
  *
@@ -60,6 +66,12 @@ export type SandboxContext = {
 export type SandboxProvider = {
   /** Stable id (`"seatbelt"`, `"bubblewrap"`, `"container-docker"`, …). */
   id: string;
+  /**
+   * Shell dialect commands run under inside this backend — always
+   * {@link POSIX_EXECUTION_SHELL} today (Seatbelt/bwrap/container all
+   * invoke `/bin/sh -c`).
+   */
+  executionShell: string;
   /**
    * Wraps `command` so the child runs inside this backend.
    *

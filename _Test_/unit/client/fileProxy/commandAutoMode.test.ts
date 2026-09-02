@@ -94,6 +94,7 @@ const makeContext = (
 
 const fakeSandbox = {
   id: "test-sandbox",
+  executionShell: "/bin/sh",
   denialPattern: /never-matches/,
   wrapCommand: (command: string) => ({ argv: ["/bin/sh", "-c", command] }),
 };

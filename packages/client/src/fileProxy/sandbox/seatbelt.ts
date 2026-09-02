@@ -9,6 +9,7 @@
  */
 
 import type { SandboxContext, SandboxProvider } from "./types.js";
+import { POSIX_EXECUTION_SHELL } from "./types.js";
 
 const quoteSeatbeltPath = (value: string): string =>
   value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -65,6 +66,7 @@ export const SEATBELT_DENIAL_PATTERN = /sandbox deny|Operation not permitted/i;
  */
 export const createSeatbeltProvider = (): SandboxProvider => ({
   id: "seatbelt",
+  executionShell: POSIX_EXECUTION_SHELL,
   denialPattern: SEATBELT_DENIAL_PATTERN,
   wrapCommand: (command, ctx) => {
     const profile = buildSeatbeltProfile(ctx);

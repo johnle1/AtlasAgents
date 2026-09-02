@@ -19,17 +19,19 @@ import type {
 import type { TaskFrame } from "../types/frames.js";
 import { decodeFrame } from "../types/frames.js";
 import type { Config } from "../config/index.js";
+import { resolveClientExecutionShell } from "../fileProxy/executionShell.js";
 
 /**
  * Reports this client process's platform once per task, so the agent's
  * `run_command` calls — which execute here, not on the server — use the
- * right shell syntax (POSIX vs. `cmd.exe`). Same on every call within one
- * client process, so it's computed fresh rather than cached; the cost is
- * negligible next to a network round trip.
+ * right shell syntax (POSIX vs. `cmd.exe`). The shell label matches the
+ * dialect {@link resolveClientExecutionShell} derives from the active
+ * sandbox backend (container/seatbelt/bwrap → `/bin/sh`) or the direct
+ * host shell when no sandbox is available.
  */
 const currentClientEnv = (): ClientEnvPayload => ({
   platform: process.platform,
-  shell: process.env.SHELL || (process.platform === "win32" ? "cmd.exe" : undefined),
+  shell: resolveClientExecutionShell(),
   osRelease: osRelease(),
 });
 

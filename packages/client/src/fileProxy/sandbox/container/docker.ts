@@ -20,6 +20,7 @@
 
 import type { ContainerRuntime } from "../capability.js";
 import type { SandboxProvider } from "../types.js";
+import { POSIX_EXECUTION_SHELL } from "../types.js";
 
 export const CONTAINER_DENIAL_PATTERN =
   /permission denied|read-only file system|network is unreachable|could not resolve host/i;
@@ -28,26 +29,15 @@ export const CONTAINER_DENIAL_PATTERN =
 export const CONTAINER_WORKDIR = "/workspace";
 
 /**
- * Maps each write root to a container mount point. The primary `cwd` always
- * lands at {@link CONTAINER_WORKDIR}; anything else (typically an OS temp
- * dir outside the workspace) gets its own path under `/mnt`, since a
- * container's filesystem doesn't share the host's layout.
+ * Maps the workspace `cwd` to {@link CONTAINER_WORKDIR}. Host temp dirs are
+ * intentionally not bind-mounted — the container uses its own ephemeral
+ * `/tmp` instead of exposing the host filesystem outside the workspace.
  */
 const containerMountsFor = (
   cwd: string,
-  writeRoots: string[],
-): { hostPath: string; containerPath: string }[] => {
-  const mounts = [{ hostPath: cwd, containerPath: CONTAINER_WORKDIR }];
-  let extraIndex = 0;
-  for (const root of writeRoots) {
-    if (root === cwd) {
-      continue;
-    }
-    mounts.push({ hostPath: root, containerPath: `/mnt/extra-${extraIndex}` });
-    extraIndex += 1;
-  }
-  return mounts;
-};
+): { hostPath: string; containerPath: string }[] => [
+  { hostPath: cwd, containerPath: CONTAINER_WORKDIR },
+];
 
 /**
  * Creates the container {@link SandboxProvider} for `runtime`.
@@ -60,9 +50,10 @@ export const createContainerProvider = (
   image: string,
 ): SandboxProvider => ({
   id: `container-${runtime}`,
+  executionShell: POSIX_EXECUTION_SHELL,
   denialPattern: CONTAINER_DENIAL_PATTERN,
   wrapCommand: (command, ctx) => {
-    const mounts = containerMountsFor(ctx.cwd, ctx.policy.writeRoots);
+    const mounts = containerMountsFor(ctx.cwd);
     const args: string[] = ["run", "--rm", "-i"];
 
     for (const mount of mounts) {
