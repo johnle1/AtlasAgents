@@ -23,6 +23,7 @@
  * sense for a single agent with no lead to defer to.
  */
 
+import type { EffortLevel } from "../../config/types.js";
 import type {
   IConfigManager,
   IExperienceRecorder,
@@ -68,9 +69,14 @@ import {
 } from "../thinkStream.js";
 import type { ThinkTagScanner } from "../thinkStream.js";
 import { runAgentPool } from "../orchestrator/orchestratorPipelineHelpers.js";
+import { resolveOllamaTuning } from "../../ollama/runtimeTuning.js";
 import { AbortError } from "../../errors/index.js";
 import { logger } from "../../utils/logger.js";
-import { completionGap } from "./completionGate.js";
+import {
+  completionGap,
+  shouldStopForUnproductiveStreak,
+} from "./terminationManager.js";
+import { runReasoningPhase } from "./reasoner.js";
 import {
   applyCompaction,
   applyElisionFallback,
@@ -82,23 +88,18 @@ import {
 } from "./contextCompaction.js";
 import { recordExchange, toHistoryMessages } from "./conversationMemory.js";
 
-/** Safety ceiling on tool-call turns in one agent turn. Most turns finish well under this. */
-const MAX_AGENT_TURN_ITERATIONS = 60;
+/**
+ * Safety ceiling on tool-call turns in one agent turn — the single honest
+ * backstop for a model that never converges. There is no separate give-up
+ * counter for stalls or rejected `finish` calls (see `resolveEmptyTurn` and
+ * `runToolCalls`): the model keeps reasoning and acting for as long as it
+ * takes, bounded only by this ceiling and by the user's own Ctrl+C.
+ */
+const MAX_AGENT_TURN_ITERATIONS = 200;
 /** Cap on tool calls run from a single model response — extras are deferred back to the model. */
 const MAX_TOOL_CALLS_PER_ITERATION = 5;
-/** How many times `finish` may be rejected by its own verification gate before the loop gives up. */
-const MAX_FINISH_REJECTIONS = 3;
-/** Consecutive iterations that executed no tool (malformed block, unknown tool) before the loop gives up. Mirrors the old (now-dead) subagent.ts's MAX_UNPRODUCTIVE_TURNS. Empty-turn stalls (the model replying with no tool call despite outstanding work) are tracked separately — see MAX_CONSECUTIVE_STALLS. */
+/** Consecutive iterations that executed no tool (malformed block, unknown tool) before the loop gives up. Mirrors the old (now-dead) subagent.ts's MAX_UNPRODUCTIVE_TURNS. This is a distinct pathology from an empty-turn stall (a model replying with no tool call): it's a model that emits well-formed prose but no valid tool syntax at all, so unlike a stall there's genuinely nothing else to observe or reset on. */
 const MAX_UNPRODUCTIVE_ITERATIONS = 100;
-/**
- * How many times in a row the model may reply with no tool call while a
- * completion gap is still open before the loop gives up. Resets to 0
- * whenever any tool actually executes — a model that keeps making real
- * progress gets unlimited check-ins; a model that keeps replying with
- * nothing to show for it is escalated (see `resolveEmptyTurn`) and then
- * stopped, never left to loop.
- */
-const MAX_CONSECUTIVE_STALLS = 3;
 
 /**
  * Recognized reasoning-tag names to scan for in the model's CONTENT channel.
@@ -173,6 +174,32 @@ const buildResumeBlock = (steps: PlanStep[]): string | null => {
   return lines.join("\n");
 };
 
+/** How many of the most recent messages the REASON phase gets to look at — see `buildReasonContext`. */
+const REASON_CONTEXT_MESSAGE_COUNT = 6;
+/** Character cap on the rendered REASON-phase context, so a long tool observation doesn't balloon the reasoning prompt. */
+const REASON_CONTEXT_CHAR_LIMIT = 3000;
+
+/**
+ * Renders a compact summary of where the loop currently stands for the
+ * REASON phase (`reasoner.ts`) — the task itself (always `messages[1]`, the
+ * first user message after the system prompt) plus the most recent exchange,
+ * so the reasoner has enough to decide the next step without being handed
+ * the full tool-calling conversation it's deliberately kept out of (see
+ * `reasoner.ts`'s module remarks).
+ */
+const buildReasonContext = (messages: Message[]): string => {
+  const task = messages[1]?.content ?? "";
+  const recent = messages.slice(-REASON_CONTEXT_MESSAGE_COUNT);
+  const recentText = recent
+    .map((message) => `${message.role}: ${message.content}`)
+    .join("\n");
+  const combined =
+    recentText.length > 0 ? `Task: ${task}\n\n${recentText}` : `Task: ${task}`;
+  return combined.length > REASON_CONTEXT_CHAR_LIMIT
+    ? combined.slice(combined.length - REASON_CONTEXT_CHAR_LIMIT)
+    : combined;
+};
+
 export type AgentTurnResult = {
   /** The turn's final user-facing text (direct answer, or the `finish` summary). */
   content: string;
@@ -216,6 +243,19 @@ const resolveTurnConfig = async (
   agentModel: string;
   agentTemperature: number;
   configuredSupportsTools: boolean;
+  /**
+   * Ollama `keep_alive` duration (e.g. `"30m"`) — no per-task override exists
+   * for this, unlike model/temperature/tool-support, since it's an operator
+   * preference about local resource residency, not something a caller would
+   * reasonably vary per task. Forwarded on every model call this loop makes
+   * (see `ChatOptions.keepAlive`); harmlessly ignored by non-Ollama providers.
+   */
+  keepAlive: string | number;
+  /**
+   * How much the REASON phase re-deliberates before acting (`reasoner.ts`)
+   * — no per-task override, same reasoning as `keepAlive` above.
+   */
+  effort: EffortLevel;
 }> => {
   const agentModel =
     overrides?.agentModel?.trim() || (await config.getAgentModel());
@@ -224,7 +264,15 @@ const resolveTurnConfig = async (
   const configuredSupportsTools =
     overrides?.agentModelSupportsTools ??
     (await config.getAgentModelSupportsTools());
-  return { agentModel, agentTemperature, configuredSupportsTools };
+  const keepAlive = await config.getKeepAlive();
+  const effort = await config.getEffort();
+  return {
+    agentModel,
+    agentTemperature,
+    configuredSupportsTools,
+    keepAlive,
+    effort,
+  };
 };
 
 /**
@@ -250,6 +298,15 @@ const runToolCallLoop = async (params: {
   agentModel: string;
   agentTemperature: number;
   configuredSupportsTools: boolean;
+  /** See `resolveTurnConfig` — forwarded on every model call this loop makes. */
+  keepAlive: string | number;
+  /**
+   * See `resolveTurnConfig` — only consulted when `enableReasoning` is
+   * true. A worker step passes its resolved value here too even though it's
+   * unused, so this stays a plain required field rather than needing an
+   * `enableReasoning`-gated optional.
+   */
+  effort: EffortLevel;
   messages: Message[];
   /** Re-invoked every iteration — lets the top-level turn's plan-mode gating flip mid-loop. */
   getActiveRegistry: () => ToolHandler[];
@@ -278,6 +335,24 @@ const runToolCallLoop = async (params: {
    * worker step always passes 2 (`[system, task]`, no history).
    */
   protectedPrefixCount: number;
+  /**
+   * Whether to run the REASON phase (`reasoner.ts`) ahead of each model
+   * call. `true` for the top-level turn, whose `conclude`/`Wait, I think`
+   * text is worth showing the user; `false` for a `run_steps_parallel`
+   * worker step, whose `emitToken`/`emit` are no-ops anyway — running it
+   * there would only add latency for a display nothing ever surfaces.
+   */
+  enableReasoning: boolean;
+  /**
+   * Whether a given tool call is safe to run concurrently with adjacent
+   * read-only calls from the same model response — see `runToolCalls`'s
+   * doc comment for the concurrency rule this drives, and
+   * `ToolHandler.readOnly`'s doc comment for what "safe" means here.
+   * Defaults to checking `handler.readOnly` alone; the top-level turn
+   * passes a version that also consults its MCP tools' `readOnly` flags
+   * (`mcpReadOnlyByName`, built alongside the plan-mode registry filter).
+   */
+  isToolReadOnly?: (handler: ToolHandler) => boolean;
 }): Promise<AgentTurnResult> => {
   const {
     taskId,
@@ -285,6 +360,8 @@ const runToolCallLoop = async (params: {
     agentModel,
     agentTemperature,
     configuredSupportsTools,
+    keepAlive,
+    effort,
     messages,
     getActiveRegistry,
     buildToolContext,
@@ -295,6 +372,8 @@ const runToolCallLoop = async (params: {
     checkCompletion,
     contextWindow,
     protectedPrefixCount,
+    enableReasoning,
+    isToolReadOnly = (handler) => handler.readOnly === true,
   } = params;
 
   // Governs ONLY when compaction kicks in (below) — a generous, documented
@@ -306,6 +385,16 @@ const runToolCallLoop = async (params: {
   const compactionBudget =
     contextWindow > 0 ? contextWindow : DEFAULT_COMPACTION_BUDGET;
 
+  // The Ollama-only `num_ctx` to send on the wire — `undefined` (omitted
+  // from the request) rather than a fabricated value when the window isn't
+  // known (contextWindow === 0, e.g. an OpenAI-compatible role). Without
+  // this, Ollama serves every call at its own default context length while
+  // this loop budgets compaction against the model's real, often much
+  // larger window — so an uncompacted turn can silently overflow Ollama's
+  // actual window and get truncated from the front, dropping the system
+  // message that holds the tool catalog.
+  const numCtx = contextWindow > 0 ? contextWindow : undefined;
+
   // Cumulative across the whole turn — a turn that never executes a tool
   // (a greeting, or a resumed turn whose new model answers without acting)
   // cannot have unverified writes or an unfinished checklist, so the
@@ -315,17 +404,12 @@ const runToolCallLoop = async (params: {
   let toolCallsExecuted = 0;
   // Consecutive empty turns (model replies with plain text, no tool call)
   // while a completion gap is still open — see `resolveEmptyTurn`, the
-  // "Continue automatically" driver. Resets to 0 the moment any tool
-  // actually executes, alongside `unproductiveStreak` below, so a model
-  // that keeps making real progress gets unlimited check-ins; a model that
-  // keeps replying with nothing to show for it is escalated, then stopped.
+  // "Continue automatically" driver. Tracked (and reset to 0 whenever any
+  // tool executes) only so the escalating nudge wording — 1st stall gets
+  // the plain gap, every stall after that gets the sharper "act now"
+  // directive — can tell "just started stalling" apart from "been stalling
+  // a while"; there is no cap here, and no stall count ever ends the turn.
   let stallsSinceProgress = 0;
-  // Resets whenever a tool OTHER than `finish` executes successfully, so
-  // this measures "rejections in a row without fixing anything" rather than
-  // "rejections this turn" — a long task that legitimately calls finish
-  // several times, fixing something in between each time, must not die on
-  // the 3rd attempt just because it also failed twice earlier.
-  let finishRejections = 0;
   // Consecutive iterations that executed no tool due to a PROTOCOL error
   // (malformed legacy block, unknown tool name) — distinct from
   // `stallsSinceProgress`, which tracks empty turns specifically. Reset on
@@ -358,26 +442,45 @@ const runToolCallLoop = async (params: {
   };
 
   /**
-   * Runs every tool call the model emitted in one response, in order,
-   * appending one assistant/tool (or assistant+`<<TOOL>>` in legacy mode)
-   * pair per call — never one assistant turn carrying every `tool_calls`
-   * entry. `providers/messageTranslation.ts` correlates a tool result back
-   * to its call BY TOOL NAME, keeping only the most recent id per name; one
+   * Runs every tool call the model emitted in one response, appending one
+   * assistant/tool (or assistant+`<<TOOL>>` in legacy mode) pair per call —
+   * never one assistant turn carrying every `tool_calls` entry.
+   * `providers/messageTranslation.ts` correlates a tool result back to its
+   * call BY TOOL NAME, keeping only the most recent id per name; one
    * assistant message with two same-named calls (e.g. two `read_file`s)
    * followed by two results would map both results to the last id under
    * that scheme. Sequential pairs sidestep this entirely — the name→id map
    * is rebuilt fresh before each lookup — with zero changes needed to the
-   * translator. `content` (the model's prose) is attached to the first pair
-   * only so it isn't duplicated into history for every call in the batch.
+   * translator. History is always appended **in the model's original call
+   * order**, regardless of execution order (see below) — `content` (the
+   * model's prose) is attached to the first pair only so it isn't
+   * duplicated into history for every call in the batch.
    *
-   * Stops early on the first `done` result. Also enforces the `finish`
-   * rejection budget: `finish` failing its own verification gate
-   * `MAX_FINISH_REJECTIONS` times *in a row, with nothing else fixed in
-   * between* ends the turn honestly instead of letting the model spend the
-   * rest of the iteration ceiling retrying a gate it keeps failing. Any
-   * other tool call running resets that counter — a long task that legitimately
-   * calls `finish` several times, fixing something in between each time,
-   * must not die just because it also failed earlier.
+   * @remarks
+   * **Concurrency.** A maximal run of 2+ *consecutive* calls whose handlers
+   * are read-only (`ToolHandler.readOnly`, or an MCP tool's own `readOnly`
+   * flag via `isToolReadOnly`) executes concurrently via `Promise.all`,
+   * then appends to history in original order once every call in the run
+   * has settled — never interleaved with another run's results. This is
+   * safe specifically because a read observes but never changes workspace,
+   * checklist, or control-flow state, so nothing about running several
+   * alongside each other can corrupt anything a sibling read or the next
+   * mutating call depends on. Everything else — a lone read-only call, any
+   * mutating or unknown call, and the boundary between two different runs —
+   * executes exactly as before: one at a time, awaited, appended
+   * immediately. A run is broken by ANY non-read-only or unknown call in
+   * between, even if more read-only calls follow, so ordering relative to a
+   * mutation is always preserved.
+   *
+   * Stops early on the first `done` result. Within a concurrent run, `done`
+   * is resolved by original call order, not settle order, if a handler
+   * marked read-only were ever to return `done: true` (not expected in
+   * practice — see `ToolHandler.readOnly`'s doc comment). A `finish` call
+   * that fails its own verification gate is not itself a stopping
+   * condition — it's just another observation fed back to the model (see
+   * `finishHandler.ts`), the same as any other rejected tool call; the
+   * model keeps trying until it actually satisfies the gate or the turn's
+   * iteration ceiling is hit.
    */
   const runToolCalls = async (
     content: string,
@@ -390,46 +493,100 @@ const runToolCallLoop = async (params: {
     executed: number;
   }> => {
     let executed = 0;
-    for (let index = 0; index < calls.length; index += 1) {
+    let index = 0;
+
+    // Runs one call sequentially — the shared path for a mutating/unknown
+    // call and for a read-only run of length 1 (no concurrency benefit, so
+    // it stays on the exact same code path as every other single call).
+    const runOne = async (
+      call: ParsedToolCall,
+      callIndex: number,
+      handler: ToolHandler | undefined,
+    ): Promise<{ done: boolean; ok?: boolean; summary: string } | null> => {
+      const pairContent = callIndex === 0 ? content : "";
+      if (!handler) {
+        appendToolTurnToHistory(pairContent, call, `Unknown tool: ${call.name}`);
+        return null;
+      }
+      const result = await handler.execute(call.args, buildToolContext());
+      executed += 1;
+      if (result.done) {
+        return { done: true, ok: result.ok, summary: result.summary };
+      }
+      appendToolTurnToHistory(pairContent, call, result.feedback);
+      return null;
+    };
+
+    while (index < calls.length) {
       if (signal.aborted) {
         throw new AbortError("Agent turn aborted");
       }
       const call = calls[index];
       if (!call) {
+        index += 1;
         continue;
       }
-      const pairContent = index === 0 ? content : "";
       const handler = toolHandlers.get(call.name);
-      if (!handler) {
-        appendToolTurnToHistory(
-          pairContent,
-          call,
-          `Unknown tool: ${call.name}`,
-        );
+
+      if (!handler || !isToolReadOnly(handler)) {
+        const outcome = await runOne(call, index, handler);
+        if (outcome) {
+          return { ...outcome, executed };
+        }
+        index += 1;
         continue;
       }
-      const result = await handler.execute(call.args, buildToolContext());
-      executed += 1;
-      if (call.name === "finish") {
-        if (!result.done) {
-          finishRejections += 1;
-          if (finishRejections >= MAX_FINISH_REJECTIONS) {
-            return {
-              done: true,
-              ok: false,
-              summary: `[agent stopped after ${MAX_FINISH_REJECTIONS} unmet finish conditions]\n${result.feedback}`,
-              executed,
-            };
-          }
+
+      // Gather the maximal consecutive run of known, read-only calls
+      // starting here.
+      const runStart = index;
+      const run: { call: ParsedToolCall; handler: ToolHandler }[] = [];
+      while (index < calls.length) {
+        const nextCall = calls[index];
+        if (!nextCall) {
+          break;
         }
-      } else {
-        finishRejections = 0;
+        const nextHandler = toolHandlers.get(nextCall.name);
+        if (!nextHandler || !isToolReadOnly(nextHandler)) {
+          break;
+        }
+        run.push({ call: nextCall, handler: nextHandler });
+        index += 1;
       }
-      if (result.done) {
-        return { done: true, ok: result.ok, summary: result.summary, executed };
+
+      if (run.length === 1) {
+        const { call: soloCall, handler: soloHandler } = run[0]!;
+        const outcome = await runOne(soloCall, runStart, soloHandler);
+        if (outcome) {
+          return { ...outcome, executed };
+        }
+        continue;
       }
-      appendToolTurnToHistory(pairContent, call, result.feedback);
+
+      const results = await Promise.all(
+        run.map(({ call: runCall, handler: runHandler }) =>
+          runHandler.execute(runCall.args, buildToolContext()),
+        ),
+      );
+      executed += results.length;
+
+      const doneIndex = results.findIndex((r) => r.done);
+      if (doneIndex !== -1) {
+        const doneResult = results[doneIndex]!;
+        return {
+          done: true,
+          ok: doneResult.ok,
+          summary: doneResult.summary,
+          executed,
+        };
+      }
+
+      run.forEach(({ call: runCall }, runOffset) => {
+        const pairContent = runStart + runOffset === 0 ? content : "";
+        appendToolTurnToHistory(pairContent, runCall, results[runOffset]!.feedback);
+      });
     }
+
     return { done: false, summary: "", executed };
   };
 
@@ -445,18 +602,21 @@ const runToolCallLoop = async (params: {
    *
    * @remarks
    * The "Continue automatically" edge: a completion gap (unfinished
-   * checklist step, unverified write) is not accepted as a reason to stop.
-   * `stallsSinceProgress` escalates rather than repeats the same nudge,
-   * since a small local model tends to need a sharper instruction the
-   * second time, not the same sentence again:
+   * checklist step, unverified write) is not accepted as a reason to stop —
+   * there is no cap on how many times this may fire. `stallsSinceProgress`
+   * escalates the wording rather than repeating the same nudge forever,
+   * since a small local model tends to need a sharper instruction after the
+   * first miss, not the same sentence on every retry:
    * - 1st stall: the plain gap message (what's outstanding).
-   * - 2nd stall: a directive to act now, try a different approach if the
-   *   obvious one won't work, and only mark the step failed (via
-   *   `update_plan`) and move on once alternatives are exhausted.
-   * - 3rd stall: stop, honestly reporting what remains — this is the
-   *   turn's own escape hatch from a genuinely stuck state; the counter
-   *   resets to 0 the instant any tool actually executes, so a model that
-   *   keeps making real progress is never walled off by it.
+   * - Every stall after that: a directive to act now, try a different
+   *   approach if the obvious one won't work, and only mark the step failed
+   *   (via `update_plan`) and move on once alternatives are exhausted.
+   * The counter resets to 0 the instant any tool actually executes, so a
+   * model that keeps making real progress never sees the escalated wording
+   * at all — only a model stuck doing nothing does, and it keeps seeing it
+   * for as long as it keeps doing nothing. The only way out of a genuinely
+   * stuck turn is the iteration ceiling (`MAX_AGENT_TURN_ITERATIONS`) or the
+   * user cancelling.
    */
   const resolveEmptyTurn = (
     historyContent: string,
@@ -469,15 +629,6 @@ const runToolCallLoop = async (params: {
     }
     lastKnownGap = gap;
     stallsSinceProgress += 1;
-
-    if (stallsSinceProgress >= MAX_CONSECUTIVE_STALLS) {
-      return {
-        kind: "final",
-        content:
-          `${displayContent}\n\n[stopped: ${MAX_CONSECUTIVE_STALLS} replies in a row took no action — ${gap}]`.trim(),
-        ok: false,
-      };
-    }
 
     const followUp =
       stallsSinceProgress === 1
@@ -495,7 +646,12 @@ const runToolCallLoop = async (params: {
 
   /** Ends the turn with an honest failure once too many iterations in a row made no progress. */
   const stopIfUnproductive = (): AgentTurnResult | null => {
-    if (unproductiveStreak < MAX_UNPRODUCTIVE_ITERATIONS) {
+    if (
+      !shouldStopForUnproductiveStreak(
+        unproductiveStreak,
+        MAX_UNPRODUCTIVE_ITERATIONS,
+      )
+    ) {
       return null;
     }
     const gapSuffix = lastKnownGap ? `\n${lastKnownGap}` : "";
@@ -543,7 +699,7 @@ const runToolCallLoop = async (params: {
           const summary = await ollama.chat(
             agentModel,
             buildCompactionRequest(middle),
-            { temperature: 0, signal },
+            { temperature: 0, signal, numCtx, keepAlive },
           );
           if (summary.trim().length > 0) {
             applyCompaction(messages, range, summary.trim());
@@ -559,6 +715,30 @@ const runToolCallLoop = async (params: {
           }
           applyElisionFallback(messages, range);
         }
+      }
+    }
+
+    // REASON phase: a lightweight, tool-free side channel that decides what
+    // to do next before the real tool-calling call below carries it out.
+    // Additive by design — see reasoner.ts's module remarks — so a provider
+    // or test fixture with no `chat()` support just gets `null` here and the
+    // loop proceeds exactly as it did before this existed. Only ever shown
+    // to the user via `display` (the record's `conclude`, or a verification
+    // pass's "Wait, I think ..." revision); the raw record never reaches
+    // `messages`, so it changes nothing about what the model that actually
+    // calls tools is shown.
+    if (enableReasoning) {
+      const reasonOutcome = await runReasoningPhase({
+        ollama,
+        model: agentModel,
+        signal,
+        numCtx,
+        keepAlive,
+        effort,
+        contextText: buildReasonContext(messages),
+      });
+      if (reasonOutcome?.display) {
+        emitToken(`${reasonOutcome.display}\n\n`);
       }
     }
 
@@ -609,6 +789,8 @@ const runToolCallLoop = async (params: {
           {
             temperature: agentTemperature,
             signal,
+            numCtx,
+            keepAlive,
             onThinkToken: (piece) => thinkFrames.delta(piece),
           },
           pushThinkFrom(contentThinkScanner),
@@ -623,6 +805,8 @@ const runToolCallLoop = async (params: {
         for await (const token of ollama.chatStream(agentModel, messages, {
           temperature: agentTemperature,
           signal,
+          numCtx,
+          keepAlive,
         })) {
           if (signal.aborted) {
             throw new AbortError("Agent turn stream aborted");
@@ -801,8 +985,13 @@ export const runAgentTurn = async (
   } = params;
   const { ollama, config, experienceRecorder } = deps;
 
-  const { agentModel, agentTemperature, configuredSupportsTools } =
-    await resolveTurnConfig(config, modelOverrides);
+  const {
+    agentModel,
+    agentTemperature,
+    configuredSupportsTools,
+    keepAlive,
+    effort,
+  } = await resolveTurnConfig(config, modelOverrides);
 
   // Full toolset vs. the plan-mode-restricted subset: in plan mode, nothing
   // that mutates the workspace (write_file, edit_file, run_command,
@@ -1016,6 +1205,8 @@ export const runAgentTurn = async (
       agentModel,
       agentTemperature,
       configuredSupportsTools,
+      effort,
+      keepAlive,
       messages: workerMessages,
       getActiveRegistry: () => workerRegistry,
       buildToolContext: buildWorkerToolContext,
@@ -1025,6 +1216,9 @@ export const runAgentTurn = async (
       signal,
       contextWindow,
       protectedPrefixCount: workerMessages.length,
+      // A worker step's emit/emitToken are no-ops (see above) — reasoning
+      // display would never reach the user, so skip the extra latency.
+      enableReasoning: false,
     });
 
     return {
@@ -1051,7 +1245,16 @@ export const runAgentTurn = async (
     const subtasks: PlannedSubtask[] = targetSteps.map((step, index) => ({
       id: step.id,
       text: step.text,
-      dependsOn: [],
+      // The checklist's real dependsOn, filtered to ids WITHIN this batch.
+      // A dependency on a step outside stepIds is already satisfied — the
+      // model only requests steps it considers ready — and must be dropped
+      // rather than passed through: readyQueue.ts's createReadyQueue seeds
+      // `ready` from dependsOn.length === 0 and dependenciesDone() checks
+      // `completed.has(id)` for every dependency, so an id this pool never
+      // tracks (because it's not one of this batch's own subtasks) would
+      // never enter `completed` — that subtask would wait forever and trip
+      // the deadlock guard below instead of ever running.
+      dependsOn: (step.dependsOn ?? []).filter((id) => stepIds.includes(id)),
       agentId: index + 1,
       agentLabel: `step-${step.id}`,
     }));
@@ -1076,6 +1279,20 @@ export const runAgentTurn = async (
       });
 
     try {
+      const isLocalProvider = contextWindow > 0;
+      // The user's explicit numParallel override, if any (ollama/runtimeTuning.ts)
+      // — `undefined` otherwise, since Ollama's own OLLAMA_NUM_PARALLEL is
+      // left unset by default so Ollama can self-detect a value for the
+      // real device (see that module's remarks on why a machine-memory
+      // guess here would be wrong on most non-unified-memory hardware).
+      // When undefined, workerCountFor falls back to its own conservative
+      // default rather than trying to match a number we don't know. A
+      // config read is cheap, so recomputing per batch costs nothing and
+      // always reflects the current config (a `/set numParallel` mid-session
+      // takes effect immediately).
+      const localProviderCeiling = isLocalProvider
+        ? (await resolveOllamaTuning(config)).numParallel
+        : undefined;
       const ordered = await runAgentPool({
         plan,
         // Respects the session's ::focus/::collab/::max concurrency cap —
@@ -1092,6 +1309,14 @@ export const runAgentTurn = async (
         // update below is the only visible trace of this batch running.
         emitStatus: () => {},
         signal,
+        // `contextWindow > 0` is the same "is this role on Ollama" proxy
+        // `numCtx` above uses — resolved once in orchestratorPipeline.ts as
+        // `agentNumCtx` only when `agentProviderName === "ollama"`, 0
+        // otherwise. Caps concurrent workers so a batch of independent
+        // steps doesn't fire more simultaneous requests than one local GPU
+        // can usefully serve — see `readyQueue.ts`'s `workerCountFor`.
+        isLocalProvider,
+        localProviderCeiling,
       });
       emitPlanUpdate(applyResults());
       return {
@@ -1135,6 +1360,8 @@ export const runAgentTurn = async (
     agentModel,
     agentTemperature,
     configuredSupportsTools,
+    keepAlive,
+    effort,
     messages,
     // Recomputed every iteration — `planApproved` can flip mid-turn (the
     // model's previous update_plan call may have just been approved), so
@@ -1148,6 +1375,18 @@ export const runAgentTurn = async (
     checkCompletion: () => completionGap({ planSteps: planThisTurn, trackers }),
     contextWindow,
     protectedPrefixCount,
+    // "low" effort skips the REASON phase entirely (1 model call per
+    // iteration, the pre-reasoner behavior); every other level runs it with
+    // that level's refinement/verification caps — see `reasoner.ts`.
+    enableReasoning: effort !== "low",
+    // Built-in tools carry readOnly on the handler itself; MCP tools carry
+    // it separately on their perConn.mcpTools entry (mcpReadOnlyByName,
+    // built above alongside the plan-mode registry filter) — this checks
+    // both, so a read-only MCP tool batches concurrently the same as
+    // read_file does.
+    isToolReadOnly: (handler) =>
+      handler.readOnly === true ||
+      mcpReadOnlyByName.get(handler.schema.function.name) === true,
   });
 
   // Record this exchange for the next turn on this connection — see

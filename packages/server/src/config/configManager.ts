@@ -21,11 +21,15 @@ import {
   ConfigError,
   type ServerConfig,
   type ConfigRole,
+  type EffortLevel,
+  type KvCacheType,
 } from "./types.js";
 import {
   parseStoredConfig,
   mergeConfig,
   normaliseKeepAlive,
+  normaliseEffort,
+  normaliseKvCacheType,
   WRITABLE_CONFIG_KEYS,
 } from "./parsing.js";
 
@@ -883,6 +887,52 @@ export class ConfigManager implements IConfigManager {
   };
 
   /**
+   * Get the configured `OLLAMA_NUM_PARALLEL` override, if set.
+   *
+   * @remarks
+   * Undefined means "not configured" — `ollama/runtimeTuning.ts` derives a
+   * value from this machine's memory instead of guessing one. Set via
+   * `/set numParallel`. Only takes effect the next time this process spawns
+   * `ollama serve` (see `ollama/lifecycle.ts`).
+   *
+   * @returns Configured `numParallel`, or `undefined` if unset.
+   */
+  getNumParallel = async (): Promise<number | undefined> => {
+    const config = await this._loadRaw();
+    return config.numParallel;
+  };
+
+  /**
+   * Get the configured `OLLAMA_FLASH_ATTENTION` override, if set.
+   *
+   * @remarks
+   * Undefined means "not configured" — `ollama/runtimeTuning.ts` defaults
+   * to enabling it. Set via `/set flashAttention`. Same spawn-time-only
+   * caveat as {@link getNumParallel}.
+   *
+   * @returns Configured value, or `undefined` if unset.
+   */
+  getFlashAttention = async (): Promise<boolean | undefined> => {
+    const config = await this._loadRaw();
+    return config.flashAttention;
+  };
+
+  /**
+   * Get the configured `OLLAMA_KV_CACHE_TYPE` override, if set.
+   *
+   * @remarks
+   * Undefined means "not configured" — `ollama/runtimeTuning.ts` defaults
+   * to `"q8_0"`. Set via `/set kvCacheType`. Same spawn-time-only caveat as
+   * {@link getNumParallel}.
+   *
+   * @returns Configured value, or `undefined` if unset.
+   */
+  getKvCacheType = async (): Promise<KvCacheType | undefined> => {
+    const config = await this._loadRaw();
+    return config.kvCacheType;
+  };
+
+  /**
    * Get the configured Ollama `keep_alive` duration.
    *
    * @remarks
@@ -896,6 +946,20 @@ export class ConfigManager implements IConfigManager {
   getKeepAlive = async (): Promise<string | number> => {
     const config = await this._loadRaw();
     return config.keepAlive;
+  };
+
+  /**
+   * Get the configured REASON-phase effort level.
+   *
+   * @remarks
+   * Controls how much `orchestration/agent/reasoner.ts` re-deliberates
+   * before acting — see {@link EffortLevel}. Defaults to `"medium"`.
+   *
+   * @returns The configured effort level.
+   */
+  getEffort = async (): Promise<EffortLevel> => {
+    const config = await this._loadRaw();
+    return config.effort;
   };
 
   /**
@@ -1082,6 +1146,34 @@ export class ConfigManager implements IConfigManager {
           );
         }
         value = normalisedKeepAlive;
+      } else if (key === "effort") {
+        // REASON-phase effort must be one of the five recognized literals —
+        // see EFFORT_LEVELS.
+        const normalisedEffort = normaliseEffort(value);
+        if (normalisedEffort === null) {
+          throw new ConfigError(
+            `effort must be one of: low, medium, high, extra-high, max`,
+          );
+        }
+        value = normalisedEffort;
+      } else if (key === "numParallel") {
+        // Same shape as numCtx above — a positive integer slot count.
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          throw new ConfigError(`numParallel must be a number`);
+        }
+        if (value <= 0 || !Number.isInteger(value)) {
+          throw new ConfigError(`numParallel must be a positive integer`);
+        }
+      } else if (key === "flashAttention") {
+        if (typeof value !== "boolean") {
+          throw new ConfigError(`flashAttention must be a boolean`);
+        }
+      } else if (key === "kvCacheType") {
+        const normalisedKvCacheType = normaliseKvCacheType(value);
+        if (normalisedKvCacheType === null) {
+          throw new ConfigError(`kvCacheType must be one of: f16, q8_0, q4_0`);
+        }
+        value = normalisedKvCacheType;
       }
 
       // Step 3: Load current configuration from disk (read-fresh approach)

@@ -19,6 +19,8 @@
  * await configManager.setModel("agent", "llama3.1");
  * ```
  */
+import type { EffortLevel, KvCacheType } from "../../config/types.js";
+
 export interface IConfigManager {
   /**
    * Returns the model name configured for the agent (planning) role.
@@ -197,6 +199,37 @@ export interface IConfigManager {
   getNumCtx(): Promise<number | undefined>;
 
   /**
+   * Returns the configured `OLLAMA_NUM_PARALLEL` override, if set.
+   *
+   * @remarks
+   * `undefined` means "not configured" — `ollama/runtimeTuning.ts` derives
+   * a value from this machine's memory instead. Ollama-only; ignored for
+   * other providers. Only takes effect the next time this process spawns
+   * `ollama serve`. Set via `/set numParallel`.
+   */
+  getNumParallel(): Promise<number | undefined>;
+
+  /**
+   * Returns the configured `OLLAMA_FLASH_ATTENTION` override, if set.
+   *
+   * @remarks
+   * `undefined` means "not configured" — `ollama/runtimeTuning.ts` defaults
+   * to enabling it. Same spawn-time-only caveat as {@link getNumParallel}.
+   * Set via `/set flashAttention`.
+   */
+  getFlashAttention(): Promise<boolean | undefined>;
+
+  /**
+   * Returns the configured `OLLAMA_KV_CACHE_TYPE` override, if set.
+   *
+   * @remarks
+   * `undefined` means "not configured" — `ollama/runtimeTuning.ts` defaults
+   * to `"q8_0"`. Same spawn-time-only caveat as {@link getNumParallel}. Set
+   * via `/set kvCacheType`.
+   */
+  getKvCacheType(): Promise<KvCacheType | undefined>;
+
+  /**
    * Returns the configured Ollama `keep_alive` duration.
    *
    * @remarks
@@ -209,6 +242,16 @@ export interface IConfigManager {
    *   unitless value, so never-unload must go on the wire as a number.
    */
   getKeepAlive(): Promise<string | number>;
+
+  /**
+   * Returns the configured REASON-phase effort level.
+   *
+   * @remarks
+   * Controls how much `orchestration/agent/reasoner.ts` re-deliberates
+   * before acting — see `config/types.ts`'s `EffortLevel`. Defaults to
+   * `"medium"`.
+   */
+  getEffort(): Promise<EffortLevel>;
 
   /**
    * Returns the complete merged configuration object.
