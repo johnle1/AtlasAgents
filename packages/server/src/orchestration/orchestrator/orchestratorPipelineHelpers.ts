@@ -308,12 +308,35 @@ export const runAgentPool = async (params: {
   ) => Promise<ToolResultSummary>;
   emitStatus: (frame: Extract<TaskFrame, { kind: "status" }>) => void;
   signal: AbortSignal;
+  /** See `readyQueue.ts`'s `workerCountFor` — caps concurrency for a local single-GPU provider. Defaults to `false`. */
+  isLocalProvider?: boolean;
+  /**
+   * See `readyQueue.ts`'s `workerCountFor` — the actual `OLLAMA_NUM_PARALLEL`
+   * this process resolved (`ollama/runtimeTuning.ts`), so the pool's
+   * concurrency ceiling matches what Ollama itself was told to serve.
+   * Ignored when `isLocalProvider` is false. Omit to fall back to
+   * `workerCountFor`'s own conservative default.
+   */
+  localProviderCeiling?: number;
 }): Promise<SubtaskResult[]> => {
-  const { plan, maxSubagents, resultMap, runSubtask, emitStatus, signal } =
-    params;
+  const {
+    plan,
+    maxSubagents,
+    resultMap,
+    runSubtask,
+    emitStatus,
+    signal,
+    isLocalProvider = false,
+    localProviderCeiling,
+  } = params;
 
   const totalTasks = plan.subtasks.length;
-  const workerCount = workerCountFor(maxSubagents, plan);
+  const workerCount = workerCountFor(
+    maxSubagents,
+    plan,
+    isLocalProvider,
+    localProviderCeiling,
+  );
   const queue = createReadyQueue(plan.subtasks);
   const workSignal = new WorkSignal();
 
