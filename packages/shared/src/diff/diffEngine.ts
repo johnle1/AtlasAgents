@@ -282,6 +282,49 @@ export type DiffDisplayLine = {
   text: string;
 };
 
+export type DiffStats = {
+  /** Total lines added across the whole diff. */
+  added: number;
+  /** Total lines removed across the whole diff. */
+  removed: number;
+};
+
+/**
+ * Counts total added/removed lines across a diff — `git diff --stat` style
+ * totals (e.g. `+12 -3`), for a compact summary alongside a diff header.
+ *
+ * @remarks
+ * Deliberately independent of {@link getDiffDisplayLines}'s context-window
+ * trimming: that function only omits `equal` rows outside the 3-line
+ * radius, never `added`/`removed` ones, so counting straight from the raw
+ * chunks here gives the same total either way — this just skips building
+ * the intermediate display rows to get there.
+ *
+ * @param chunks - Raw diff chunks from {@link computeDiff}.
+ * @returns Total added and removed line counts.
+ *
+ * @example
+ * ```ts
+ * const chunks = computeDiff("a\nb\nc\n", "a\nx\ny\nc\n");
+ * getDiffStats(chunks); // { added: 2, removed: 1 }
+ * ```
+ */
+export const getDiffStats = (chunks: DiffChunk[]): DiffStats => {
+  let added = 0;
+  let removed = 0;
+
+  for (const chunk of chunks) {
+    const lineCount = splitChunkLines(chunk.value).length;
+    if (chunk.added) {
+      added += lineCount;
+    } else if (chunk.removed) {
+      removed += lineCount;
+    }
+  }
+
+  return { added, removed };
+};
+
 /**
  * Extracts structured diff rows for client-side rendering.
  */
