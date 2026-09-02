@@ -66,13 +66,26 @@ export const emptyBuffer = (): TextBufferState => ({
 });
 
 /**
+ * Normalizes CRLF and bare-CR line breaks to LF.
+ *
+ * @remarks
+ * Terminals can deliver `\r\n` or bare `\r` for line breaks inside a paste;
+ * the buffer only understands `\n`-separated lines.
+ *
+ * @param text - Text that may contain `\r\n` or `\r` line breaks.
+ * @returns `text` with every line break normalized to `\n`.
+ */
+export const normalizeNewlines = (text: string): string =>
+  text.replace(/\r\n?/g, "\n");
+
+/**
  * Builds buffer state from a (possibly multiline) string.
  *
  * @param text - Source text; `""` becomes a single empty line.
  * @returns Buffer with the caret parked at the start (row 0, col 0).
  */
 export const bufferFromString = (text: string): TextBufferState => {
-  const lines = text.split("\n");
+  const lines = normalizeNewlines(text).split("\n");
   return {
     lines: lines.length > 0 ? lines : [""],
     cursor: { row: 0, col: 0 },
@@ -166,7 +179,7 @@ export const textBufferReducer = (
       const line = lines[row] ?? "";
       const before = line.slice(0, col);
       const after = line.slice(col);
-      const incoming = action.text.split("\n");
+      const incoming = normalizeNewlines(action.text).split("\n");
       if (incoming.length === 1) {
         const nextLine = `${before}${incoming[0]}${after}`;
         const nextLines = [...lines];

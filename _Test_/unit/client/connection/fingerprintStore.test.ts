@@ -4,29 +4,25 @@
  *
  * @remarks
  * `config.ts` computes its config directory from `os.homedir()` once at
- * module load, so `HOME` is overridden and `config.js`/`fingerprintStore.js`
- * are imported dynamically inside `beforeAll` — after the override — rather
- * than statically at the top of this file. Vitest isolates each test file's
- * module registry by default, so this doesn't leak into other test files.
+ * module load, so HOME/USERPROFILE are overridden (via {@link createTempHome})
+ * and `config.js`/`fingerprintStore.js` are imported dynamically inside
+ * `beforeAll` — after the override — rather than statically at the top of
+ * this file. Vitest isolates each test file's module registry by default, so
+ * this doesn't leak into other test files.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+import { createTempHome, type TempHome } from "../../../helpers/tempHome.js";
 
 describe("fingerprintStore", () => {
   let checkAndPinFingerprint: typeof import("../../../../packages/client/src/connection/tls/fingerprintStore.js").checkAndPinFingerprint;
   let clearFingerprint: typeof import("../../../../packages/client/src/connection/tls/fingerprintStore.js").clearFingerprint;
   let fingerprintKeyFn: typeof import("../../../../packages/client/src/connection/tls/fingerprintStore.js").fingerprintKey;
   let unlockOrSetupConfigCipher: typeof import("../../../../packages/client/src/config/index.js").unlockOrSetupConfigCipher;
-  let originalHome: string | undefined;
-  let tempHome: string;
+  let tempHome: TempHome;
 
   beforeAll(async () => {
-    originalHome = process.env.HOME;
-    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-fingerprint-test-"));
-    process.env.HOME = tempHome;
+    tempHome = createTempHome("atlas-fingerprint-test-");
 
     const fpMod = await import(
       "../../../../packages/client/src/connection/tls/fingerprintStore.js"
@@ -39,12 +35,13 @@ describe("fingerprintStore", () => {
     unlockOrSetupConfigCipher = configMod.unlockOrSetupConfigCipher;
     // Unlock once for the whole file — a passphrase prompt for fingerprint
     // pinning would be an unrelated, noisy dependency to inject per test.
+    // First-run, single call, so a constant answer can't loop even in
+    // principle — no leftover envelope exists yet in the fresh temp home.
     await unlockOrSetupConfigCipher(async () => "test-passphrase");
   });
 
   afterAll(() => {
-    process.env.HOME = originalHome;
-    fs.rmSync(tempHome, { recursive: true, force: true });
+    tempHome.restore();
   });
 
   // Each test uses a distinct host so pins never collide across tests

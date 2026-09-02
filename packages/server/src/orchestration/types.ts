@@ -43,7 +43,7 @@ export type TaskModelOverrides = {
   agentModel?: string;
   /** Override subagent model */
   subagentModel?: string;
-  /** Override the provider serving the agent role (e.g. "ollama", "vllm-gpu") */
+  /** Override the provider serving the agent role (e.g. "ollama", "lmstudio") */
   agentProvider?: string;
   /** Override the provider serving the subagent role */
   subagentProvider?: string;
@@ -55,6 +55,8 @@ export type TaskModelOverrides = {
   agentModelSupportsTools?: boolean;
   /** When true, use native Ollama tool_calls for the subagent model */
   subagentModelSupportsTools?: boolean;
+  /** When true, request Ollama's extended `think` mode for the agent model */
+  agentModelSupportsThinking?: boolean;
   /** When true, subagent logs raw turns and parsed tools to stderr */
   debug?: boolean;
 };
@@ -296,3 +298,29 @@ export interface OrchestrationOutcome {
   /** Human-readable error when ok is false (cycle, abort, planning error propagated) */
   error?: string;
 }
+
+/**
+ * Client machine info reported once per task stream (`TaskStreamPayload.clientEnv`).
+ *
+ * @remarks
+ * `run_command` executes on the client's machine (relayed over the file
+ * proxy), not the server's, so the agent needs this to pick correct shell
+ * syntax (POSIX vs. `cmd.exe`). Optional on the wire — an older client that
+ * doesn't send it falls back to a POSIX/Linux default (see `environmentPrompt.ts`).
+ * Defined in `@atlasagents/shared` as `ClientEnvPayload`; re-exported here
+ * under the name orchestration code uses.
+ */
+export type { ClientEnvPayload as ClientEnv } from "@atlasagents/shared";
+
+/**
+ * One step in the agent's live task checklist, expressed via the `update_plan`
+ * tool and mirrored by the client as a `[ ]` / `[#]` checklist.
+ *
+ * @remarks
+ * Unlike the old `PlannedSubtask` DAG (which only ever existed for the
+ * planner's up-front decomposition), a `PlanStep` is a live, mutable
+ * progress record the agent updates as it works — see `update_plan`. Defined
+ * in `@atlasagents/shared` (the wire type the client also uses) and
+ * re-exported here so orchestration code has one import path for it.
+ */
+export type { PlanStep } from "@atlasagents/shared";

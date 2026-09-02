@@ -1,4 +1,4 @@
-import type { SubagentPlan as SharedSubagentPlan, PlanExecution } from "@atlasagents/shared";
+import type { PlanExecution } from "@atlasagents/shared";
 import type { MaxSubagentsParam } from "./maxSubagents.js";
 import type { SubagentPlan, PlannedSubtask } from "./types.js";
 
@@ -101,60 +101,6 @@ export const validateNoCycles = (subtasks: PlannedSubtask[]): boolean => {
   };
 
   return subtasks.every((subtask) => depthFirstSearch(subtask.id));
-};
-
-/**
- * Converts subtasks into agent-level plans with inter-agent dependencies.
- *
- * @remarks
- * Groups subtasks by agent ID and creates SubagentPlan objects with steps.
- * Detects cross-agent dependencies when a subtask depends on a subtask
- * assigned to a different agent. Returns sorted array of agent plans by ID.
- *
- * @param subtasks - List of planned subtasks with agent assignments
- *
- * @returns Array of SubagentPlan objects with steps and inter-agent dependencies
- */
-export const deriveSubagentPlans = (subtasks: PlannedSubtask[]): SharedSubagentPlan[] => {
-  const agentMap = new Map<number, SharedSubagentPlan>();
-
-  // Build index for O(1) dependency lookups instead of O(n) .find() per edge
-  // This avoids O(n*e) scanning and reduces to O(n + e) total
-  const subtaskById = new Map(subtasks.map((subtask) => [subtask.id, subtask]));
-
-  for (const subtask of subtasks) {
-    if (!agentMap.has(subtask.agentId)) {
-      agentMap.set(subtask.agentId, {
-        id: subtask.agentId,
-        label: subtask.agentLabel,
-        steps: [],
-        dependsOn: [],
-      });
-    }
-    agentMap.get(subtask.agentId)!.steps.push(subtask.text);
-  }
-
-  for (const subtask of subtasks) {
-    if (subtask.dependsOn.length === 0) {
-      continue;
-    }
-    const agent = agentMap.get(subtask.agentId);
-    if (!agent) {
-      continue;
-    }
-    for (const dependencyId of subtask.dependsOn) {
-      const dependencySubtask = subtaskById.get(dependencyId);
-      if (dependencySubtask && dependencySubtask.agentId !== subtask.agentId) {
-        if (!agent.dependsOn.includes(dependencySubtask.agentId)) {
-          agent.dependsOn.push(dependencySubtask.agentId);
-        }
-      }
-    }
-  }
-
-  return [...agentMap.values()].sort(
-    (agentPlanA, agentPlanB) => agentPlanA.id - agentPlanB.id,
-  );
 };
 
 /**

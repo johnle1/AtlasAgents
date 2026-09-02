@@ -92,11 +92,11 @@ describe("buildFooterLine", () => {
         cwd: "~",
         branch: null,
         model: "m",
-        approvalMode: "bypass",
+        approvalMode: "auto",
         contextPct: null,
         width: 80,
       }),
-    ).toContain("⚠ BYPASS");
+    ).toContain("⏵⏵ Auto");
   });
 
   it("truncates with an ellipsis when the terminal is narrower than the line (boundary)", () => {

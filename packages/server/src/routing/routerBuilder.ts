@@ -35,6 +35,7 @@ import {
   syncAgentToolSupport,
   syncSubagentToolSupport,
 } from "../ollama/syncAgentToolSupport.js";
+import { syncAgentThinkingSupport } from "../ollama/syncAgentThinkingSupport.js";
 import {
   describeModelPlacement,
   matchRunningModel,
@@ -47,6 +48,7 @@ import {
   mcpToolToAtlasSchema,
   type McpToolSyncPayload,
 } from "../orchestration/mcp/mcpToolSchema.js";
+import type { McpToolsCacheStore } from "../orchestration/mcp/mcpToolsCacheStore.js";
 import type { OllamaClient } from "../ollama/client.js";
 import type { IOllamaAdminClient } from "../orchestration/interfaces/ollamaInterfaces.js";
 import type { IConfigManager } from "../orchestration/interfaces/configInterfaces.js";
@@ -92,8 +94,8 @@ function parseObjectField<T>(payload: unknown, field: string): T {
  *
  * @remarks
  * `providers.list` and `config.get` both expose this map to any authenticated
- * client. `apiKey` is a credential for a third-party model provider (e.g. a
- * vLLM/OpenAI-compatible endpoint) — no client consumer reads it, only
+ * client. `apiKey` is a credential for a third-party model provider (e.g. an
+ * OpenAI-compatible endpoint) — no client consumer reads it, only
  * `baseUrl` and the provider name, so it must never be sent. `hasApiKey` is
  * kept (rather than omitting the field entirely) so a future UI can still
  * show "key configured" without ever shipping the secret itself.
@@ -243,7 +245,12 @@ function createSetConfigHandler(
         config,
         name,
       );
-      return { ok: true, agentModelSupportsTools };
+      const agentModelSupportsThinking = await syncAgentThinkingSupport(
+        ollama,
+        config,
+        name,
+      );
+      return { ok: true, agentModelSupportsTools, agentModelSupportsThinking };
     } else if (configKey === "subagentModel") {
       const name = String(configValue ?? "");
       await config.setModel("subagent", name);
@@ -318,13 +325,20 @@ function createSetModelHandler(
       role === "agent"
         ? await syncAgentToolSupport(admin, config, modelName)
         : await syncSubagentToolSupport(admin, config, modelName);
+    // Only the agent role ever requests Ollama's `think` mode (see the
+    // includeThinking comment in subagent.ts) — leave this undefined for
+    // subagent rather than probing a capability nothing reads.
+    const supportsThinking =
+      role === "agent"
+        ? await syncAgentThinkingSupport(admin, config, modelName)
+        : undefined;
 
     const placementWarning =
       providerName === OLLAMA_PROVIDER_NAME
         ? await checkSelectionPlacement(admin, modelName)
         : undefined;
 
-    return { ok: true, supportsTools, placementWarning };
+    return { ok: true, supportsTools, supportsThinking, placementWarning };
   };
 }
 
@@ -479,12 +493,24 @@ function createSessionExistsHandler(session: {
 
 /**
  * Creates a handler for clearing session.
+ *
+ * @remarks
+ * Also drops the connection's carried-over `activePlan` and `conversation`
+ * (see `PerConnection`) — `/new` starting a fresh task should not resume a
+ * checklist, or refer back to prior turns, from the conversation the user
+ * just cleared.
  */
-function createClearSessionHandler(session: {
-  clear: () => Promise<string>;
-}): CommandHandler {
-  return async () => {
+function createClearSessionHandler(
+  session: { clear: () => Promise<string> },
+  brokerByRequester: Map<string, PerConnection>,
+): CommandHandler {
+  return async (commandSession) => {
     const message = await session.clear();
+    const perConnection = brokerByRequester.get(commandSession.requesterId);
+    if (perConnection) {
+      perConnection.activePlan = undefined;
+      perConnection.conversation = undefined;
+    }
     return { message };
   };
 }
@@ -493,8 +519,16 @@ function createClearSessionHandler(session: {
 
 /**
  * Creates a handler for synchronizing MCP tools.
+ *
+ * @remarks
+ * `workspaceRoot`/`clientId`/`mcpMarker` are optional in the payload — an
+ * older client, or {@link "../../../packages/client/src/commands/tokenSaveHandlers.js".syncTokenSaveTools}
+ * (an orphaned-but-still-exported caller that never sends them), must not
+ * crash or write a bogus cache entry when they're absent; the sync itself
+ * (`perConnection.mcpTools`) still happens unconditionally either way.
  */
-function createMcpToolsSyncHandler(
+export function createMcpToolsSyncHandler(
+  mcpToolsCacheStore: McpToolsCacheStore,
   brokerByRequester: Map<string, PerConnection>,
   createPerConnection: (
     requesterId: string,
@@ -502,7 +536,12 @@ function createMcpToolsSyncHandler(
   ) => any,
 ): CommandHandler {
   return async (session, payload) => {
-    const body = payload as { tools?: McpToolSyncPayload[] };
+    const body = payload as {
+      tools?: McpToolSyncPayload[];
+      workspaceRoot?: string;
+      clientId?: string;
+      mcpMarker?: string;
+    };
     let perConnection = brokerByRequester.get(session.requesterId);
 
     if (!perConnection) {
@@ -519,8 +558,202 @@ function createMcpToolsSyncHandler(
     }
 
     const rawTools = Array.isArray(body.tools) ? body.tools : [];
-    perConnection.tokenSaveTools = rawTools.map(mcpToolToAtlasSchema);
-    return { synced: perConnection.tokenSaveTools.length };
+    perConnection.mcpTools = rawTools.map((tool) => ({
+      schema: mcpToolToAtlasSchema(tool),
+      readOnly: tool.readOnly ?? false,
+    }));
+
+    if (
+      typeof body.workspaceRoot === "string" &&
+      typeof body.clientId === "string" &&
+      typeof body.mcpMarker === "string"
+    ) {
+      await mcpToolsCacheStore.set(
+        body.clientId,
+        body.workspaceRoot,
+        body.mcpMarker,
+        rawTools,
+      );
+    }
+
+    return { synced: perConnection.mcpTools.length };
+  };
+}
+
+/** The six config fields the client and server both track, server-side naming. */
+type SyncedConfigValues = {
+  agentModel: string;
+  subagentModel: string;
+  agentProvider: string;
+  subagentProvider: string;
+  agentTemp: number;
+  subagentTemp: number;
+};
+
+const readSyncedConfigValues = (
+  raw: Record<string, unknown> | undefined,
+): SyncedConfigValues | undefined => {
+  if (!raw) {
+    return undefined;
+  }
+  return {
+    agentModel: String(raw.agentModel ?? ""),
+    subagentModel: String(raw.subagentModel ?? ""),
+    agentProvider: String(raw.agentProvider ?? "ollama"),
+    subagentProvider: String(raw.subagentProvider ?? "ollama"),
+    agentTemp: typeof raw.agentTemp === "number" ? raw.agentTemp : 0.1,
+    subagentTemp: typeof raw.subagentTemp === "number" ? raw.subagentTemp : 0.4,
+  };
+};
+
+/**
+ * Creates the handler for `sync.check` — the single unified startup
+ * reconciliation call, covering both MCP tool cache freshness and
+ * newest-timestamp-wins config reconciliation. Replaces the earlier
+ * separate `mcp.tools.check` route.
+ *
+ * @remarks
+ * The two halves are independent and wrapped in their own try/catch: a
+ * failure reconciling config must not prevent the client from still
+ * learning whether it can skip MCP discovery, and vice versa. Either half
+ * of the response may be omitted if that half's inputs are missing/invalid
+ * or its own logic throws — the client treats a missing half as "nothing to
+ * reconcile this round" and falls back to its own existing behavior (full
+ * MCP discovery, or no config reconciliation).
+ *
+ * Config reconciliation, when both `configChangedAt` values differ, always
+ * applies the newer side's values to the other — see
+ * {@link "../config/configManager.js".ConfigManager.applySyncedConfig} for
+ * why the "client wins" branch stamps the client's own `changedAt` on the
+ * server rather than `Date.now()`. Capability flags (`*SupportsTools`,
+ * `agentModelSupportsThinking`) are only re-probed for a role whose model
+ * value actually changed, bounding startup latency to real changes.
+ */
+export function createSyncCheckHandler(
+  mcpToolsCacheStore: McpToolsCacheStore,
+  brokerByRequester: Map<string, PerConnection>,
+  createPerConnection: (
+    requesterId: string,
+    emit: (frame: TaskFrame) => void,
+  ) => any,
+  config: IConfigManager,
+  providerRegistry: ProviderRegistry,
+): CommandHandler {
+  return async (session, payload) => {
+    const body = payload as {
+      workspaceRoot?: string;
+      clientId?: string;
+      mcpMarker?: string;
+      config?: {
+        changedAt?: number;
+        values?: Record<string, unknown>;
+      };
+    };
+
+    const response: { mcp?: unknown; config?: unknown } = {};
+
+    // --- MCP half ---
+    try {
+      if (
+        typeof body.workspaceRoot === "string" &&
+        typeof body.clientId === "string" &&
+        typeof body.mcpMarker === "string"
+      ) {
+        const entry = mcpToolsCacheStore.get(body.clientId, body.workspaceRoot);
+        if (entry && entry.marker === body.mcpMarker) {
+          let perConnection = brokerByRequester.get(session.requesterId);
+          if (!perConnection) {
+            const newPerConnection = createPerConnection(
+              session.requesterId,
+              () => {},
+            );
+            brokerByRequester.set(session.requesterId, newPerConnection);
+            perConnection = newPerConnection;
+          }
+          if (perConnection) {
+            perConnection.mcpTools = entry.tools.map((tool) => ({
+              schema: mcpToolToAtlasSchema(tool),
+              readOnly: tool.readOnly ?? false,
+            }));
+          }
+          response.mcp = { upToDate: true, tools: entry.tools };
+        } else {
+          response.mcp = { upToDate: false };
+        }
+      } else {
+        response.mcp = { upToDate: false };
+      }
+    } catch {
+      response.mcp = { upToDate: false };
+    }
+
+    // --- Config half ---
+    try {
+      const clientChangedAt = body.config?.changedAt;
+      const clientValues = readSyncedConfigValues(body.config?.values);
+
+      if (typeof clientChangedAt === "number" && clientValues) {
+        const serverConfig = (await config.getAll()) as ServerConfig;
+        const serverChangedAt = serverConfig.configChangedAt ?? 0;
+
+        if (clientChangedAt > serverChangedAt) {
+          const previousAgentModel = serverConfig.agentModel;
+          const previousSubagentModel = serverConfig.subagentModel;
+
+          await config.applySyncedConfig(clientValues, clientChangedAt);
+
+          if (
+            clientValues.agentModel.length > 0 &&
+            clientValues.agentModel !== previousAgentModel
+          ) {
+            const admin = await providerRegistry.getAdmin(
+              clientValues.agentProvider,
+            );
+            await syncAgentToolSupport(admin, config, clientValues.agentModel);
+            await syncAgentThinkingSupport(
+              admin,
+              config,
+              clientValues.agentModel,
+            );
+          }
+          if (
+            clientValues.subagentModel.length > 0 &&
+            clientValues.subagentModel !== previousSubagentModel
+          ) {
+            const admin = await providerRegistry.getAdmin(
+              clientValues.subagentProvider,
+            );
+            await syncSubagentToolSupport(
+              admin,
+              config,
+              clientValues.subagentModel,
+            );
+          }
+
+          response.config = { winner: "client", changedAt: clientChangedAt };
+        } else if (serverChangedAt > clientChangedAt) {
+          response.config = {
+            winner: "server",
+            changedAt: serverChangedAt,
+            values: {
+              agentModel: serverConfig.agentModel,
+              subagentModel: serverConfig.subagentModel,
+              agentProvider: serverConfig.agentProvider,
+              subagentProvider: serverConfig.subagentProvider,
+              agentTemp: serverConfig.agentTemp,
+              subagentTemp: serverConfig.subagentTemp,
+            },
+          };
+        } else {
+          response.config = { winner: "same", changedAt: serverChangedAt };
+        }
+      }
+    } catch {
+      // Leave response.config undefined — the client just doesn't reconcile
+      // config this round rather than failing the whole sync.check call.
+    }
+
+    return response;
   };
 }
 
@@ -633,12 +866,21 @@ function createTaskStreamHandler(
       subagentTemp?: number;
       debug?: boolean;
       approvalMode?: unknown;
+      clientEnv?: { platform?: string; shell?: string; osRelease?: string };
     };
 
     const taskText = String(body.text ?? "");
     const maxSubagents = parseMaxSubagentsPayload(body.maxSubagents);
     const approvalMode = normalizeTaskApprovalMode(body.approvalMode);
     const modelOverrides = buildModelOverrides(body);
+    const clientEnv =
+      typeof body.clientEnv?.platform === "string"
+        ? {
+            platform: body.clientEnv.platform,
+            shell: body.clientEnv.shell,
+            osRelease: body.clientEnv.osRelease,
+          }
+        : undefined;
 
     let perConnection = brokerByRequester.get(session.requesterId);
     if (!perConnection) {
@@ -658,6 +900,7 @@ function createTaskStreamHandler(
         modelOverrides,
         maxSubagents,
         approvalMode,
+        clientEnv,
       );
       emit({ kind: "done" });
     } catch (error) {
@@ -752,6 +995,7 @@ export const buildRouter = (deps: RouterBuilderDeps): Router => {
     orchestrator,
     brokerByRequester,
     createPerConnection,
+    mcpToolsCacheStore,
     preferenceRulesToMemoryEntries,
     ollamaBaseUrl,
   } = deps;
@@ -778,10 +1022,18 @@ export const buildRouter = (deps: RouterBuilderDeps): Router => {
     "memory.forget": createForgetMemoryHandler(prefs),
     "memory.clear": createClearMemoryHandler(prefs),
     "session.exists": createSessionExistsHandler(session),
-    "session.clear": createClearSessionHandler(session),
+    "session.clear": createClearSessionHandler(session, brokerByRequester),
     "mcp.tools.sync": createMcpToolsSyncHandler(
+      mcpToolsCacheStore,
       brokerByRequester,
       createPerConnection,
+    ),
+    "sync.check": createSyncCheckHandler(
+      mcpToolsCacheStore,
+      brokerByRequester,
+      createPerConnection,
+      config,
+      providerRegistry,
     ),
     "plan.respond": createPlanRespondHandler(brokerByRequester),
   };

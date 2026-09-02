@@ -538,6 +538,18 @@ export const maxDagWidth = (subtasks: PlannedSubtask[]): number => {
 };
 
 /**
+ * Default ceiling on concurrent workers when the agent role runs on a
+ * local single-GPU provider (Ollama) — see {@link workerCountFor}'s
+ * `localProviderCeiling` param. This is the number actually used in the
+ * common case: `ollama/runtimeTuning.ts` deliberately leaves
+ * `OLLAMA_NUM_PARALLEL` unset by default (so Ollama can self-detect a value
+ * for the real device — see that module's remarks), which means there is
+ * usually no better number to pass through here. A caller only overrides
+ * this with something else when the user has set an explicit `numParallel`.
+ */
+const DEFAULT_LOCAL_PROVIDER_WORKER_CEILING = 4;
+
+/**
  * Calculates the optimal worker count based on max_agents constraint and plan structure.
  *
  * @remarks
@@ -551,12 +563,30 @@ export const maxDagWidth = (subtasks: PlannedSubtask[]): number => {
  *
  * @param maxSubagents - The max_agents constraint
  * @param plan - The agent plan to analyze
+ * @param isLocalProvider - Whether the agent role is served by a local
+ *   single-GPU runtime (Ollama) rather than a remote/hosted one. When true,
+ *   the result is additionally capped at `localProviderCeiling` — even an
+ *   explicit `"max"` or a large custom cap would otherwise fire that many
+ *   concurrent requests at one local model instance, which thrashes a
+ *   single GPU rather than actually finishing sooner. A remote/hosted
+ *   provider has no such ceiling; defaults to `false` so existing callers
+ *   are unaffected until they opt in.
+ * @param localProviderCeiling - The concurrency ceiling to apply when
+ *   `isLocalProvider` is true. Callers should pass the user's explicit
+ *   `numParallel` override when one is set (`ollama/runtimeTuning.ts`), so
+ *   the pool matches what Ollama was actually told to serve. When no
+ *   override is set — the common case, since `OLLAMA_NUM_PARALLEL` is left
+ *   unset by default so Ollama can self-detect a value for the real device
+ *   — omit this and let it default to {@link DEFAULT_LOCAL_PROVIDER_WORKER_CEILING},
+ *   a conservative number safe on any hardware.
  *
  * @returns Optimal worker count for this plan
  */
 export const workerCountFor = (
   maxSubagents: MaxSubagentsParam,
   plan: SubagentPlan,
+  isLocalProvider = false,
+  localProviderCeiling = DEFAULT_LOCAL_PROVIDER_WORKER_CEILING,
 ): number => {
   const subtaskCount = plan.subtasks.length;
 
@@ -584,6 +614,13 @@ export const workerCountFor = (
   } else {
     // Fallback default: cap at 3 unless more parallelism is available
     workerCount = Math.min(3, dagWidth);
+  }
+
+  if (isLocalProvider) {
+    // One local GPU serving N concurrent requests thrashes rather than
+    // parallelizes — cap regardless of how the high count was requested
+    // ("max", or a custom number above the ceiling).
+    workerCount = Math.min(workerCount, localProviderCeiling);
   }
 
   // Final bounds: at least 1 worker, at most as many as there are tasks

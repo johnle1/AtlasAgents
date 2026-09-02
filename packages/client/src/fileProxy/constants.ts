@@ -98,6 +98,16 @@ export const DANGEROUS_TOKENS = new Set([
   "-fprint",
   "-fprint0",
   "-fls",
+  // Windows cmd.exe equivalents of the above (del/erase ~ rm, rd ~ rmdir,
+  // format/diskpart destroy whole volumes, reg can rewrite arbitrary
+  // registry state). The classifier's SAFE_BASE_COMMANDS/find-primary lists
+  // are POSIX-shaped, but this deny-list applies regardless of platform.
+  "del",
+  "erase",
+  "rd",
+  "format",
+  "diskpart",
+  "reg",
 ]);
 
 /**
@@ -177,16 +187,25 @@ export const SAFE_FIND_PRIMARIES = new Set([
  * Shell metacharacters that can chain, redirect, or substitute a second,
  * unvetted command onto an otherwise allow-listed base command (e.g.
  * `echo x && rm -rf /`, `cat f | sh`, `echo x > ~/.bashrc`, `` `whoami` ``,
- * `$(curl …)`). Any command containing one of these must never be
- * classified `"safe"` purely from its first token.
+ * `$(curl …)`, `type %USERPROFILE%\.ssh\id_rsa`). Any command containing
+ * one of these must never be classified `"safe"` purely from its first
+ * token.
  *
  * @remarks
  * Deliberately does not distinguish quoted occurrences from real ones
  * (e.g. `grep "a;b" file.txt` also matches) — consistent with this
  * module's fail-closed-to-`"cautious"` philosophy rather than parsing
  * quoting/escaping.
+ *
+ * The `%VAR%` alternative is cmd.exe's variable-expansion syntax — matched
+ * as a balanced `%name%` pair (not a bare `%`) so an ordinary percent sign
+ * in output (`echo 50% done`) doesn't get flagged; `^`, cmd.exe's escape
+ * character, is deliberately **not** included here — it's also the regex
+ * start-anchor, and `grep '^foo'` is common enough that classifying it
+ * `"cautious"` would be a worse everyday trade-off than the risk it closes.
  */
-export const SHELL_METACHARACTER_PATTERN = /[;&|`<>\n]|\$\(/;
+export const SHELL_METACHARACTER_PATTERN =
+  /[;&|`<>\n]|\$\(|%[A-Za-z_][A-Za-z0-9_]*%/;
 
 /**
  * Argument shapes that point outside the workspace the agent is scoped to.
@@ -199,9 +218,13 @@ export const SHELL_METACHARACTER_PATTERN = /[;&|`<>\n]|\$\(/;
  * line) shows the user nothing. `cat /Users/you/.ssh/id_rsa` must therefore
  * require approval rather than auto-run.
  *
- * Matches an absolute path (`/etc/passwd`), a home-relative path (`~/.aws`),
- * a `..` traversal segment, or an absolute path tucked into a flag value
- * (`--file=/etc/passwd`). Workspace-relative arguments (`src/a.ts`, `.`,
- * `*.ts`) do not match and stay eligible for `"safe"`.
+ * Matches a POSIX absolute path (`/etc/passwd`), a home-relative path
+ * (`~/.aws`), a `..` traversal segment (`/` or `\` delimited, so it also
+ * catches `..\`), a Windows drive-absolute path (`C:\Users\...`), a UNC
+ * path (`\\server\share`), or any of those tucked into a flag value
+ * (`--file=/etc/passwd`, `--file=C:\Users\...`). Workspace-relative
+ * arguments (`src/a.ts`, `.`, `*.ts`) do not match and stay eligible for
+ * `"safe"`.
  */
-export const ESCAPING_PATH_PATTERN = /^[/~]|^\.\.(?:\/|$)|\/\.\.(?:\/|$)|=[/~]/;
+export const ESCAPING_PATH_PATTERN =
+  /^[/~]|^\.\.(?:[/\\]|$)|[/\\]\.\.(?:[/\\]|$)|=[/~]|^[A-Za-z]:[/\\]|^\\\\|=[A-Za-z]:[/\\]/;

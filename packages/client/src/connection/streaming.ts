@@ -9,11 +9,31 @@
  * waiting for a live socket.
  */
 
+import { release as osRelease } from "node:os";
 import type { Payload, RSocket } from "@rsocket/core";
-import type { TaskApprovalMode, TaskStreamPayload } from "@atlasagents/shared";
+import type {
+  ClientEnvPayload,
+  TaskApprovalMode,
+  TaskStreamPayload,
+} from "@atlasagents/shared";
 import type { TaskFrame } from "../types/frames.js";
 import { decodeFrame } from "../types/frames.js";
 import type { Config } from "../config/index.js";
+import { resolveClientExecutionShell } from "../fileProxy/executionShell.js";
+
+/**
+ * Reports this client process's platform once per task, so the agent's
+ * `run_command` calls — which execute here, not on the server — use the
+ * right shell syntax (POSIX vs. `cmd.exe`). The shell label matches the
+ * dialect {@link resolveClientExecutionShell} derives from the active
+ * sandbox backend (container/seatbelt/bwrap → `/bin/sh`) or the direct
+ * host shell when no sandbox is available.
+ */
+const currentClientEnv = (): ClientEnvPayload => ({
+  platform: process.platform,
+  shell: resolveClientExecutionShell(),
+  osRelease: osRelease(),
+});
 
 /**
  * Initial / refill credit window for RSocket stream backpressure.
@@ -214,13 +234,14 @@ export const sendTask = (
     kind: "task",
     text: task,
     maxSubagents: maxSubagents ?? config.subagentCap,
+    agentModel: config.agentModel,
     subagentModel: config.subagentModel,
-    subsubagentModel: config.subsubagentModel,
     agentProvider: config.agentProvider,
     subagentProvider: config.subagentProvider,
     agentTemp: config.agentTemp,
     subagentTemp: config.subagentTemp,
     approvalMode,
+    clientEnv: currentClientEnv(),
   };
 
   return streamRequest(rsocket, body, metadata, onFrame, onToken);

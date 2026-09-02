@@ -175,3 +175,42 @@ describe("classifyCommand — accepted trade-off: quoted metacharacters are not 
     expect(classifyCommand('grep "a;b" file.txt')).toBe("cautious");
   });
 });
+
+describe("classifyCommand — Windows command forms (WS-A hardening)", () => {
+  it("classifies del/erase/rd/format/reg as dangerous, same as their POSIX equivalents", () => {
+    expect(classifyCommand("del build")).toBe("dangerous");
+    expect(classifyCommand("erase build")).toBe("dangerous");
+    expect(classifyCommand("rd /s /q build")).toBe("dangerous");
+    expect(classifyCommand("format C:")).toBe("dangerous");
+    expect(classifyCommand("reg delete HKCU\\Software\\Foo")).toBe("dangerous");
+  });
+
+  it("never auto-approves a Windows drive-absolute path argument", () => {
+    expect(classifyCommand("cat C:\\Users\\me\\.ssh\\id_rsa")).toBe("cautious");
+    expect(classifyCommand("grep --file=C:\\Users\\me\\.aws\\credentials .")).toBe(
+      "cautious",
+    );
+  });
+
+  it("never auto-approves a UNC path argument", () => {
+    expect(classifyCommand("cat \\\\fileserver\\share\\secret.txt")).toBe(
+      "cautious",
+    );
+  });
+
+  it("treats a `..` traversal segment written with a backslash as escaping", () => {
+    expect(classifyCommand("cat ..\\..\\etc\\passwd")).toBe("cautious");
+  });
+
+  it("treats %VAR% expansion as a metacharacter", () => {
+    expect(classifyCommand("cat %USERPROFILE%\\.ssh\\id_rsa")).toBe("cautious");
+  });
+
+  it("does not flag an ordinary percent sign that isn't a balanced %VAR% pair", () => {
+    expect(classifyCommand("echo 50% done")).toBe("safe");
+  });
+
+  it("still classifies a bare regex anchor as safe — ^ is deliberately not a metacharacter here", () => {
+    expect(classifyCommand("grep ^foo file.txt")).toBe("safe");
+  });
+});

@@ -6,7 +6,7 @@
  * controller, with fakes only at the two outer boundaries:
  *
  *   model tokens ──► thinkStream.js (scanner + frame emitter, real)
- *                  ──► agent.js Agent.plan (real, lead-agent case only)
+ *                  ──► agentTurn.js runAgentTurn (real, top-level agent case)
  *                  ──► TaskFrame[] (the wire format)
  *                  ──► taskStream.js runTaskStream (real client dispatch)
  *                  ──► uiBridge (mocked — no Ink render)
@@ -23,7 +23,10 @@
  *   without dropping or duplicating text.
  * - Scanner chunk-boundary hold-back survives the whole trip: think text
  *   arrives intact in history even when tags split across chunks.
- * - Think text never leaks into the visible assistant stream or history.
+ * - Think text never leaks into the visible assistant stream or history —
+ *   this is the regression guard for agentTurn.ts's reasoning-tag scanning
+ *   (a model that inlines `<think>`/`<agent-think>` reasoning in its content
+ *   channel unprompted must never have that raw tagged text reach the user).
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -93,8 +96,7 @@ vi.mock("../../../packages/client/src/config/index.js", () => ({
   loadConfig: mockLoadConfig,
 }));
 
-import { Agent } from "../../../packages/server/src/orchestration/agent/agent.js";
-import { extractAgentThink } from "../../../packages/server/src/orchestration/agent/agentThink.js";
+import { runAgentTurn } from "../../../packages/server/src/orchestration/agent/agentTurn.js";
 import {
   createThinkFrameEmitter,
   createThinkTagScanner,
@@ -104,7 +106,7 @@ import type {
   IConfigManager,
   IOllamaClient,
 } from "../../../packages/server/src/orchestration/interfaces.js";
-import type { Message } from "../../../packages/server/src/orchestration/types.js";
+import type { PerConnection } from "../../../packages/server/src/container/types.js";
 
 import { runTaskStream } from "../../../packages/client/src/ui/taskStream.js";
 import { formatAgentThinkForDisplay } from "../../../packages/client/src/renderer.js";
@@ -140,26 +142,25 @@ COMMAND PLAN:
   verify commands: npm test
 </agent-think>`;
 
-const VALID_PLAN_ARGS = {
-  subtasks: [
-    {
-      id: 1,
-      text: "do work",
-      dependsOn: [],
-      agentId: 1,
-      agentLabel: "implementation",
-    },
-  ],
-  execution: "sequential",
-  agentCount: 1,
-  risks: [] as string[],
-};
+/** The visible answer text following the think block — must survive stripping intact. */
+const ANSWER_TEXT = "Fixed the bug and added a test.";
 
 const nativeConfig = {
   getAgentModel: async () => "test-agent",
   getAgentTemperature: async () => 0,
   getAgentModelSupportsTools: async () => true,
+  getKeepAlive: async () => "30m",
+  getEffort: async () => "high" as const,
 } as unknown as IConfigManager;
+
+/** Minimal PerConnection stub — the direct-answer path never touches workspace/terminal/planBroker. */
+const fakePerConn = {
+  mcpTools: undefined,
+  workspace: {},
+  terminal: {},
+  planBroker: {},
+  activePlan: undefined,
+} as unknown as PerConnection;
 
 // ---------------------------------------------------------------------------
 // Harness — fake Connection whose sendTask runs the real server pipeline
@@ -169,14 +170,25 @@ const nativeConfig = {
  * Frames are collected as the server pipeline produces them, then replayed
  * through `onFrame` in order. Collect-then-replay keeps ordering exact while
  * letting each case build its frames however the real pipeline emits them.
+ *
+ * Mirrors the real `streamRequest`'s fan-out (see connection/streaming.ts):
+ * a `"token"` frame goes to `onToken` (fed into streamingText/history by
+ * runTaskStream), never to `onFrame` — `onFrame`'s switch has no `"token"`
+ * case at all, so replaying token frames only through `onFrame` would
+ * silently drop the visible answer text here.
  */
 const connectionFromFrames = (frames: ServerTaskFrame[]): Connection =>
   ({
     sendTask: async (options: {
       onFrame: (frame: ClientTaskFrame) => void | Promise<void>;
+      onToken?: (token: string) => void;
     }) => {
       const done = (async () => {
         for (const frame of frames) {
+          if (frame.kind === "token") {
+            options.onToken?.(frame.text);
+            continue;
+          }
           await options.onFrame(frame as unknown as ClientTaskFrame);
         }
       })();
@@ -186,42 +198,64 @@ const connectionFromFrames = (frames: ServerTaskFrame[]): Connection =>
   }) as unknown as Connection;
 
 /**
- * Runs the REAL lead-agent planner against a fake model that streams the
- * think block character by character (the worst case for the scanner's
- * partial-tag hold-back), with the production hook wiring from
- * orchestratorPipeline: onThinkDelta → emitter.delta, onThinkEnd →
- * emitter.finish.
+ * Runs the REAL unified agent turn against a fake model that streams a
+ * think block — inline in its content channel, unprompted, the way an
+ * R1-style open model might — character by character (the worst case for
+ * the scanner's partial-tag hold-back), followed by the visible answer
+ * text. `runAgentTurn` owns its own think-scanning internally (see
+ * agentTurn.ts's REASONING_TAG_NAMES), so no external hook wiring is
+ * needed here — just the real `emit` callback.
  */
 const runLeadAgentPipeline = async (): Promise<ServerTaskFrame[]> => {
   const frames: ServerTaskFrame[] = [];
-  const thinkFrames = createThinkFrameEmitter({
-    emit: (frame) => frames.push(frame),
-    agent: true,
-  });
+  const fullResponse = `${VALID_THINK_BLOCK}\n${ANSWER_TEXT}`;
 
   const ollama = {
     chatWithTools: async (
       _model: string,
-      _messages: Message[],
+      _messages: unknown[],
       _tools: unknown[],
       _options: unknown,
       onToken?: (token: string) => void,
     ) => {
-      for (const character of VALID_THINK_BLOCK) {
+      for (const character of fullResponse) {
         onToken?.(character);
       }
-      return {
-        content: VALID_THINK_BLOCK,
-        toolCalls: [{ name: "submit_plan", args: VALID_PLAN_ARGS }],
-      };
+      return { content: fullResponse, thinking: "", toolCalls: [] };
     },
   } as unknown as IOllamaClient;
 
-  const agent = new Agent({ ollama, config: nativeConfig });
-  await agent.plan("fix the bug", "", "", undefined, {
-    onThinkDelta: (text) => thinkFrames.delta(text),
-    onThinkEnd: (text) => thinkFrames.finish(text),
-  });
+  await runAgentTurn(
+    {
+      ollama,
+      config: nativeConfig,
+      agent: {} as never,
+      subagent: {} as never,
+      experienceRecorder: {} as never,
+    },
+    {
+      taskId: "t1",
+      taskText: "fix the bug",
+      contextHeader: "",
+      skillBody: "",
+      clientEnv: undefined,
+      perConn: fakePerConn,
+      modelOverrides: undefined,
+      approvalMode: "default",
+      maxSubagents: 3,
+      emit: (frame) => frames.push(frame),
+      // Mirrors orchestratorPipeline.ts's real emitToken helper: the final
+      // answer becomes a "token" frame, exactly what the client replays
+      // into streamingText/history — so the "no leak" assertions below are
+      // checking something real, not a frame that was never produced.
+      emitToken: (text) => {
+        if (text.length > 0) {
+          frames.push({ kind: "token", text });
+        }
+      },
+      signal: new AbortController().signal,
+    },
+  );
 
   return frames;
 };
@@ -271,32 +305,37 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Lead agent — full Agent.plan → emitter → client
+// Lead agent — full runAgentTurn → emitter → client
 // ---------------------------------------------------------------------------
 
-describe("think flow — lead agent (Agent.plan → emitter → runTaskStream)", () => {
+describe("think flow — lead agent (runAgentTurn → emitter → runTaskStream)", () => {
   it("commits exactly one agent think block with the extracted text", async () => {
     const frames = await runLeadAgentPipeline();
 
-    // The wire itself is well-formed before the client ever sees it:
-    // start, ≥1 delta, exactly one end, all sharing one id.
+    // The wire itself is well-formed before the client ever sees it: an
+    // initial "thinking" status (agentTurn.ts emits this before the model
+    // call), then think-start, ≥1 delta, and exactly one end, all sharing
+    // one id.
     const kinds = frames.map((frame) => frame.kind);
-    expect(kinds[0]).toBe("think-start");
-    expect(kinds[kinds.length - 1]).toBe("think-end");
+    expect(kinds[0]).toBe("status");
+    expect(kinds).toContain("think-start");
     expect(kinds).toContain("think-delta");
-    const ids = new Set(
-      frames.map((frame) => ("id" in frame ? frame.id : null)),
+    expect(kinds).toContain("think-end");
+    const thinkIds = new Set(
+      frames
+        .filter((frame) => frame.kind.startsWith("think-"))
+        .map((frame) => ("id" in frame ? frame.id : null)),
     );
-    expect(ids.size).toBe(1);
+    expect(thinkIds.size).toBe(1);
 
     await runTaskStream(connectionFromFrames(frames), "fix the bug");
 
-    // VALID_THINK_BLOCK is a well-formed fixture, so extraction always
-    // succeeds here — the non-null assertion narrows the general
-    // `string | null` return type, it doesn't paper over a real null case.
-    const expectedText = formatAgentThinkForDisplay(
-      extractAgentThink(VALID_THINK_BLOCK)!,
-    );
+    // VALID_THINK_BLOCK's inner text, exactly as agentTurn.ts's live
+    // scanner extracts it (see REASONING_TAG_NAMES) — computed from the
+    // fixture directly rather than importing the old planner's
+    // extractAgentThink, which agentTurn.ts no longer uses.
+    const innerText = VALID_THINK_BLOCK.replace(/<\/?agent-think>/g, "").trim();
+    const expectedText = formatAgentThinkForDisplay(innerText);
     expect(historyThinkEntries()).toEqual([
       { kind: "think", text: expectedText, agent: true },
     ]);
@@ -314,9 +353,15 @@ describe("think flow — lead agent (Agent.plan → emitter → runTaskStream)",
     }
   });
 
-  it("never leaks think text into the visible assistant stream or text history", async () => {
+  it("never leaks think text into the visible assistant stream or text history, but the real answer lands", async () => {
     const frames = await runLeadAgentPipeline();
     await runTaskStream(connectionFromFrames(frames), "fix the bug");
+
+    // The visible answer must have actually landed — otherwise the "no
+    // leak" checks below would trivially pass on an empty history.
+    expect(
+      historyTextEntries().some((entry) => entry.text.includes(ANSWER_TEXT)),
+    ).toBe(true);
 
     for (const entry of historyTextEntries()) {
       expect(entry.text).not.toContain("COMPLEXITY");

@@ -131,7 +131,7 @@ export type DispatchContext = {
    * perform approval UI — callers decide when to prompt.
    *
    * @param command - Shell command line (may already be CWD-wrapped).
-   * @param options - Optional sandbox provider for auto-mode containment.
+   * @param options - Optional sandbox provider a caller may opt into explicitly for containment.
    * @returns Captured {@link ShellResult}.
    */
   runShell: (

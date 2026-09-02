@@ -11,12 +11,20 @@
  * `startedByServer` is true, you own the child process and must call `stop()`
  * to clean it up. If false, Ollama was pre-existing and you should not stop it.
  *
- * Signal handlers (SIGINT, SIGTERM) are registered to ensure the child process
- * is killed even if the node process exits unexpectedly.
+ * This module does NOT register its own process-level signal handlers.
+ * Earlier it did, but that meant *any* run where this process started Ollama
+ * silently disabled Node's default terminate-on-SIGINT (registering a
+ * `'SIGINT'` listener suppresses that default, and this one never called
+ * `process.exit()`), so Ctrl+C would kill the Ollama child and then hang
+ * forever on the still-open server socket. Signal ownership belongs to the
+ * entry point (`server/index.ts`), which retains the handle this module
+ * returns and calls `stop()` as one step of its own shutdown sequence.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { TimeoutError } from "../errors/index.js";
+import { tuningToEnv, type OllamaTuning } from "./runtimeTuning.js";
+import { logger } from "../utils/logger.js";
 
 /** How long to wait between health-check polls (ms). Balances responsiveness vs. CPU load. */
 const POLL_INTERVAL_MS = 500;
@@ -131,15 +139,24 @@ export type OllamaLifecycle = {
  * The entry point for Ollama lifecycle management. On startup, this function:
  * 1. Checks if Ollama is already running (by probing the health endpoint)
  * 2. If it is, returns a no-op stop handler (Ollama was pre-existing)
- * 3. If it isn't, spawns `ollama serve` as a child process
+ * 3. If it isn't, spawns `ollama serve` as a child process — with the
+ *    caller-supplied `tuning` (see `ollama/runtimeTuning.ts`) applied as env
+ *    vars, if provided
  * 4. Waits for the child to become reachable (up to 30 seconds)
- * 5. Registers signal handlers (SIGINT, SIGTERM) to ensure the child is killed on exit
- * 6. Returns a handle containing a stop function to terminate the child
+ * 5. Returns a handle containing a stop function to terminate the child
  *
- * **Important:** Signal handlers are registered even if Ollama was pre-existing,
- * but the stop() function only does work if this call spawned the child.
+ * **Important:** The caller owns shutdown — `stop()` only does work if this
+ * call spawned the child (`startedByServer: true`), and it is the caller's
+ * responsibility to invoke it (typically from its own SIGINT/SIGTERM
+ * handler). This module registers no process-level signal handlers itself.
  *
  * @param tagsUrl - Full URL to the `/api/tags` endpoint used for health checks.
+ * @param tuning - Runtime tuning to set as env vars when this call spawns
+ *   Ollama (see `ollama/runtimeTuning.ts`). Omit for no tuning (existing
+ *   behavior). **Only takes effect when this call actually spawns Ollama**
+ *   — env vars can't be applied to an already-running process, so on the
+ *   early-return path this is used only to log an informational note, never
+ *   to alter the pre-existing instance.
  * @returns Lifecycle handle. If `startedByServer` is true, caller must call `stop()` to clean up.
  * @throws {@link Error} if `ollama` command is not found, Ollama exited early, or failed to become reachable.
  * @throws {@link TimeoutError} if startup took longer than 30 seconds.
@@ -161,9 +178,21 @@ export type OllamaLifecycle = {
  */
 export const ensureOllamaRunning = async (
   tagsUrl: string,
+  tuning?: OllamaTuning,
 ): Promise<OllamaLifecycle> => {
-  // EARLY RETURN: Ollama is already running — no need to spawn it.
+  // EARLY RETURN: Ollama is already running — no need to spawn it. The env
+  // this process would have set can't retroactively apply to an instance it
+  // didn't start, so just let the operator know tuning was skipped.
   if (await isOllamaReachable(tagsUrl)) {
+    if (tuning) {
+      logger.info(
+        "Ollama is already running — runtime tuning (num_parallel, flash " +
+          "attention, kv cache type) only applies when this process starts " +
+          "Ollama itself, so it was skipped. Quit the existing Ollama and " +
+          "let atlas-server start it, or set these in its own environment, " +
+          "for the tuning to take effect.",
+      );
+    }
     return { startedByServer: false, stop: () => {} };
   }
 
@@ -175,6 +204,7 @@ export const ensureOllamaRunning = async (
     child = spawn("ollama", ["serve"], {
       detached: false,
       stdio: "ignore",
+      env: tuning ? { ...process.env, ...tuningToEnv(tuning) } : process.env,
     });
 
     // WAIT FOR SPAWN: Wait for the spawn event (process actually started) or an error/exit event.
@@ -215,30 +245,17 @@ export const ensureOllamaRunning = async (
     throw err;
   }
 
-  // SIGNAL HANDLING: Register handlers to ensure the child is killed on graceful shutdown.
-  // This protects against orphaned `ollama serve` processes if the node process exits.
+  // STOP: Terminates the child process. Safe to call more than once — checks
+  // `child.killed` first. No signal handlers are registered here; the caller
+  // owns when this fires (see module remarks).
   const stopChild = (): void => {
     if (child && !child.killed) {
       child.kill("SIGTERM");
     }
   };
 
-  const onSignal = (): void => {
-    stopChild();
-  };
-
-  // Register signal handlers. Using `once` ensures we only listen for the FIRST signal.
-  process.once("SIGINT", onSignal);
-  process.once("SIGTERM", onSignal);
-
   return {
     startedByServer: true,
-    stop: () => {
-      // DEREGISTER: Remove signal handlers so they don't fire after we've cleaned up.
-      process.removeListener("SIGINT", onSignal);
-      process.removeListener("SIGTERM", onSignal);
-      // KILL: Terminate the child process.
-      stopChild();
-    },
+    stop: stopChild,
   };
 };

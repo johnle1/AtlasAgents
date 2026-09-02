@@ -17,7 +17,7 @@
  *
  * **No caching pattern:**
  * Config is re-read on every call (same pattern as ConfigManager). This means:
- * - `/set agent provider vllm` takes effect immediately (no restart needed)
+ * - `/set agent provider lmstudio` takes effect immediately (no restart needed)
  * - Per-task provider overrides work transparently
  * - Configuration changes are always visible
  *
@@ -103,7 +103,7 @@ export type ProviderRegistryConfig = {
    * Returns the configuration (baseUrl, apiKey) for a non-Ollama provider.
    * Returns undefined if the provider is not configured.
    *
-   * @param name - Provider name, e.g. "gpt-4" or "vllm-local".
+   * @param name - Provider name, e.g. "gpt-4" or "lmstudio".
    * @returns Configuration for the provider, or undefined if not configured.
    */
   getProvider(
@@ -138,7 +138,7 @@ export interface IProviderRegistry {
    *
    * When `overrideProvider` is set (per-task provider selection from CLI),
    * it wins over the role's configured provider for that specific call. This allows
-   * "use vLLM for this one task" without changing the persistent configuration.
+   * "use LM Studio for this one task" without changing the persistent configuration.
    *
    * @param role - The role to get a client for ("agent" or "subagent").
    * @param overrideProvider - Optional per-task provider override (e.g., "gpt-4").
@@ -188,7 +188,7 @@ export interface IProviderRegistry {
  * const agentClient = registry.getRoleClient("agent");
  * await agentClient.chat("mistral-7b", messages, options);
  * // ↓ re-reads config ↓
- * // If agent is set to "vllm": routes to vLLM
+ * // If agent is set to "lmstudio": routes to LM Studio
  * // If agent is set to "ollama": routes to native Ollama
  * ```
  */
@@ -292,7 +292,7 @@ export class ProviderRegistry implements IProviderRegistry {
    * Constructing a fresh adapter for each call is cheap (no persistent connection state
    * to maintain) and ensures isolation between calls.
    *
-   * @param providerName - The provider to resolve, e.g. "ollama", "gpt-4", "vllm".
+   * @param providerName - The provider to resolve, e.g. "ollama", "gpt-4", "lmstudio".
    * @returns An IOllamaClient for the provider.
    * @throws {@link ConfigError} if the provider is not configured (except "ollama").
    *
@@ -347,8 +347,8 @@ export class ProviderRegistry implements IProviderRegistry {
    * const admin = await registry.getAdmin("ollama");
    * // Returns shared ollamaClient (which implements IOllamaAdminClient)
    *
-   * const admin2 = await registry.getAdmin("vllm");
-   * // Returns SingleModelAdmin wrapper for vLLM
+   * const admin2 = await registry.getAdmin("lmstudio");
+   * // Returns SingleModelAdmin wrapper for LM Studio
    * ```
    */
   getAdmin = async (providerName: string): Promise<IOllamaAdminClient> => {
@@ -387,7 +387,7 @@ export class ProviderRegistry implements IProviderRegistry {
  * 3. Delegate the call to the real client
  *
  * **No caching:** Configuration is re-read on every call. This means:
- * - `/set agent provider vllm` takes effect on the very next chat call
+ * - `/set agent provider lmstudio` takes effect on the very next chat call
  * - No need to restart Agent or rebuild dependency injection
  * - Multi-provider workflows can switch providers mid-task
  *
@@ -397,7 +397,7 @@ export class ProviderRegistry implements IProviderRegistry {
  *
  * **Architecture:** This is a thin wrapper that implements {@link IOllamaClient} by delegating
  * to the real provider's client. It's the "dispatch layer" between the orchestration
- * (Agent/Subagent) and the providers (Ollama, vLLM, OpenAI, etc.).
+ * (Agent/Subagent) and the providers (Ollama, LM Studio, OpenAI, etc.).
  *
  * @example
  * ```ts
@@ -433,8 +433,8 @@ export class RoleRoutedClient implements IOllamaClient {
    * // Standard role-routed client (reads config on each call)
    * const agentClient = new RoleRoutedClient(registry, config, "agent");
    *
-   * // Per-task override (always uses vllm)
-   * const overrideClient = new RoleRoutedClient(registry, config, "agent", "vllm");
+   * // Per-task override (always uses lmstudio)
+   * const overrideClient = new RoleRoutedClient(registry, config, "agent", "lmstudio");
    * ```
    */
   constructor(
@@ -463,8 +463,8 @@ export class RoleRoutedClient implements IOllamaClient {
    * ```ts
    * // For a client without override
    * const client = await roleRoutedClient.resolveClient();
-   * // Reads: agent is configured to use "vllm"
-   * // Returns: OpenAiCompatibleAdapter for vLLM
+   * // Reads: agent is configured to use "lmstudio"
+   * // Returns: OpenAiCompatibleAdapter for LM Studio
    *
    * // For a client with override
    * const client = await overrideClient.resolveClient();

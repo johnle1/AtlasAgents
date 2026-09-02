@@ -4,13 +4,16 @@
  * @remarks
  * A prompt line starting with `!` runs the rest as a local shell command via
  * {@link runShell}. It never reaches {@link CommandHandler} or the agent
- * task stream. Non-`"safe"` commands reuse the same run/skip approval (and
- * session allowlist) as `command.run`.
+ * task stream, and — unlike `command.run`, which the *agent* issues — it
+ * never prompts for approval: the user typed this command on their own
+ * prompt line, so there is no second party to ask. A `"dangerous"`
+ * classification still prints a warning line before running, purely
+ * informational.
  *
  * @example
  * ```ts
  * const command = parseBang("!echo hi"); // "echo hi"
- * const entries = await handleBang({ command, runShell, cwd, timeoutMs, ... });
+ * const entries = await handleBang({ command, runShell, cwd, timeoutMs, classifyCommand });
  * ```
  */
 
@@ -53,8 +56,8 @@ export type HandleBangOptions = {
   ) => Promise<ShellResult>;
   cwd: string;
   timeoutMs: number;
+  /** Used only to decide whether to print the dangerous-command warning — never gates execution (see module remarks). */
   classifyCommand: (command: string) => BashClass;
-  requestApproval: (command: string) => Promise<boolean>;
 };
 
 const usageHint = (): BangHistoryEntry[] => [
@@ -68,57 +71,52 @@ const usageHint = (): BangHistoryEntry[] => [
 /**
  * Runs a bang command and returns history entries for stdout/stderr/exit.
  *
- * @param options - Injected shell, cwd, classifier, and approval.
+ * @param options - Injected shell, cwd, and classifier.
  * @returns History rows to append. Does not throw on non-zero exit.
  */
 export const handleBang = async (
   options: HandleBangOptions,
 ): Promise<BangHistoryEntry[]> => {
-  const { command, runShell, cwd, timeoutMs, classifyCommand, requestApproval } =
-    options;
+  const { command, runShell, cwd, timeoutMs, classifyCommand } = options;
 
   if (command.length === 0) {
     return usageHint();
   }
 
-  const classification = classifyCommand(command);
-  if (classification !== "safe") {
-    const approved = await requestApproval(command);
-    if (!approved) {
-      return [
-        {
-          kind: "text",
-          text: "Command skipped.",
-          variant: "warning",
-        },
-      ];
-    }
+  const warnings: BangHistoryEntry[] = [];
+  if (classifyCommand(command) === "dangerous") {
+    warnings.push({
+      kind: "text",
+      text: "⚠ Dangerous command.",
+      variant: "warning",
+    });
   }
 
   const result = await runShell(command, cwd, timeoutMs);
-  const entries: BangHistoryEntry[] = [];
-  const stdout = result.stdout.replace(/\n$/, "");
-  const stderr = result.stderr.replace(/\n$/, "");
+  // cmd.exe (Windows) terminates output with \r\n; strip either form.
+  const stdout = result.stdout.replace(/\r?\n$/, "");
+  const stderr = result.stderr.replace(/\r?\n$/, "");
 
+  const outputEntries: BangHistoryEntry[] = [];
   if (stdout.length > 0) {
-    entries.push({ kind: "text", text: stdout, variant: "secondary" });
+    outputEntries.push({ kind: "text", text: stdout, variant: "secondary" });
   }
   if (stderr.length > 0) {
-    entries.push({
+    outputEntries.push({
       kind: "text",
       text: stderr,
       variant: result.exitCode === 0 ? "secondary" : "warning",
     });
   }
   if (result.exitCode !== 0) {
-    entries.push({
+    outputEntries.push({
       kind: "text",
       text: `exit ${result.exitCode}`,
       variant: "warning",
     });
   }
-  if (entries.length === 0) {
-    entries.push({ kind: "text", text: "(no output)", variant: "secondary" });
+  if (outputEntries.length === 0) {
+    outputEntries.push({ kind: "text", text: "(no output)", variant: "secondary" });
   }
-  return entries;
+  return [...warnings, ...outputEntries];
 };

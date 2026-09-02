@@ -21,7 +21,7 @@ import {
   cursorOffset,
   emptyBuffer,
   hasTrailingBackslash,
-  stripTrailingBackslash,
+  normalizeNewlines,
   textBufferReducer,
   type TextBufferState,
 } from "../multiline/textBuffer.js";
@@ -34,6 +34,7 @@ import {
   type PasteMapping,
 } from "../multiline/paste.js";
 import { registerNewlineHandle } from "../multiline/newlineHandle.js";
+import { registerExpandHandle } from "../multiline/expandHandle.js";
 
 export type MultilineInputProps = {
   /** Controlled prompt text (may contain `\n`). */
@@ -95,38 +96,64 @@ export const MultilineInput: React.FC<MultilineInputProps> = ({
 
   const submitExpanded = useCallback(() => {
     const expanded = expandPlaceholders(bufferToString(buffer), pastes);
-    setPastes([]);
-    pasteIdRef.current = 1;
     onSubmit(expanded);
   }, [buffer, onSubmit, pastes]);
+
+  const expandDisplay = useCallback(
+    (display: string) => expandPlaceholders(display, pastes),
+    [pastes],
+  );
+
+  useEffect(() => registerExpandHandle(expandDisplay), [expandDisplay]);
 
   useInput(
     (inputCharacter, key) => {
       if (disabled) return;
 
+      // Ctrl+D/A/E are input-box-owned (forward-delete/home/end); every
+      // other ctrl chord belongs to the global handler.
+      if (key.ctrl) {
+        if (inputCharacter === "d") {
+          emit(textBufferReducer(buffer, { type: "delete" }));
+          return;
+        }
+        if (inputCharacter === "a") {
+          emit(textBufferReducer(buffer, { type: "home" }));
+          return;
+        }
+        if (inputCharacter === "e") {
+          emit(textBufferReducer(buffer, { type: "end" }));
+          return;
+        }
+        return;
+      }
       // Global handler owns these; do not also insert the character.
-      if (key.escape || key.tab || key.ctrl || key.meta) return;
+      if (key.escape || key.tab || key.meta) return;
       if (key.return && key.shift) return;
 
       if (key.return) {
         const text = bufferToString(buffer);
         if (hasTrailingBackslash(text)) {
-          const stripped = stripTrailingBackslash(text);
-          const next = textBufferReducer(
-            textBufferReducer(emptyBuffer(), {
-              type: "setText",
-              text: stripped,
+          const end = cursorFromOffset(buffer, text.length);
+          const start = cursorFromOffset(buffer, text.length - 1);
+          emit(
+            textBufferReducer(buffer, {
+              type: "replaceRange",
+              start,
+              end,
+              text: "\n",
             }),
-            { type: "newline" },
           );
-          emit(next);
           return;
         }
         submitExpanded();
         return;
       }
 
-      if (key.backspace) {
+      // Ink 5 reports the physical Backspace key as `key.delete`, not
+      // `key.backspace` (parse-keypress.js splits \x7f from \b) — treat
+      // both flags as backspace. Forward-delete lives on Ctrl+D above.
+      if (key.backspace || key.delete) {
         const text = bufferToString(buffer);
         const offset = cursorOffset(buffer);
         const range = placeholderRangeAt(
@@ -151,11 +178,6 @@ export const MultilineInput: React.FC<MultilineInputProps> = ({
           return;
         }
         emit(textBufferReducer(buffer, { type: "backspace" }));
-        return;
-      }
-
-      if (key.delete) {
-        emit(textBufferReducer(buffer, { type: "delete" }));
         return;
       }
 
@@ -188,22 +210,14 @@ export const MultilineInput: React.FC<MultilineInputProps> = ({
 
       if (key.upArrow || key.downArrow) return;
 
-      if (inputCharacter === "\x01") {
-        emit(textBufferReducer(buffer, { type: "home" }));
-        return;
-      }
-      if (inputCharacter === "\x05") {
-        emit(textBufferReducer(buffer, { type: "end" }));
-        return;
-      }
-
       if (inputCharacter.length === 0) return;
 
       const previous = bufferToString(buffer);
-      let inserted = inputCharacter;
-      if (detectPaste(previous, `${previous}${inputCharacter}`)) {
+      const normalizedInput = normalizeNewlines(inputCharacter);
+      let inserted = normalizedInput;
+      if (detectPaste(previous, `${previous}${normalizedInput}`)) {
         const collapsed = collapsePaste(
-          inputCharacter,
+          normalizedInput,
           PASTE_CHAR_THRESHOLD,
           pasteIdRef.current,
         );

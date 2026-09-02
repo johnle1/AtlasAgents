@@ -80,6 +80,10 @@ vi.mock("../../../../packages/client/src/config/index.js", () => ({
 import { runTaskStream } from "../../../../packages/client/src/ui/taskStream.js";
 import type { Connection } from "../../../../packages/client/src/connection/index.js";
 import type { TaskFrame } from "../../../../packages/client/src/types/frames.js";
+import {
+  getApprovalMode,
+  setSessionApprovalMode,
+} from "../../../../packages/client/src/ui/bridge/allowlist.js";
 
 /** Replays a fixed frame sequence through onFrame, then resolves `done`. */
 const fakeConnection = (frames: TaskFrame[]): Connection =>
@@ -97,6 +101,25 @@ const fakeConnection = (frames: TaskFrame[]): Connection =>
     respondPlan: async () => {},
   }) as unknown as Connection;
 
+/** Same as fakeConnection, but with an inspectable respondPlan spy. */
+const fakeConnectionWithRespondPlan = (
+  frames: TaskFrame[],
+  respondPlan: Connection["respondPlan"],
+): Connection =>
+  ({
+    sendTask: async (options: {
+      onFrame: (frame: TaskFrame) => void | Promise<void>;
+    }) => {
+      const done = (async () => {
+        for (const frame of frames) {
+          await options.onFrame(frame);
+        }
+      })();
+      return { done, cancel: () => {} };
+    },
+    respondPlan,
+  }) as unknown as Connection;
+
 const appendHistoryThinkCalls = () =>
   mockAppendHistory.mock.calls
     .map(([item]) => item)
@@ -105,6 +128,7 @@ const appendHistoryThinkCalls = () =>
 beforeEach(() => {
   vi.clearAllMocks();
   mockLoadConfig.mockReturnValue({ showThinkOutput: true });
+  setSessionApprovalMode("default");
 });
 
 describe("runTaskStream — showThinkOutput off", () => {
@@ -375,5 +399,59 @@ describe("runTaskStream — notifications", () => {
       text: "Task cancelled by user",
       variant: "warning",
     });
+  });
+});
+
+describe("runTaskStream — plan-review mode switch (Claude-Code-style options)", () => {
+  const confirmPlanFrame: TaskFrame = {
+    kind: "confirm-plan",
+    id: "plan-1",
+    task: "do something",
+    steps: ["step"],
+    risks: [],
+    agents: [],
+    agentCount: 1,
+    execution: "sequential",
+    modeLabel: null,
+  };
+
+  it("'auto-accept edits' sends implement and switches session mode to accept_edits (normal)", async () => {
+    mockRequestApproval.mockResolvedValue("autoAcceptEdits");
+    const respondPlan = vi.fn(async () => {});
+    const connection = fakeConnectionWithRespondPlan([confirmPlanFrame], respondPlan);
+
+    await runTaskStream(connection, "do something");
+
+    expect(respondPlan).toHaveBeenCalledWith("plan-1", "implement", undefined);
+    expect(getApprovalMode()).toBe("accept_edits");
+  });
+
+  it("'manually approve edits' sends implement and switches session mode to default (normal)", async () => {
+    setSessionApprovalMode("plan");
+    mockRequestApproval.mockResolvedValue("manualApprove");
+    const respondPlan = vi.fn(async () => {});
+    const connection = fakeConnectionWithRespondPlan([confirmPlanFrame], respondPlan);
+
+    await runTaskStream(connection, "do something");
+
+    expect(respondPlan).toHaveBeenCalledWith("plan-1", "implement", undefined);
+    expect(getApprovalMode()).toBe("default");
+  });
+
+  it("'no, keep planning' sends edit and leaves session mode untouched (boundary)", async () => {
+    setSessionApprovalMode("plan");
+    mockRequestApproval.mockResolvedValue("edit");
+    mockRequestPrompt.mockResolvedValue("use a different library");
+    const respondPlan = vi.fn(async () => {});
+    const connection = fakeConnectionWithRespondPlan([confirmPlanFrame], respondPlan);
+
+    await runTaskStream(connection, "do something");
+
+    expect(respondPlan).toHaveBeenCalledWith(
+      "plan-1",
+      "edit",
+      "use a different library",
+    );
+    expect(getApprovalMode()).toBe("plan");
   });
 });

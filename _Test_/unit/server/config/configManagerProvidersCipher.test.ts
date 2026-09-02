@@ -91,7 +91,7 @@ describe("ConfigManager.unlockOrSetupProvidersCipher — restart", () => {
   it("unlocks an existing encrypted file with the correct passphrase on the first try", async () => {
     const { manager, root } = await makeManager();
     await manager.unlockOrSetupProvidersCipher(async () => "restart-pass");
-    await manager.addProvider("vllm", { baseUrl: "http://10.0.0.9:8000" });
+    await manager.addProvider("lmstudio", { baseUrl: "http://10.0.0.9:8000" });
     lockCipher(); // simulate process restart
 
     const manager2 = new ConfigManager({ rootDir: root });
@@ -102,14 +102,14 @@ describe("ConfigManager.unlockOrSetupProvidersCipher — restart", () => {
     });
     expect(promptCount).toBe(1);
     expect(await manager2.getProviders()).toEqual({
-      vllm: { baseUrl: "http://10.0.0.9:8000" },
+      lmstudio: { baseUrl: "http://10.0.0.9:8000" },
     });
   });
 
   it("retries after a wrong passphrase, then succeeds", async () => {
     const { manager, root } = await makeManager();
     await manager.unlockOrSetupProvidersCipher(async () => "correct-pass");
-    await manager.addProvider("vllm", { baseUrl: "http://10.0.0.9:8000" });
+    await manager.addProvider("lmstudio", { baseUrl: "http://10.0.0.9:8000" });
     lockCipher();
 
     const manager2 = new ConfigManager({ rootDir: root });
@@ -122,14 +122,14 @@ describe("ConfigManager.unlockOrSetupProvidersCipher — restart", () => {
     });
     expect(promptCount).toBe(3);
     expect(await manager2.getProviders()).toEqual({
-      vllm: { baseUrl: "http://10.0.0.9:8000" },
+      lmstudio: { baseUrl: "http://10.0.0.9:8000" },
     });
   });
 
   it("forgot passphrase: 'try again' resets the attempt counter and can still succeed", async () => {
     const { manager, root } = await makeManager();
     await manager.unlockOrSetupProvidersCipher(async () => "correct-pass");
-    await manager.addProvider("vllm", { baseUrl: "http://10.0.0.9:8000" });
+    await manager.addProvider("lmstudio", { baseUrl: "http://10.0.0.9:8000" });
     lockCipher();
 
     const manager2 = new ConfigManager({ rootDir: root });
@@ -142,14 +142,14 @@ describe("ConfigManager.unlockOrSetupProvidersCipher — restart", () => {
     });
     expect(promptCount).toBe(5);
     expect(await manager2.getProviders()).toEqual({
-      vllm: { baseUrl: "http://10.0.0.9:8000" },
+      lmstudio: { baseUrl: "http://10.0.0.9:8000" },
     });
   });
 
   it("forgot passphrase: 'quit' aborts and leaves the file untouched", async () => {
     const { manager, root } = await makeManager();
     await manager.unlockOrSetupProvidersCipher(async () => "correct-pass");
-    await manager.addProvider("vllm", { baseUrl: "http://10.0.0.9:8000" });
+    await manager.addProvider("lmstudio", { baseUrl: "http://10.0.0.9:8000" });
     lockCipher();
 
     const configPath = path.join(root, "user-data", "config.json");
@@ -172,7 +172,7 @@ describe("ConfigManager.unlockOrSetupProvidersCipher — restart", () => {
   it("forgot passphrase: 'reset' + cancelled confirmation falls back to retry, no file change", async () => {
     const { manager, root } = await makeManager();
     await manager.unlockOrSetupProvidersCipher(async () => "correct-pass");
-    await manager.addProvider("vllm", { baseUrl: "http://10.0.0.9:8000" });
+    await manager.addProvider("lmstudio", { baseUrl: "http://10.0.0.9:8000" });
     lockCipher();
 
     const configPath = path.join(root, "user-data", "config.json");
@@ -195,7 +195,7 @@ describe("ConfigManager.unlockOrSetupProvidersCipher — restart", () => {
     });
     expect(promptCount).toBe(6);
     expect(await manager2.getProviders()).toEqual({
-      vllm: { baseUrl: "http://10.0.0.9:8000" },
+      lmstudio: { baseUrl: "http://10.0.0.9:8000" },
     });
     expect(await fs.readFile(configPath, "utf-8")).toBe(before);
   });
@@ -203,7 +203,7 @@ describe("ConfigManager.unlockOrSetupProvidersCipher — restart", () => {
   it("forgot passphrase: 'reset' + confirmed wipes provider secrets but preserves everything else", async () => {
     const { manager, root } = await makeManager();
     await manager.unlockOrSetupProvidersCipher(async () => "correct-pass");
-    await manager.addProvider("vllm", {
+    await manager.addProvider("lmstudio", {
       baseUrl: "http://10.0.0.9:8000",
       apiKey: "sk-old",
     });
@@ -257,7 +257,7 @@ describe("ConfigManager.unlockOrSetupProvidersCipher — locked cipher propagate
   it("throws rather than silently returning empty providers when locked", async () => {
     const { manager, root } = await makeManager();
     await manager.unlockOrSetupProvidersCipher(async () => "lock-test-pass");
-    await manager.addProvider("vllm", { baseUrl: "http://10.0.0.9:8000" });
+    await manager.addProvider("lmstudio", { baseUrl: "http://10.0.0.9:8000" });
     lockCipher();
 
     const manager2 = new ConfigManager({ rootDir: root });
@@ -267,7 +267,7 @@ describe("ConfigManager.unlockOrSetupProvidersCipher — locked cipher propagate
   it("annotates the locked-cipher error with provider-secrets context, even from an unrelated getter", async () => {
     const { manager, root } = await makeManager();
     await manager.unlockOrSetupProvidersCipher(async () => "lock-test-pass");
-    await manager.addProvider("vllm", { baseUrl: "http://10.0.0.9:8000" });
+    await manager.addProvider("lmstudio", { baseUrl: "http://10.0.0.9:8000" });
     await manager.setModel("agent", "gemma3:27b");
     lockCipher();
 
@@ -320,9 +320,9 @@ describe("ConfigManager.rotateProvidersPassphrase", () => {
   it("the new passphrase unlocks it correctly after a simulated restart", async () => {
     const { manager, root } = await makeManager();
     await manager.unlockOrSetupProvidersCipher(async () => "old-pass");
-    await manager.addProvider("vllm", {
+    await manager.addProvider("lmstudio", {
       baseUrl: "http://10.0.0.9:8000",
-      apiKey: "sk-vllm",
+      apiKey: "sk-lmstudio",
     });
 
     await manager.rotateProvidersPassphrase("old-pass", "new-pass");
@@ -336,7 +336,7 @@ describe("ConfigManager.rotateProvidersPassphrase", () => {
     });
     expect(promptCount).toBe(1);
     expect(await manager2.getProviders()).toEqual({
-      vllm: { baseUrl: "http://10.0.0.9:8000", apiKey: "sk-vllm" },
+      lmstudio: { baseUrl: "http://10.0.0.9:8000", apiKey: "sk-lmstudio" },
     });
   });
 

@@ -22,6 +22,7 @@ import { buildBannerLines } from "../renderer/banner.js";
 import type {
   SubagentBoardState,
   SubagentStatusState,
+  PlanStepState,
   AppProps,
   ApprovalRequest,
   HistoryItem,
@@ -134,6 +135,10 @@ export type AppContextValue = {
 
   subagentBoards: SubagentBoardState[];
   setSubagentBoards: React.Dispatch<React.SetStateAction<SubagentBoardState[]>>;
+
+  /** The agent's live `update_plan` checklist — see `PlanChecklist.tsx`. */
+  activePlan: PlanStepState[];
+  setActivePlan: React.Dispatch<React.SetStateAction<PlanStepState[]>>;
 
   /** First Ctrl+C during `busy` increments this; second press exits. */
   sigintBusy: number;
@@ -307,6 +312,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({
   const [subagentBoards, setSubagentBoards] = useState<SubagentBoardState[]>(
     [],
   );
+  // The agent's live `update_plan` checklist — drives `PlanChecklist`, the
+  // replacement for the per-agent task boards above (which the unified
+  // agent loop no longer populates; kept only for wire back-compat).
+  const [activePlan, setActivePlan] = useState<PlanStepState[]>([]);
 
   const [histIdx, setHistIdx] = useState(-1);
   const [busy, setBusy] = useState(false);
@@ -389,6 +398,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({
       setSubagentStatuses,
       subagentBoards,
       setSubagentBoards,
+      activePlan,
+      setActivePlan,
       sigintBusy,
       setSigintBusy,
       showShortcuts,
@@ -431,6 +442,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({
       promptDraft,
       subagentStatuses,
       subagentBoards,
+      activePlan,
       sigintBusy,
       showShortcuts,
       handleSubmit,

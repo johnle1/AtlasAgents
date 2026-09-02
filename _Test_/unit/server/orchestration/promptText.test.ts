@@ -15,8 +15,34 @@ describe("schemaToPromptLine", () => {
   it("renders required fields with description hints", () => {
     const line = schemaToPromptLine(readFileTool.schema);
     expect(line).toBe(
-      '- read_file: {"tool":"read_file","path":"<Relative path from workspace root>"}',
+      '- read_file (Read the full content of a file from the workspace.): {"tool":"read_file","path":"<Relative path from workspace root>"}',
     );
+  });
+
+  it("includes the tool's own description in parentheses — the main signal for an MCP tool with a terse name", () => {
+    const line = schemaToPromptLine({
+      type: "function",
+      function: {
+        name: "mcp__github__create_issue",
+        description: "Creates a new issue in a GitHub repository.",
+        parameters: { type: "object", properties: {}, required: [] },
+      },
+    });
+    expect(line).toBe(
+      '- mcp__github__create_issue (Creates a new issue in a GitHub repository.): {"tool":"mcp__github__create_issue",}',
+    );
+  });
+
+  it("omits the parenthetical entirely when description is empty", () => {
+    const line = schemaToPromptLine({
+      type: "function",
+      function: {
+        name: "no_description_tool",
+        description: "",
+        parameters: { type: "object", properties: {}, required: [] },
+      },
+    });
+    expect(line).toBe('- no_description_tool: {"tool":"no_description_tool",}');
   });
 
   it("marks optional fields with a trailing question mark in the hint", () => {

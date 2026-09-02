@@ -27,7 +27,7 @@ vi.mock("../../../../packages/client/src/config/index.js", async (importOriginal
 
 vi.mock("../../../../packages/client/src/commands/tokenSaveHandlers.js", () => ({
   printTokenSaveInitTip: vi.fn(),
-  syncTokenSaveTools: vi.fn(async () => []),
+  syncAllMcpTools: vi.fn(async () => 0),
 }));
 
 vi.mock("../../../../packages/client/src/ui/bootstrap/historyPersist.js", () => ({

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { Agent } from "../../../../packages/server/src/orchestration/agent/agent.js";
 import {
   createToolRegistry,
+  createAgentTurnToolRegistry,
   getToolHandlerMap,
   getToolSchemaByName,
   getToolSchemas,
@@ -56,5 +57,29 @@ describe("getToolSchemaByName", () => {
       "read_file",
     );
     expect(getToolSchemaByName(registry, "missing_tool")).toBeUndefined();
+  });
+});
+
+describe("ToolHandler.readOnly", () => {
+  it("read_file is marked read-only — this is what lets agentTurn.ts's runToolCalls batch consecutive reads concurrently (normal)", () => {
+    const registry = createAgentTurnToolRegistry();
+    const readFile = getToolHandlerMap(registry).get("read_file");
+    expect(readFile?.readOnly).toBe(true);
+  });
+
+  it("every mutating or control-flow built-in tool is NOT marked read-only — regression guard against accidentally letting a write batch concurrently (error/negative case)", () => {
+    const registry = createAgentTurnToolRegistry();
+    const map = getToolHandlerMap(registry);
+
+    for (const name of [
+      "write_file",
+      "edit_file",
+      "run_command",
+      "update_plan",
+      "run_steps_parallel",
+      "finish",
+    ]) {
+      expect(map.get(name)?.readOnly).not.toBe(true);
+    }
   });
 });

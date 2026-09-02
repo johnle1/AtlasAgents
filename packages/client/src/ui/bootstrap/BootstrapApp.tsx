@@ -31,7 +31,7 @@ import { wireSessionAbortSignal } from "./wireSessionAbortSignal.js";
 import { setInkActive } from "../uiBridge.js";
 import {
   printTokenSaveInitTip,
-  syncTokenSaveTools,
+  syncAllMcpTools,
 } from "../../commands/tokenSaveHandlers.js";
 
 /**
@@ -183,6 +183,7 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
     // This is critical because the connection effect can run for several seconds
     // while the user might dismiss the error screen and trigger unmount.
     let connectionCancelled = false;
+    let unsubscribeReconnectSync: (() => void) | undefined;
 
     const { connection: rsocketConnection, fileProxy: localFileProxy } =
       connectionServices;
@@ -214,26 +215,47 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
       const skillManager = new SkillManager(rsocketConnection);
 
       try {
-        const syncedToolCount = await syncTokenSaveTools(
+        const syncedToolCount = await syncAllMcpTools(
           rsocketConnection,
           workspaceRootDirectory,
         );
         if (syncedToolCount > 0) {
           sessionInitializationMessages.push(
-            `Synced ${syncedToolCount} TokenSave tool(s) to server.`,
+            `Synced ${syncedToolCount} MCP tool(s) to server.`,
           );
         } else {
           await printTokenSaveInitTip(workspaceRootDirectory);
         }
       } catch (tokenSaveSyncError) {
         sessionInitializationMessages.push(
-          `TokenSave sync failed: ${
+          `MCP tool sync failed: ${
             tokenSaveSyncError instanceof Error
               ? tokenSaveSyncError.message
               : String(tokenSaveSyncError)
           }`,
         );
       }
+
+      // Re-run the same sync after a reconnect (network blip, server
+      // restart, …) — the server's perConnection.mcpTools is keyed by a
+      // per-connection id that's destroyed on disconnect, so without this a
+      // reconnected session would silently have zero MCP tools until the
+      // client process itself restarts. Skips the immediate synchronous
+      // callback every subscribe fires with the *current* status (already
+      // handled by the syncAllMcpTools call above) — only later transitions
+      // back to "Connected" are a genuine reconnect.
+      let sawInitialStatus = false;
+      unsubscribeReconnectSync = rsocketConnection.onConnectionStatus(
+        (status) => {
+          if (!sawInitialStatus) {
+            sawInitialStatus = true;
+            return;
+          }
+          if (status === "Connected") {
+            void syncAllMcpTools(rsocketConnection, workspaceRootDirectory);
+          }
+        },
+      );
 
       // Inform the user if a server session already exists; ignore RPC errors.
       // This is agenty only — startup continues without the hint if the RPC fails.
@@ -279,6 +301,7 @@ export const BootstrapApp: React.FC<BootstrapAppProps> = ({
       // Set the flag to prevent state updates if the effect cleanup runs
       // after async operations complete but before the component fully unmounts.
       connectionCancelled = true;
+      unsubscribeReconnectSync?.();
     };
   }, [bootstrapPhase, appConfig, connectionServices]);
 

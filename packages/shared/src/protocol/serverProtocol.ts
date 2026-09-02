@@ -7,8 +7,8 @@
  * (server→client requests, e.g. the server asking the client to read a file
  * or run a shell command). The two protocols share no route names — this
  * file covers `models.*`, `config.*`, `providers.*`, `skills.sync`,
- * `memory.*`, `session.*`, `plan.respond`, `mcp.tools.sync` (commands) and
- * `task`/`models.pull`/`explore` (streams).
+ * `memory.*`, `session.*`, `plan.respond`, `mcp.tools.sync`, `sync.check`
+ * (commands) and `task`/`models.pull`/`explore` (streams).
  */
 
 /**
@@ -28,6 +28,8 @@
  * - `session.*`: Session management
  * - `plan.*`: Plan-related operations
  * - `mcp.tools.*`: MCP tool synchronization
+ * - `sync.check`: Unified startup reconciliation — MCP tool cache freshness
+ *   plus newest-timestamp-wins config reconciliation, in one round trip
  *
  * @example
  * ```ts
@@ -54,7 +56,8 @@ export type RouteId =
   | "session.exists"
   | "session.clear"
   | "plan.respond"
-  | "mcp.tools.sync";
+  | "mcp.tools.sync"
+  | "sync.check";
 
 /**
  * Fixed list of all RouteId values for runtime validation.
@@ -95,6 +98,7 @@ export const ROUTE_IDS: readonly RouteId[] = [
   "session.clear",
   "plan.respond",
   "mcp.tools.sync",
+  "sync.check",
 ] as const;
 
 // Pre-computed Set for O(1) membership testing in isRouteId
@@ -211,8 +215,8 @@ export const isStreamKind = (value: string): value is StreamKind => {
  * const payload: TaskStreamPayload = {
  *   kind: "task",
  *   text: "Add unit tests for the banner layout helpers",
- *   subagentModel: "gemma3:27b",
- *   subsubagentModel: "gemma3:4b",
+ *   agentModel: "gemma3:27b",
+ *   subagentModel: "gemma3:4b",
  *   agentProvider: "ollama",
  *   subagentProvider: "ollama",
  *   agentTemp: 0.2,
@@ -231,15 +235,15 @@ export type TaskStreamPayload = {
   maxSubagents?: 1 | 2 | "max" | number;
 
   /** Model id for the agent role (planning / orchestration). */
-  subagentModel: string;
+  agentModel: string;
 
   /** Model id for the subagent role (tool use / edits). */
-  subsubagentModel: string;
+  subagentModel: string;
 
-  /** Provider serving the agent role (e.g. "ollama", "vllm-gpu"). */
+  /** Provider serving the agent role (e.g. "ollama", "lmstudio"). */
   agentProvider: string;
 
-  /** Provider serving the subagent role (e.g. "ollama", "vllm-gpu"). */
+  /** Provider serving the subagent role (e.g. "ollama", "lmstudio"). */
   subagentProvider: string;
 
   /** Agent sampling temperature in roughly `0.0`–`1.0`. */
@@ -250,10 +254,27 @@ export type TaskStreamPayload = {
 
   /**
    * Session approval mode. `"plan"` stops after confirm-plan; other values
-   * execute. `"accept_edits"` / `"auto"` / `"bypass"` are client-side
-   * permission policies the server does not enforce.
+   * execute. `"accept_edits"` / `"auto"` are client-side permission
+   * policies the server does not enforce.
    */
   approvalMode?: TaskApprovalMode;
+
+  /**
+   * Client machine info, so the agent's `run_command` calls (which execute
+   * on the client, not the server) use the right shell syntax. Optional —
+   * an older client omitting this falls back to a POSIX/Linux default.
+   */
+  clientEnv?: ClientEnvPayload;
+};
+
+/** Client platform info reported with each task stream — see `TaskStreamPayload.clientEnv`. */
+export type ClientEnvPayload = {
+  /** Node's `process.platform` value, e.g. "darwin", "win32", "linux". */
+  platform: string;
+  /** Client shell, e.g. "/bin/zsh" or "cmd.exe" (best-effort, may be absent). */
+  shell?: string;
+  /** Free-form OS release string, e.g. "Darwin 25.6.0" (best-effort, may be absent). */
+  osRelease?: string;
 };
 
 /**
@@ -268,7 +289,6 @@ export type TaskApprovalMode =
   | "accept_edits"
   | "plan"
   | "auto"
-  | "bypass"
   | "auto_edit";
 
 /**
@@ -296,8 +316,7 @@ export const normalizeTaskApprovalMode = (raw: unknown): TaskApprovalMode => {
     raw === "default" ||
     raw === "accept_edits" ||
     raw === "plan" ||
-    raw === "auto" ||
-    raw === "bypass"
+    raw === "auto"
   ) {
     return raw;
   }

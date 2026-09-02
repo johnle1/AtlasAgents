@@ -11,19 +11,16 @@
  * new endpoint. This ensures the live session picks up changes immediately
  * without requiring a CLI restart.
  *
- * **Model selection delegation:** Agent and subagent model picking is
- * delegated to {@link handleSetModel}, which may prompt interactively
- * if model choices need clarification.
+ * **Model selection delegation:** Subagent model picking (`/set subagent`)
+ * is delegated to {@link handleSetModel}, which may prompt interactively
+ * if model choices need clarification. The primary agent's model is picked
+ * via the separate top-level `/model` command (`commands/index.ts`).
  *
  * @see {@link Connection} for reconnection semantics
  * @see {@link config} for the persistent configuration structure
  */
 
 import { loadConfig, updateConfig } from "../config/index.js";
-import {
-  parseApprovalMode,
-  setSessionApprovalMode,
-} from "../ui/bridge/allowlist.js";
 import type { PromptPort } from "../ui/promptPort.js";
 import type { Connection } from "../connection/index.js";
 import { getTheme } from "../theme/themeManager.js";
@@ -141,10 +138,11 @@ export type HandleSetDeps = {
    * Callback to handle model selection for the agent or subagent role.
    *
    * @remarks
-   * Called when the user runs `/set agent` or `/set subagent`. Responsibility
-   * for the interactive flow (menu, validation, persistence) is delegated here
-   * to avoid circular imports and keep model-picking logic centralized in
-   * the model handlers module.
+   * Called when the user runs `/set subagent` (the agent role instead goes
+   * through the top-level `/model` command, bypassing `handleSet` entirely).
+   * Responsibility for the interactive flow (menu, validation, persistence)
+   * is delegated here to avoid circular imports and keep model-picking logic
+   * centralized in the model handlers module.
    *
    * @param role - Either `"agent"` or `"subagent"`, determining which config
    *   field gets updated.
@@ -159,8 +157,9 @@ export type HandleSetDeps = {
  * the connection if transport settings were modified.
  *
  * @remarks
- * The `/set` command supports five settings: connection credentials (`password`,
- * `server`, `port`) and model role selection (`agent`, `subagent`). Transport
+ * The `/set` command supports connection credentials (`password`, `server`,
+ * `port`) and subagent model selection (`subagent`) — the primary agent's
+ * model is picked via the top-level `/model` command instead. Transport
  * settings trigger an immediate {@link Connection.reload} to reconnect with the
  * new endpoint or credentials, ensuring the next command sees the updated config.
  * Model settings are delegated to {@link handleSetModel} for interactive selection.
@@ -178,11 +177,10 @@ export type HandleSetDeps = {
  *   - `"password"` — agent server auth token
  *   - `"server"` — RSocket endpoint hostname (default: localhost)
  *   - `"port"` — RSocket endpoint port (default: 7000)
- *   - `"agent"` — primary agent model selector
- *   - `"subagent"` — secondary subagent model selector
+ *   - `"subagent"` — subagent model selector (agent role: use `/model`)
  *   Pass empty string to show usage.
  * @param arg - Optional inline value for the setting. Ignored if the setting
- *   does not accept arguments (e.g., `agent`, `subagent`).
+ *   does not accept arguments (e.g., `subagent`).
  * @param deps - Runtime dependencies: connection, prompt helpers, and the
  *   model-selection callback.
  *
@@ -195,7 +193,7 @@ export type HandleSetDeps = {
  * await handleSet("server", "", deps);
  *
  * // Model selection (no arg used)
- * await handleSet("agent", "", deps);
+ * await handleSet("subagent", "", deps);
  * ```
  */
 export const handleSet = async (
@@ -208,7 +206,7 @@ export const handleSet = async (
   // Validate that a setting name was provided.
   if (!sub) {
     printError(
-      "Usage: /set password [value] | /set server [host] | /set port [n] | /set agent | /set subagent | /set approval [mode]",
+      "Usage: /set password [value] | /set server [host] | /set port [n] | /set subagent",
     );
     return;
   }
@@ -287,7 +285,6 @@ export const handleSet = async (
       break;
     }
 
-    case "agent":
     case "subagent": {
       // Delegate the interactive model-selection flow to the model handlers,
       // which own the logic for prompting and validating model choices.
@@ -295,42 +292,10 @@ export const handleSet = async (
       break;
     }
 
-    case "approval": {
-      const parsed = parseApprovalMode(arg);
-      if (!parsed) {
-        printError(
-          "Usage: /set approval default|accept_edits|plan|auto|bypass  (Shift+Tab cycles the first three)",
-        );
-        return;
-      }
-      if (parsed === "bypass") {
-        const confirmation = (
-          await prompts.question(
-            "  Type 'bypass' to confirm disabling all prompts this session: ",
-          )
-        )
-          .trim()
-          .toLowerCase();
-        if (confirmation !== "bypass") {
-          printError("Bypass not enabled.");
-          return;
-        }
-        setSessionApprovalMode("bypass");
-        printError(
-          "Approval mode BYPASS — all prompts skipped this session (not saved).",
-        );
-        break;
-      }
-      updateConfig({ approvalMode: parsed });
-      setSessionApprovalMode(parsed);
-      printSuccess(`Approval mode set to ${parsed}.`);
-      break;
-    }
-
     default: {
       // Reject unknown settings and remind the user of valid options.
       printError(
-        "Unknown /set subcommand. Use: password, server, port, agent, subagent, or approval.",
+        "Unknown /set subcommand. Use: password, server, port, or subagent.",
       );
       break;
     }

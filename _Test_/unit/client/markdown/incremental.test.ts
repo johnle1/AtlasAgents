@@ -42,6 +42,24 @@ describe("splitStableMarkdown", () => {
     expect(tail.startsWith("```")).toBe(true);
   });
 
+  it("returns an empty tail once the fence closes (boundary — even fence count)", () => {
+    const full = "# Title\n\n```js\nconst x = 1\n```\n\nmore text";
+    expect(splitStableMarkdown(full)).toEqual({ stable: full, tail: "" });
+  });
+
+  it("keeps two complete fenced blocks fully stable (normal — multiple fences)", () => {
+    const source = "```js\nconst a = 1\n```\n\ntext\n\n```py\nb = 2\n```\n";
+    expect(splitStableMarkdown(source)).toEqual({ stable: source, tail: "" });
+  });
+
+  it("holds back only the third block when it is the unclosed one (boundary — multiple fences)", () => {
+    const closedBlocks = "```js\nconst a = 1\n```\n\ntext\n\n```py\nb = 2\n```\n\n";
+    const source = `${closedBlocks}\`\`\`rust\nlet c = 3`;
+    const { stable, tail } = splitStableMarkdown(source);
+    expect(stable).toBe(closedBlocks);
+    expect(tail).toBe("```rust\nlet c = 3");
+  });
+
   it("returns empty stable+tail for an empty buffer (error)", () => {
     expect(splitStableMarkdown("")).toEqual({ stable: "", tail: "" });
   });

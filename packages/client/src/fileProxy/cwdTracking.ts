@@ -34,9 +34,11 @@ export const isWindowsShell = (): boolean => process.platform === "win32";
  * **Unix:** brace-group the command, capture `$?`, `printf` marker + `$(pwd)`,
  * then `exit` with the captured status.
  *
- * **Windows:** `setlocal enabledelayedexpansion`, run the command, capture
- * `!errorlevel!` and `!cd!`, then `exit /b`. Do **not** call `endlocal` before
- * exit — that would discard `__atlas_status` before the exit code is applied.
+ * **Windows:** delayed expansion is enabled by `runShell` (`cmd /v:on`). The
+ * wrapper captures `!errorlevel!` and `!cd!`, then `exit /b`. Do **not** call
+ * `endlocal` before exit — that would discard `__atlas_status` before the
+ * exit code is applied. `setlocal enabledelayedexpansion` stays in the
+ * snippet as defense in depth when the command is later pasted into a `.cmd`.
  *
  * @param command - Original user/agent command line.
  * @param isWindows - Force Windows syntax; defaults to {@link isWindowsShell}.
@@ -109,18 +111,42 @@ export const extractCwdFromOutput = (stdout: string): CwdExtractionResult => {
 };
 
 /**
+ * Strips the Windows extended-length prefix that native realpath may return.
+ *
+ * @param resolved - Path from `fs.realpathSync` / `.native`.
+ * @returns Drive-letter or UNC path comparable to `cmd.exe` `CD` output.
+ */
+const stripWindowsExtendedPrefix = (resolved: string): string => {
+  if (process.platform !== "win32") {
+    return resolved;
+  }
+  if (resolved.startsWith("\\\\?\\UNC\\")) {
+    return `\\\\${resolved.slice("\\\\?\\UNC\\".length)}`;
+  }
+  if (resolved.startsWith("\\\\?\\")) {
+    return resolved.slice("\\\\?\\".length);
+  }
+  return resolved;
+};
+
+/**
  * Normalizes a tracked cwd for storage and equality checks.
  *
  * @remarks
- * Prefers `fs.realpathSync` so symlinks compare equal to their targets. Falls
- * back to `path.resolve` when the path does not exist yet (e.g. race after mkdir).
+ * Prefers a filesystem realpath so symlinks (and on Windows, 8.3 short names)
+ * compare equal to the path `cmd.exe` reports. Falls back to `path.resolve`
+ * when the path does not exist yet (e.g. race after mkdir).
  *
  * @param cwd - Absolute or relative directory path from the shell.
  * @returns Canonical absolute path string.
  */
 export const canonicalizeTrackedCwd = (cwd: string): string => {
   try {
-    return fs.realpathSync(cwd);
+    const resolved =
+      process.platform === "win32"
+        ? fs.realpathSync.native(cwd)
+        : fs.realpathSync(cwd);
+    return stripWindowsExtendedPrefix(resolved);
   } catch {
     // Path may not exist yet; still normalize `.` / `..` segments.
     return path.resolve(cwd);

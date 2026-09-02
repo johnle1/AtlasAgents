@@ -8,19 +8,51 @@
  * agent cannot point outside the workspace via `/etc/...`.
  */
 
+import * as fs from "node:fs";
 import * as path from "node:path";
+
+/**
+ * Resolves `candidate` to its real (symlink-free) path, falling back to the
+ * realpath of its closest existing ancestor when the path itself (or a
+ * trailing segment) doesn't exist yet.
+ *
+ * @remarks
+ * `fs.realpathSync` throws unless the full path exists, which is too strict
+ * for a path being validated *before* creation (a new file under `mkdir -p`,
+ * or a not-yet-existing target of `file.write`). Recursing on `dirname`
+ * still dereferences every symlink that *does* exist — including one placed
+ * inside the workspace that points outside it — so a still-nonexistent
+ * suffix cannot be used to dodge the check.
+ *
+ * @param candidate - Absolute path to resolve.
+ * @returns The real path, with any nonexistent suffix preserved verbatim.
+ */
+const realpathOrClosestAncestor = (candidate: string): string => {
+  try {
+    return fs.realpathSync(candidate);
+  } catch {
+    const parent = path.dirname(candidate);
+    if (parent === candidate) {
+      return candidate;
+    }
+    return path.join(realpathOrClosestAncestor(parent), path.basename(candidate));
+  }
+};
 
 /**
  * Returns whether `candidate` sits on or under `workspaceRoot`.
  *
  * @remarks
- * Uses `path.relative(workspaceRoot, candidate)`:
+ * Both inputs are resolved via {@link realpathOrClosestAncestor} before
+ * comparing, so a symlink inside the workspace that points outside it (e.g.
+ * `workspaceRoot/link -> /etc`) cannot pass this check just because its own
+ * path string is a descendant of `workspaceRoot`. Uses
+ * `path.relative(root, candidate)` on the resolved forms:
  * - a result starting with `..` means the candidate is an ancestor (traversal)
  * - an absolute relative result on Windows means a different drive / root escape
  *
- * Call after `path.resolve` / `path.join` so symlinks and `..` segments are
- * normalized first (callers are responsible for resolving). Used by auto-mode
- * keepUndo confinement — {@link assertInsideRoot} throws the same check.
+ * Used by auto-mode keepUndo confinement — {@link assertInsideRoot} throws
+ * the same check.
  *
  * @param workspaceRoot - Absolute sandbox root.
  * @param candidate - Absolute path to test.
@@ -36,7 +68,9 @@ export const isInsideRoot = (
   workspaceRoot: string,
   candidate: string,
 ): boolean => {
-  const relativePathFromRoot = path.relative(workspaceRoot, candidate);
+  const resolvedRoot = realpathOrClosestAncestor(workspaceRoot);
+  const resolvedCandidate = realpathOrClosestAncestor(candidate);
+  const relativePathFromRoot = path.relative(resolvedRoot, resolvedCandidate);
   return (
     !relativePathFromRoot.startsWith("..") &&
     !path.isAbsolute(relativePathFromRoot)

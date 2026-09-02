@@ -21,11 +21,15 @@ import {
   ConfigError,
   type ServerConfig,
   type ConfigRole,
+  type EffortLevel,
+  type KvCacheType,
 } from "./types.js";
 import {
   parseStoredConfig,
   mergeConfig,
   normaliseKeepAlive,
+  normaliseEffort,
+  normaliseKvCacheType,
   WRITABLE_CONFIG_KEYS,
 } from "./parsing.js";
 
@@ -261,9 +265,9 @@ export class ConfigManager implements IConfigManager {
     // for the one case where neither is actually needed: nothing to encrypt
     // (`providers` is empty) AND no passphrase has been established this
     // process (`!isUnlocked()`). That's exactly a fresh, standalone process
-    // that never called unlockOrSetupProvidersCipher — notably
-    // `atlas-detect-hardware --write` — which otherwise failed every write
-    // with ConfigCipherLockedError for a field with no secret in it.
+    // that never called unlockOrSetupProvidersCipher — e.g. a standalone
+    // script writing config fields directly — which otherwise failed every
+    // write with ConfigCipherLockedError for a field with no secret in it.
     //
     // Once a passphrase HAS been established (isUnlocked() is true — e.g.
     // right after `unlockOrSetupProvidersCipher`'s reset flow calls
@@ -377,9 +381,9 @@ export class ConfigManager implements IConfigManager {
    *    port under the very same key/salt as this method protects
    *    `providers` under. Prompting a second time for the same passphrase
    *    would be redundant, so this returns immediately. Standalone callers
-   *    that never unlock anything else first (`atlas-detect-hardware
-   *    --write`, most unit tests) are unaffected — `isUnlocked()` is false
-   *    for them, so they fall through to the normal prompting flow below.
+   *    that never unlock anything else first (most unit tests) are
+   *    unaffected — `isUnlocked()` is false for them, so they fall through
+   *    to the normal prompting flow below.
    * 1. **No config file yet** (first run), or a file with no
    *    `$providersSecrets` yet: prompts to set a new passphrase and
    *    initializes the cipher. The first {@link _saveRaw} call creates the
@@ -574,7 +578,7 @@ export class ConfigManager implements IConfigManager {
     // Validate that a model is actually configured (not empty string)
     if (modelName.length === 0) {
       throw new ConfigError(
-        "No agent model configured. Run /set agent to choose one.",
+        "No agent model configured. Run /model to choose one.",
       );
     }
 
@@ -649,6 +653,22 @@ export class ConfigManager implements IConfigManager {
   getSubagentModelSupportsTools = async (): Promise<boolean> => {
     const config = await this._loadRaw();
     return config.subagentModelSupportsTools;
+  };
+
+  /**
+   * Get whether the agent model supports Ollama's extended `think` mode.
+   *
+   * @remarks
+   * Probed via `syncAgentThinkingSupport` at startup and whenever the agent
+   * model changes, then cached here. Ollama rejects `think: true` outright
+   * for models that don't advertise the `"thinking"` capability, so the
+   * agent must check this before requesting it.
+   *
+   * @returns True if the agent model supports Ollama's `think` mode.
+   */
+  getAgentModelSupportsThinking = async (): Promise<boolean> => {
+    const config = await this._loadRaw();
+    return config.agentModelSupportsThinking;
   };
 
   /**
@@ -857,14 +877,59 @@ export class ConfigManager implements IConfigManager {
    *
    * @remarks
    * Undefined means "not configured" — callers should fall back to Ollama's
-   * own default (4096) rather than guessing a value. Set via
-   * `atlas-detect-hardware --write` or `/set numCtx`.
+   * own default (4096) rather than guessing a value. Set via `/set numCtx`.
    *
    * @returns Configured `num_ctx` in tokens, or `undefined` if unset.
    */
   getNumCtx = async (): Promise<number | undefined> => {
     const config = await this._loadRaw();
     return config.numCtx;
+  };
+
+  /**
+   * Get the configured `OLLAMA_NUM_PARALLEL` override, if set.
+   *
+   * @remarks
+   * Undefined means "not configured" — `ollama/runtimeTuning.ts` derives a
+   * value from this machine's memory instead of guessing one. Set via
+   * `/set numParallel`. Only takes effect the next time this process spawns
+   * `ollama serve` (see `ollama/lifecycle.ts`).
+   *
+   * @returns Configured `numParallel`, or `undefined` if unset.
+   */
+  getNumParallel = async (): Promise<number | undefined> => {
+    const config = await this._loadRaw();
+    return config.numParallel;
+  };
+
+  /**
+   * Get the configured `OLLAMA_FLASH_ATTENTION` override, if set.
+   *
+   * @remarks
+   * Undefined means "not configured" — `ollama/runtimeTuning.ts` defaults
+   * to enabling it. Set via `/set flashAttention`. Same spawn-time-only
+   * caveat as {@link getNumParallel}.
+   *
+   * @returns Configured value, or `undefined` if unset.
+   */
+  getFlashAttention = async (): Promise<boolean | undefined> => {
+    const config = await this._loadRaw();
+    return config.flashAttention;
+  };
+
+  /**
+   * Get the configured `OLLAMA_KV_CACHE_TYPE` override, if set.
+   *
+   * @remarks
+   * Undefined means "not configured" — `ollama/runtimeTuning.ts` defaults
+   * to `"q8_0"`. Set via `/set kvCacheType`. Same spawn-time-only caveat as
+   * {@link getNumParallel}.
+   *
+   * @returns Configured value, or `undefined` if unset.
+   */
+  getKvCacheType = async (): Promise<KvCacheType | undefined> => {
+    const config = await this._loadRaw();
+    return config.kvCacheType;
   };
 
   /**
@@ -881,6 +946,20 @@ export class ConfigManager implements IConfigManager {
   getKeepAlive = async (): Promise<string | number> => {
     const config = await this._loadRaw();
     return config.keepAlive;
+  };
+
+  /**
+   * Get the configured REASON-phase effort level.
+   *
+   * @remarks
+   * Controls how much `orchestration/agent/reasoner.ts` re-deliberates
+   * before acting — see {@link EffortLevel}. Defaults to `"medium"`.
+   *
+   * @returns The configured effort level.
+   */
+  getEffort = async (): Promise<EffortLevel> => {
+    const config = await this._loadRaw();
+    return config.effort;
   };
 
   /**
@@ -1067,6 +1146,34 @@ export class ConfigManager implements IConfigManager {
           );
         }
         value = normalisedKeepAlive;
+      } else if (key === "effort") {
+        // REASON-phase effort must be one of the five recognized literals —
+        // see EFFORT_LEVELS.
+        const normalisedEffort = normaliseEffort(value);
+        if (normalisedEffort === null) {
+          throw new ConfigError(
+            `effort must be one of: low, medium, high, extra-high, max`,
+          );
+        }
+        value = normalisedEffort;
+      } else if (key === "numParallel") {
+        // Same shape as numCtx above — a positive integer slot count.
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          throw new ConfigError(`numParallel must be a number`);
+        }
+        if (value <= 0 || !Number.isInteger(value)) {
+          throw new ConfigError(`numParallel must be a positive integer`);
+        }
+      } else if (key === "flashAttention") {
+        if (typeof value !== "boolean") {
+          throw new ConfigError(`flashAttention must be a boolean`);
+        }
+      } else if (key === "kvCacheType") {
+        const normalisedKvCacheType = normaliseKvCacheType(value);
+        if (normalisedKvCacheType === null) {
+          throw new ConfigError(`kvCacheType must be one of: f16, q8_0, q4_0`);
+        }
+        value = normalisedKvCacheType;
       }
 
       // Step 3: Load current configuration from disk (read-fresh approach)
@@ -1078,7 +1185,18 @@ export class ConfigManager implements IConfigManager {
       // Uses object spread: {...config} copies all current values, then [key]: value
       // overwrites just the key we're modifying. All other keys stay unchanged.
       // Cast to ServerConfig to satisfy TypeScript (the key/value pair is valid by validation above)
-      const nextConfig = { ...config, [key]: value } as ServerConfig;
+      // agentTemp/subagentTemp are the two WRITABLE_CONFIG_KEYS the client
+      // also tracks — stamp configChangedAt only for those, only on a real
+      // change, so an unrelated /set (retries, numCtx, ...) doesn't falsely
+      // outrank a real config difference in the newest-wins comparison.
+      const isTrackedTempChange =
+        (key === "agentTemp" || key === "subagentTemp") &&
+        config[key] !== value;
+      const nextConfig = {
+        ...config,
+        [key]: value,
+        ...(isTrackedTempChange ? { configChangedAt: Date.now() } : {}),
+      } as ServerConfig;
 
       // Step 5: Persist the updated configuration atomically to disk
       // We use _saveRaw directly for the same reason as _loadRaw above
@@ -1189,10 +1307,14 @@ export class ConfigManager implements IConfigManager {
       // Step 5: Create new config object with the updated model name
       // Uses conditional to select which field to update (agentModel or subagentModel)
       // Spreads all other config values unchanged
+      const configChangedAt =
+        previousModel !== trimmedModelName
+          ? Date.now()
+          : config.configChangedAt;
       const nextConfig: ServerConfig =
         role === "agent"
-          ? { ...config, agentModel: trimmedModelName }
-          : { ...config, subagentModel: trimmedModelName };
+          ? { ...config, agentModel: trimmedModelName, configChangedAt }
+          : { ...config, subagentModel: trimmedModelName, configChangedAt };
 
       // Step 6: Persist the new configuration to disk atomically
       // We use _saveRaw directly for the same reason as _loadRaw above
@@ -1217,7 +1339,7 @@ export class ConfigManager implements IConfigManager {
   /**
    * Get the provider name currently serving the agent (planning) role.
    *
-   * @returns Provider name (e.g. "ollama", "vllm-gpu"); defaults to "ollama".
+   * @returns Provider name (e.g. "ollama", "lmstudio"); defaults to "ollama".
    */
   getAgentProvider = async (): Promise<string> => {
     const config = await this._loadRaw();
@@ -1227,7 +1349,7 @@ export class ConfigManager implements IConfigManager {
   /**
    * Get the provider name currently serving the subagent (execution) role.
    *
-   * @returns Provider name (e.g. "ollama", "vllm-gpu"); defaults to "ollama".
+   * @returns Provider name (e.g. "ollama", "lmstudio"); defaults to "ollama".
    */
   getSubagentProvider = async (): Promise<string> => {
     const config = await this._loadRaw();
@@ -1347,10 +1469,16 @@ export class ConfigManager implements IConfigManager {
           `Provider '${trimmedProvider}' is not configured. Run /providers add ${trimmedProvider} first.`,
         );
       }
+      const previousProvider =
+        role === "agent" ? config.agentProvider : config.subagentProvider;
+      const configChangedAt =
+        previousProvider !== trimmedProvider
+          ? Date.now()
+          : config.configChangedAt;
       const nextConfig: ServerConfig =
         role === "agent"
-          ? { ...config, agentProvider: trimmedProvider }
-          : { ...config, subagentProvider: trimmedProvider };
+          ? { ...config, agentProvider: trimmedProvider, configChangedAt }
+          : { ...config, subagentProvider: trimmedProvider, configChangedAt };
       await this._saveRaw(nextConfig);
     });
   };
@@ -1392,6 +1520,11 @@ export class ConfigManager implements IConfigManager {
 
       const previousModel =
         role === "agent" ? config.agentModel : config.subagentModel;
+      const previousProvider =
+        role === "agent" ? config.agentProvider : config.subagentProvider;
+      const changed =
+        previousModel !== trimmedModelName ||
+        previousProvider !== trimmedProvider;
 
       const nextConfig: ServerConfig =
         role === "agent"
@@ -1399,17 +1532,70 @@ export class ConfigManager implements IConfigManager {
               ...config,
               agentModel: trimmedModelName,
               agentProvider: trimmedProvider,
+              configChangedAt: changed ? Date.now() : config.configChangedAt,
             }
           : {
               ...config,
               subagentModel: trimmedModelName,
               subagentProvider: trimmedProvider,
+              configChangedAt: changed ? Date.now() : config.configChangedAt,
             };
 
       await this._saveRaw(nextConfig);
 
       if (previousModel !== trimmedModelName) {
         this.onModelChanged?.(previousModel, role);
+      }
+    });
+  };
+
+  /**
+   * Overwrites every overlapping config field in one atomic write, stamping
+   * `configChangedAt` to the caller-supplied value rather than `Date.now()`.
+   *
+   * @remarks
+   * Used exclusively by the `sync.check` route's "client wins" branch. The
+   * explicit `changedAt` (the client's own timestamp) is what lets both
+   * sides converge to an *identical* `configChangedAt` after reconciling —
+   * stamping `Date.now()` here instead would make the server's value always
+   * look newer than the client's on the very next check, incorrectly
+   * flipping the winner every time even though nothing new changed.
+   *
+   * No provider-existence validation (unlike {@link setRoleModel}) — this is
+   * reconciling from an already-authenticated client's own config, and
+   * rejecting it here would just leave the two sides diverged with no
+   * remedy. A provider unknown to this server surfaces the same way an
+   * already-existing stale-provider mismatch does: the next task's provider
+   * resolution fails with a clear error.
+   */
+  applySyncedConfig = async (
+    values: {
+      agentModel: string;
+      subagentModel: string;
+      agentProvider: string;
+      subagentProvider: string;
+      agentTemp: number;
+      subagentTemp: number;
+    },
+    changedAt: number,
+  ): Promise<void> => {
+    return this.mutex.run(async () => {
+      const config = await this._loadRaw();
+      const previousAgentModel = config.agentModel;
+      const previousSubagentModel = config.subagentModel;
+
+      const nextConfig: ServerConfig = {
+        ...config,
+        ...values,
+        configChangedAt: changedAt,
+      };
+      await this._saveRaw(nextConfig);
+
+      if (previousAgentModel !== values.agentModel) {
+        this.onModelChanged?.(previousAgentModel, "agent");
+      }
+      if (previousSubagentModel !== values.subagentModel) {
+        this.onModelChanged?.(previousSubagentModel, "subagent");
       }
     });
   };

@@ -62,6 +62,17 @@ describe("hexToAnsi256", () => {
     const seq = hexToAnsi256("#808080");
     expect(seq).toMatch(/^\x1b\[38;5;(23[2-9]|24\d|25[0-5])m$/);
   });
+
+  it("quantizes pure red to the exact 6x6x6 cube index (normal — exact formula)", () => {
+    // 16 + 36*redIndex(5) + 6*greenIndex(0) + blueIndex(0) = 196
+    expect(hexToAnsi256("#FF0000")).toBe("\x1b[38;5;196m");
+  });
+
+  it("picks the exact cube cell for pure white over the gray ramp (boundary — tie-break)", () => {
+    // White is an exact hit in the cube (255,255,255 -> step 5,5,5), so the
+    // cube's zero distance beats every gray-ramp step even though chroma is 0.
+    expect(hexToAnsi256("#FFFFFF")).toBe("\x1b[38;5;231m");
+  });
 });
 
 describe("hexToAnsi256Bg", () => {

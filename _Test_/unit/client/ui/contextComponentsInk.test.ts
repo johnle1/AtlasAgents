@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import React from "react";
 import { render } from "ink-testing-library";
 import stripAnsi from "strip-ansi";
+import type { ApprovalRequest } from "../../../../packages/client/src/ui/types.js";
 
 vi.mock("../../../../packages/client/src/config/index.js", async (importOriginal) => {
   const actual = await importOriginal<
@@ -32,14 +33,14 @@ vi.mock("../../../../packages/client/src/ui/uiBridge.js", () => ({
   getPendingPrompt: () => null,
 }));
 
-const mockContext = {
+const mockContext: { approval: ApprovalRequest | null } & Record<string, unknown> = {
   prompt: "> ",
   input: "",
   setInput: vi.fn(),
   handleSubmit: vi.fn(async () => {}),
   inputDisabled: false,
   busy: false,
-  approval: { type: "runSkip" as const, command: "echo hi" },
+  approval: { type: "runSkip", command: "echo hi" },
   approvalSelected: 0,
   setApprovalSelected: vi.fn(),
   promptReq: { type: "line" as const, prompt: "Enter value:" },
@@ -72,6 +73,35 @@ describe("context-backed components", () => {
     const tree = render(React.createElement(ApprovalMenu));
     expect(stripAnsi(tree.lastFrame() ?? "")).toMatch(/Run|Skip/);
     tree.unmount();
+  });
+
+  it("ApprovalMenu shows a simple 'Plan · N steps' context line for a plan review", () => {
+    const previousApproval = mockContext.approval;
+    mockContext.approval = {
+      type: "planReview",
+      task: "add a login form",
+      stepCount: 3,
+      agentCount: 1,
+      execution: "sequential",
+      modeLabel: null,
+    };
+    try {
+      const tree = render(React.createElement(ApprovalMenu));
+      const rendered = stripAnsi(tree.lastFrame() ?? "");
+      expect(rendered).toContain("Plan: add a login form");
+      expect(rendered).toContain("3 steps");
+      // The old "N step(s) · M agents · execution" / "Mode: ..." lines are
+      // gone — plan mode's checklist no longer surfaces per-agent grouping.
+      expect(rendered).not.toContain("agent");
+      expect(rendered).not.toContain("sequential");
+      // Claude-Code-style option rows.
+      expect(rendered).toContain("Yes, and auto-accept edits");
+      expect(rendered).toContain("Yes, and manually approve edits");
+      expect(rendered).toContain("No, keep planning");
+      tree.unmount();
+    } finally {
+      mockContext.approval = previousApproval;
+    }
   });
 
   it("InputBox shows prompt", () => {

@@ -7,6 +7,7 @@ import {
   computeDiff,
   formatDiffPlain,
   getDiffDisplayLines,
+  getDiffStats,
 } from "@atlasagents/shared";
 
 describe("computeDiff", () => {
@@ -109,5 +110,41 @@ describe("getDiffDisplayLines", () => {
     const lines = getDiffDisplayLines(computeDiff(original, proposed));
     expect(lines.some((l) => l.text === "far1")).toBe(false);
     expect(lines.some((l) => l.text === "near")).toBe(true);
+  });
+});
+
+describe("getDiffStats", () => {
+  it("returns zero for identical content", () => {
+    const stats = getDiffStats(computeDiff("a\nb\n", "a\nb\n"));
+    expect(stats).toEqual({ added: 0, removed: 0 });
+  });
+
+  it("counts a pure addition", () => {
+    const stats = getDiffStats(computeDiff("a\n", "a\nb\nc\n"));
+    expect(stats).toEqual({ added: 2, removed: 0 });
+  });
+
+  it("counts a pure deletion", () => {
+    const stats = getDiffStats(computeDiff("a\nb\nc\n", "a\n"));
+    expect(stats).toEqual({ added: 0, removed: 2 });
+  });
+
+  it("counts mixed additions and removals across multiple hunks", () => {
+    const original = "keep1\nold1\nold2\nkeep2\nold3\n";
+    const proposed = "keep1\nnew1\nkeep2\nnew2\nnew3\nnew4\n";
+    const stats = getDiffStats(computeDiff(original, proposed));
+    // old1, old2, old3 removed (3); new1, new2, new3, new4 added (4).
+    expect(stats).toEqual({ added: 4, removed: 3 });
+  });
+
+  it("counts total added/removed lines regardless of getDiffDisplayLines's context-window trimming (regression guard)", () => {
+    // A change far from any other change would have its surrounding equal
+    // rows trimmed by getDiffDisplayLines's 3-line radius, but the changed
+    // row itself is never trimmed — getDiffStats must agree on the total
+    // either way, since it counts straight from the raw chunks.
+    const original = Array.from({ length: 20 }, (_, i) => `line${i}`).join("\n");
+    const proposed = original.replace("line10", "changed");
+    const stats = getDiffStats(computeDiff(original, proposed));
+    expect(stats).toEqual({ added: 1, removed: 1 });
   });
 });

@@ -12,10 +12,11 @@
  * - Error: keys are ignored while an approval or prompt overlay is active
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createKeyHandler,
 } from "../../../../packages/client/src/ui/hooks/keyHandler.js";
+import { registerExpandHandle } from "../../../../packages/client/src/ui/multiline/expandHandle.js";
 import type {
   KeyboardInputContext,
   KeyboardInputHandlers,
@@ -474,6 +475,61 @@ describe("createKeyHandler — Enter while busy queues (WS5)", () => {
     handle("", { ...emptyKey, return: true });
 
     expect(handlers.enqueueMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not enqueue while a trailing backslash requests a continuation line (boundary)", () => {
+    const handlers = makeHandlers();
+    const handle = createKeyHandler(
+      makeContext({ busy: true, input: "echo hello\\" }),
+      handlers,
+    );
+
+    handle("", { ...emptyKey, return: true });
+
+    expect(handlers.enqueueMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("createKeyHandler — Enter while busy expands paste placeholders", () => {
+  afterEach(() => {
+    registerExpandHandle(null);
+  });
+
+  it("enqueues the expanded text when an expander is registered (normal)", () => {
+    registerExpandHandle((text) =>
+      text.replace(
+        "[Pasted text #1: 3 lines]",
+        "line one\nline two\nline three",
+      ),
+    );
+    const setInput = vi.fn();
+    const handlers = makeHandlers();
+    const handle = createKeyHandler(
+      makeContext({
+        busy: true,
+        input: "before [Pasted text #1: 3 lines] after",
+        setInput,
+      }),
+      handlers,
+    );
+
+    handle("", { ...emptyKey, return: true });
+
+    expect(handlers.enqueueMessage).toHaveBeenCalledWith(
+      "before line one\nline two\nline three after",
+    );
+  });
+
+  it("falls back to the raw input when no expander is registered (boundary)", () => {
+    const handlers = makeHandlers();
+    const handle = createKeyHandler(
+      makeContext({ busy: true, input: "plain text" }),
+      handlers,
+    );
+
+    handle("", { ...emptyKey, return: true });
+
+    expect(handlers.enqueueMessage).toHaveBeenCalledWith("plain text");
   });
 });
 

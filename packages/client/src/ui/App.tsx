@@ -6,7 +6,13 @@
  * → UI traffic flows through {@link useBridgeSetup}; keyboard and submit
  * logic live in dedicated hooks so this file stays focused on composition.
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useApp, useInput } from "ink";
 import { Box, Static, Text } from "ink";
 
@@ -23,7 +29,7 @@ import { QueuedMessageRow } from "./components/QueuedMessageRow.js";
 import { FooterBar } from "./components/FooterBar.js";
 import { ApprovalMenu } from "./components/ApprovalMenu.js";
 import { PromptOverlay } from "./components/PromptOverlay.js";
-import { SubagentTaskBoard } from "./components/SubagentTaskBoard.js";
+import { PlanChecklist } from "./components/PlanChecklist.js";
 import { ShortcutsHelp } from "./components/ShortcutsHelp.js";
 import type { AppProps } from "./types.js";
 import {
@@ -106,7 +112,8 @@ const AppContent: React.FC = () => {
     busy,
     approval,
     promptReq,
-    subagentBoards,
+    activePlan,
+    setActivePlan,
     sigintBusy,
     showShortcuts,
     setShowShortcuts,
@@ -160,6 +167,7 @@ const AppContent: React.FC = () => {
     setLiveThinks,
     setSubagentStatuses,
     setSubagentBoards,
+    setActivePlan,
   });
 
   const { exit } = useApp();
@@ -174,8 +182,16 @@ const AppContent: React.FC = () => {
   }, []);
 
   // `<Static>` does not repaint committed rows. Remount when the raw-markdown
-  // toggle flips so history re-renders from the stored source.
+  // toggle flips so history re-renders from the stored source. Effects also
+  // fire once on mount regardless of the dependency array, so skip that
+  // first call — otherwise every launch bumps the epoch and reprints the
+  // banner a second time before the user ever touches the toggle.
+  const isFirstMarkdownRawEffect = useRef(true);
   useEffect(() => {
+    if (isFirstMarkdownRawEffect.current) {
+      isFirstMarkdownRawEffect.current = false;
+      return;
+    }
     setStaticEpoch((epoch) => epoch + 1);
   }, [markdownRaw]);
 
@@ -211,6 +227,7 @@ const AppContent: React.FC = () => {
     setBannerEntries,
     setSubagentStatuses,
     setSubagentBoards,
+    setActivePlan,
     onAfterClearScreen,
     setContextUsage,
     setApprovalMode,
@@ -436,10 +453,13 @@ const AppContent: React.FC = () => {
       {/* Streaming history: appears below static region, updates in real-time */}
       <HistoryView />
 
-      {/* Agent task boards: one per active agent, shows parallel work */}
-      {subagentBoards.map((agentBoard) => (
-        <SubagentTaskBoard key={agentBoard.id} board={agentBoard} />
-      ))}
+      {/* Agent's live checklist, if it has laid out multi-step work via
+          update_plan. Hidden subagent work (run_steps_parallel) shows up
+          here only as steps flipping to done/failed — never as its own UI.
+          Shown only in plan mode — other modes track the checklist
+          internally (the completion gate still reads it) but don't surface
+          it as a persistent UI element. */}
+      {approvalMode === "plan" && <PlanChecklist steps={activePlan} />}
 
       {/* Status spinner: shows loading state for long-running operations */}
       <StatusSpinner state={spinner} />

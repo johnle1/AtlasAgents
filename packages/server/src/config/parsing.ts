@@ -6,7 +6,13 @@
  * place in the config module that trusts unvalidated `unknown` data.
  */
 
-import { SERVER_DEFAULTS, type ServerConfig } from "./types.js";
+import {
+  EFFORT_LEVELS,
+  SERVER_DEFAULTS,
+  type EffortLevel,
+  type KvCacheType,
+  type ServerConfig,
+} from "./types.js";
 
 /**
  * Parse and validate JSON config file content, with graceful error handling.
@@ -158,6 +164,42 @@ export const normaliseKeepAlive = (value: unknown): string | number | null => {
 };
 
 /**
+ * Validates a raw `effort` value against {@link EFFORT_LEVELS}.
+ *
+ * @remarks
+ * Shared by `ConfigManager.set` (rejects a bad value at write time) and
+ * {@link mergeStoredConfig} (repairs a value hand-edited into config.json,
+ * same pattern as {@link normaliseKeepAlive}).
+ *
+ * @param value - Raw value from a `set()` call or from disk.
+ * @returns `value` narrowed to `EffortLevel` if it's one of the five
+ *   recognized literals, otherwise `null`.
+ */
+export const normaliseEffort = (value: unknown): EffortLevel | null =>
+  typeof value === "string" &&
+  (EFFORT_LEVELS as readonly string[]).includes(value)
+    ? (value as EffortLevel)
+    : null;
+
+/** Recognized `OLLAMA_KV_CACHE_TYPE` values — see `ollama/runtimeTuning.ts`. */
+const KV_CACHE_TYPES: readonly KvCacheType[] = ["f16", "q8_0", "q4_0"];
+
+/**
+ * Validates a raw `kvCacheType` value against {@link KV_CACHE_TYPES}.
+ *
+ * @remarks
+ * Same shape as {@link normaliseEffort} — shared by `ConfigManager.set` and
+ * {@link mergeStoredConfig}.
+ *
+ * @param value - Raw value from a `set()` call or from disk.
+ * @returns `value` narrowed to `KvCacheType`, or `null` if unrecognized.
+ */
+export const normaliseKvCacheType = (value: unknown): KvCacheType | null =>
+  typeof value === "string" && (KV_CACHE_TYPES as readonly string[]).includes(value)
+    ? (value as KvCacheType)
+    : null;
+
+/**
  * Type-safe number coercion with fallback.
  *
  * **Purpose:**
@@ -289,6 +331,15 @@ const asBoolean = (value: unknown, fallback: boolean): boolean =>
   typeof value === "boolean" ? value : fallback;
 
 /**
+ * Same validation as {@link asBoolean}, but returns `undefined` instead of a
+ * fallback — for fields like `flashAttention` that are deliberately
+ * optional (unset means "let runtime detection decide", not "use a
+ * default").
+ */
+const asOptionalBoolean = (value: unknown): boolean | undefined =>
+  typeof value === "boolean" ? value : undefined;
+
+/**
  * Type-safe extraction of the `providers` map from stored config.
  *
  * **Purpose:**
@@ -413,6 +464,10 @@ export const mergeConfig = (storedConfig: Record<string, unknown>): ServerConfig
       storedConfig.subagentModelSupportsTools,
       SERVER_DEFAULTS.subagentModelSupportsTools,
     ),
+    agentModelSupportsThinking: asBoolean(
+      storedConfig.agentModelSupportsThinking,
+      SERVER_DEFAULTS.agentModelSupportsThinking,
+    ),
 
     // Temperature settings: extracted via asNumber() to ensure finite values with defaults
     agentTemp: asNumber(storedConfig.agentTemp, SERVER_DEFAULTS.agentTemp),
@@ -463,11 +518,31 @@ export const mergeConfig = (storedConfig: Record<string, unknown>): ServerConfig
     // would let it survive loading and reach Ollama's request body as-is.
     numCtx: asPositiveInteger(storedConfig.numCtx),
 
+    // Ollama runtime tuning: all three deliberately have no default, same
+    // reasoning as numCtx above — unset means "let ollama/runtimeTuning.ts
+    // detect a value for this machine" rather than guessing one here.
+    numParallel: asPositiveInteger(storedConfig.numParallel),
+    flashAttention: asOptionalBoolean(storedConfig.flashAttention),
+    kvCacheType: normaliseKvCacheType(storedConfig.kvCacheType) ?? undefined,
+
     // Keep-alive duration: normalized so a value stored before validation
     // existed (notably the string "-1", which Ollama rejects) is repaired on
     // load instead of failing every request.
     keepAlive:
       normaliseKeepAlive(storedConfig.keepAlive) ?? SERVER_DEFAULTS.keepAlive,
+
+    // REASON-phase effort level: repaired to the default the same way as
+    // keepAlive above if the stored value isn't one of the five recognized
+    // literals (predates this field, or was hand-edited).
+    effort: normaliseEffort(storedConfig.effort) ?? SERVER_DEFAULTS.effort,
+
+    // Newest-wins config reconciliation marker — see the field's doc comment
+    // in types.ts. Not in WRITABLE_CONFIG_KEYS: only the dedicated setters
+    // that touch an overlapping field are allowed to stamp it.
+    configChangedAt: asNumber(
+      storedConfig.configChangedAt,
+      SERVER_DEFAULTS.configChangedAt,
+    ),
   };
 };
 
@@ -481,6 +556,11 @@ export const mergeConfig = (storedConfig: Record<string, unknown>): ServerConfig
  *   server restart. Model names (agentModel, subagentModel) are excluded as
  *   they require special handling via setModel() for cache invalidation.
  *
+ *   Exception: numParallel/flashAttention/kvCacheType persist immediately
+ *   like any other key here, but only take effect the next time this
+ *   process spawns `ollama serve` (env vars can't be applied to an already-
+ *   running process) — see their doc comments in types.ts.
+ *
  * Used by:
  *   - set — validates that the requested key is writable.
  *
@@ -493,10 +573,15 @@ export const WRITABLE_CONFIG_KEYS = [
   "subagentTemp",
   "agentModelSupportsTools",
   "subagentModelSupportsTools",
+  "agentModelSupportsThinking",
   "retries",
   "timeout",
   "maxContextBudget",
   "lastConsolidatedAt",
   "numCtx",
   "keepAlive",
+  "effort",
+  "numParallel",
+  "flashAttention",
+  "kvCacheType",
 ] as const satisfies ReadonlyArray<keyof ServerConfig>;

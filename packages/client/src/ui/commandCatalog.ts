@@ -42,26 +42,8 @@ export const COMMAND_CATALOG: CommandEntry[] = [
     requiresArgs: true,
   },
   {
-    command: "/set agent",
-    description:
-      "Choose agent model (from any configured provider) — same model as subagent is fine",
-  },
-  {
-    command: "/set approval",
-    label: "/set approval [mode]",
-    description:
-      "Set permission mode (default / accept_edits / plan / auto / bypass)",
-    requiresArgs: true,
-  },
-  {
     command: "/providers list",
     description: "List configured providers and their role assignment",
-  },
-  {
-    command: "/providers add",
-    label: "/providers add <name> --url <baseUrl> [--key <apiKey>]",
-    description: "Add an OpenAI-compatible provider (vLLM, Trainium, TPU, ...)",
-    requiresArgs: true,
   },
   {
     command: "/providers remove",
@@ -72,7 +54,8 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   {
     command: "/agent cap",
     label: "/agent cap [n]",
-    description: "Default agent cap is 3; ::focus/::collab/::max override per task",
+    description:
+      "Default agent cap is 3; ::focus/::collab/::max override per task",
     requiresArgs: true,
   },
   {
@@ -82,6 +65,11 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   {
     command: "/theme",
     description: "Choose terminal color theme",
+  },
+  {
+    command: "/model",
+    description:
+      "Choose agent model (from any configured provider) — same model as subagent is fine",
   },
   {
     command: "/skills list",
@@ -161,6 +149,69 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   {
     command: "/cwd",
     description: "Print current directory",
+  },
+  {
+    command: "/sandbox",
+    description: "Show sandbox mode and active backend",
+  },
+  {
+    command: "/sandbox auto",
+    description: "Use the strongest sandbox backend available on this machine",
+  },
+  {
+    command: "/sandbox container",
+    description: "Always sandbox commands in a container (Docker/Podman)",
+  },
+  {
+    command: "/sandbox off",
+    description: "Disable command sandboxing",
+  },
+  {
+    command: "/mcp list",
+    description: "List configured MCP servers",
+  },
+  {
+    command: "/mcp add",
+    label: "/mcp add <github|jira|slack|name> [--command <cmd> | --url <url>]",
+    description: "Add a built-in preset or a custom MCP server",
+    requiresArgs: true,
+  },
+  {
+    command: "/mcp remove",
+    label: "/mcp remove <name>",
+    description: "Remove a configured MCP server",
+    requiresArgs: true,
+  },
+  {
+    command: "/mcp enable",
+    label: "/mcp enable <name>",
+    description: "Re-enable a disabled MCP server",
+    requiresArgs: true,
+  },
+  {
+    command: "/mcp disable",
+    label: "/mcp disable <name>",
+    description: "Turn off an MCP server without deleting its config",
+    requiresArgs: true,
+  },
+  {
+    command: "/mcp tools",
+    label: "/mcp tools [name]",
+    description: "List tools discovered from one or all MCP servers",
+  },
+  {
+    command: "/mcp check",
+    label: "/mcp check <name>",
+    description: "Connect to an MCP server and report its tool count",
+    requiresArgs: true,
+  },
+  {
+    command: "/tokensave init",
+    description: "Initialize the TokenSave code index for this workspace",
+  },
+  {
+    command: "/tokensave status",
+    description: "Show TokenSave index status",
   },
   {
     command: "/debug",
@@ -251,4 +302,3 @@ export const getCommandDescription = (command: string): string =>
  */
 export const commandRequiresArgs = (command: string): boolean =>
   catalogByCommand.get(command)?.requiresArgs === true;
-

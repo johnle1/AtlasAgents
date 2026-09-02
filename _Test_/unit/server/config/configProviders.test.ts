@@ -61,7 +61,6 @@ describe("ConfigManager provider defaults — back-compat", () => {
       configPath,
       JSON.stringify({
         subagentModel: "gemma3:27b",
-        subsubagentModel: "gemma3:4b",
       }),
     );
 
@@ -74,27 +73,27 @@ describe("ConfigManager provider defaults — back-compat", () => {
 describe("ConfigManager.addProvider / getProvider / getProviders", () => {
   it("adds a provider and makes it retrievable", async () => {
     const { manager } = await makeManager();
-    await manager.addProvider("vllm-gpu", {
-      baseUrl: "http://localhost:8000/v1",
+    await manager.addProvider("lmstudio", {
+      baseUrl: "http://localhost:1234/v1",
     });
 
-    expect(await manager.getProvider("vllm-gpu")).toEqual({
-      baseUrl: "http://localhost:8000/v1",
+    expect(await manager.getProvider("lmstudio")).toEqual({
+      baseUrl: "http://localhost:1234/v1",
     });
     expect(await manager.getProviders()).toEqual({
-      "vllm-gpu": { baseUrl: "http://localhost:8000/v1" },
+      "lmstudio": { baseUrl: "http://localhost:1234/v1" },
     });
   });
 
   it("stores an apiKey when provided", async () => {
     const { manager } = await makeManager();
-    await manager.addProvider("vllm-gpu", {
-      baseUrl: "http://localhost:8000/v1",
+    await manager.addProvider("lmstudio", {
+      baseUrl: "http://localhost:1234/v1",
       apiKey: "secret",
     });
 
-    expect(await manager.getProvider("vllm-gpu")).toEqual({
-      baseUrl: "http://localhost:8000/v1",
+    expect(await manager.getProvider("lmstudio")).toEqual({
+      baseUrl: "http://localhost:1234/v1",
       apiKey: "secret",
     });
   });
@@ -116,20 +115,20 @@ describe("ConfigManager.addProvider / getProvider / getProviders", () => {
   it("rejects an empty baseUrl", async () => {
     const { manager } = await makeManager();
     await expect(
-      manager.addProvider("vllm-gpu", { baseUrl: "" }),
+      manager.addProvider("lmstudio", { baseUrl: "" }),
     ).rejects.toThrow(ConfigError);
   });
 
   it("upserts (overwrites) an existing provider entry", async () => {
     const { manager } = await makeManager();
-    await manager.addProvider("vllm-gpu", {
-      baseUrl: "http://localhost:8000/v1",
+    await manager.addProvider("lmstudio", {
+      baseUrl: "http://localhost:1234/v1",
     });
-    await manager.addProvider("vllm-gpu", {
+    await manager.addProvider("lmstudio", {
       baseUrl: "http://localhost:9000/v1",
     });
 
-    expect(await manager.getProvider("vllm-gpu")).toEqual({
+    expect(await manager.getProvider("lmstudio")).toEqual({
       baseUrl: "http://localhost:9000/v1",
     });
   });
@@ -138,10 +137,10 @@ describe("ConfigManager.addProvider / getProvider / getProviders", () => {
 describe("ConfigManager.removeProvider", () => {
   it("removes a configured, unused provider", async () => {
     const { manager } = await makeManager();
-    await manager.addProvider("vllm-gpu", { baseUrl: "http://x/v1" });
-    await manager.removeProvider("vllm-gpu");
+    await manager.addProvider("lmstudio", { baseUrl: "http://x/v1" });
+    await manager.removeProvider("lmstudio");
 
-    expect(await manager.getProvider("vllm-gpu")).toBeUndefined();
+    expect(await manager.getProvider("lmstudio")).toBeUndefined();
   });
 
   it("rejects removing 'ollama'", async () => {
@@ -158,10 +157,10 @@ describe("ConfigManager.removeProvider", () => {
 
   it("rejects removing a provider currently in use by a role", async () => {
     const { manager } = await makeManager();
-    await manager.addProvider("vllm-gpu", { baseUrl: "http://x/v1" });
-    await manager.setProvider("agent", "vllm-gpu");
+    await manager.addProvider("lmstudio", { baseUrl: "http://x/v1" });
+    await manager.setProvider("agent", "lmstudio");
 
-    await expect(manager.removeProvider("vllm-gpu")).rejects.toThrow(
+    await expect(manager.removeProvider("lmstudio")).rejects.toThrow(
       ConfigError,
     );
   });
@@ -170,8 +169,8 @@ describe("ConfigManager.removeProvider", () => {
 describe("ConfigManager.setProvider", () => {
   it("switches a role to 'ollama'", async () => {
     const { manager } = await makeManager();
-    await manager.addProvider("vllm-gpu", { baseUrl: "http://x/v1" });
-    await manager.setProvider("agent", "vllm-gpu");
+    await manager.addProvider("lmstudio", { baseUrl: "http://x/v1" });
+    await manager.setProvider("agent", "lmstudio");
     await manager.setProvider("agent", "ollama");
 
     expect(await manager.getAgentProvider()).toBe("ollama");
@@ -186,8 +185,8 @@ describe("ConfigManager.setProvider", () => {
 
   it("does not affect the other role", async () => {
     const { manager } = await makeManager();
-    await manager.addProvider("vllm-gpu", { baseUrl: "http://x/v1" });
-    await manager.setProvider("agent", "vllm-gpu");
+    await manager.addProvider("lmstudio", { baseUrl: "http://x/v1" });
+    await manager.setProvider("agent", "lmstudio");
 
     expect(await manager.getSubagentProvider()).toBe("ollama");
   });
@@ -196,10 +195,10 @@ describe("ConfigManager.setProvider", () => {
 describe("ConfigManager.setRoleModel", () => {
   it("sets both provider and model atomically", async () => {
     const { manager } = await makeManager();
-    await manager.addProvider("vllm-gpu", { baseUrl: "http://x/v1" });
-    await manager.setRoleModel("agent", "vllm-gpu", "Qwen2.5-7B-Instruct");
+    await manager.addProvider("lmstudio", { baseUrl: "http://x/v1" });
+    await manager.setRoleModel("agent", "lmstudio", "Qwen2.5-7B-Instruct");
 
-    expect(await manager.getAgentProvider()).toBe("vllm-gpu");
+    expect(await manager.getAgentProvider()).toBe("lmstudio");
     expect(await manager.getAgentModel()).toBe("Qwen2.5-7B-Instruct");
   });
 

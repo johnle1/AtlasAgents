@@ -60,6 +60,17 @@ describe("editFileTool", () => {
     expect(result.feedback).toContain("-foo\n+bar");
   });
 
+  it("reports a no-change message instead of an empty diff when content already matched disk", async () => {
+    const editFile = vi.fn().mockResolvedValue({ accepted: true, diff: "" });
+    const ctx = buildContext(editFile);
+
+    const result = await editFileTool.execute(args, ctx);
+
+    expect(ctx.trackers.filesWrittenThisTask.has("src/a.ts")).toBe(true);
+    expect(result.feedback).toContain("no change");
+    expect(result.feedback).not.toContain("Diff:");
+  });
+
   it("reports a plain decline without touching trackers", async () => {
     const editFile = vi.fn().mockResolvedValue({ accepted: false });
     const ctx = buildContext(editFile);

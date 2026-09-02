@@ -18,6 +18,7 @@ import {
   printCd,
   printCreateDir,
   printDelete,
+  printNoChange,
   printRead,
   printSkipped,
   printSuccessOp,
@@ -102,6 +103,16 @@ export const handleFileWrite = async (
     if (errnoCode !== "ENOENT") {
       throw error;
     }
+  }
+
+  // Identical content: skip the diff card and approval prompt entirely —
+  // otherwise this renders as an "Updated <path>" header with nothing under
+  // it (no visible added/removed/context rows), which reads as a bug
+  // rather than a no-op. Returning accepted:true keeps
+  // trackers.filesWrittenThisTask honest for the completion gate.
+  if (previousContent === newContent) {
+    printNoChange(absolutePath);
+    return { accepted: true, diff: "" };
   }
 
   const diffChunks = computeDiff(previousContent, newContent);

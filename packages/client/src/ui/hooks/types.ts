@@ -31,6 +31,7 @@ export type BridgeSetupContext = Pick<
   | "setBannerEntries"
   | "setSubagentStatuses"
   | "setSubagentBoards"
+  | "setActivePlan"
   | "setContextUsage"
   | "setApprovalMode"
 > & {
@@ -57,6 +58,7 @@ export type ConnectionDisconnectCleanupSetters = Pick<
   | "setLiveThinks"
   | "setSubagentStatuses"
   | "setSubagentBoards"
+  | "setActivePlan"
 >;
 
 /**

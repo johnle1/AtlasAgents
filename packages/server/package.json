@@ -4,8 +4,7 @@
   "description": "AtlasAgents RSocket server",
   "main": "dist/server/index.js",
   "bin": {
-    "atlas-server": "dist/server/index.js",
-    "atlas-detect-hardware": "dist/hardware/detectHardware.js"
+    "atlas-server": "dist/server/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

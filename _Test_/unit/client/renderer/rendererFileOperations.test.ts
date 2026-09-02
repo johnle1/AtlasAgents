@@ -6,13 +6,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const appendBlock = vi.fn();
 const appendDiff = vi.fn();
+let diffRendererOutput = "+line\n";
 
 vi.mock("../../../../packages/client/src/state/agentStatus.js", () => ({
   beginBlockOutput: vi.fn(),
 }));
 
 vi.mock("../../../../packages/client/src/diff/diffRenderer.js", () => ({
-  renderDiffFromChunks: vi.fn(async () => "+line\n"),
+  renderDiffFromChunks: vi.fn(async () => diffRendererOutput),
 }));
 
 vi.mock("../../../../packages/client/src/utils/pathDisplay.js", () => ({
@@ -25,6 +26,8 @@ vi.mock("../../../../packages/client/src/theme/themeManager.js", () => ({
     textBold: "B",
     warning: "W",
     error: "E",
+    diffAdded: "DA",
+    diffRemoved: "DR",
     reset: "R",
   }),
 }));
@@ -41,6 +44,7 @@ import {
   printDelete,
   printListDir,
   printListDirEntries,
+  printNoChange,
   printRead,
   printTokenSaveOp,
   printTokenSaveResult,
@@ -50,6 +54,7 @@ import {
 beforeEach(() => {
   appendBlock.mockClear();
   appendDiff.mockClear();
+  diffRendererOutput = "+line\n";
 });
 
 describe("fileOperations printers", () => {
@@ -65,9 +70,40 @@ describe("fileOperations printers", () => {
     expect(appendBlock.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("printWrite appends a diff card", async () => {
+  it("printWrite appends a diff card with stats on a └─ line when there are no changed lines", async () => {
     await printWrite("/a.ts", []);
-    expect(appendDiff).toHaveBeenCalledWith("Write /a.ts", "+line\n");
+    expect(appendDiff).toHaveBeenCalledWith(
+      "* Updated(B/a.tsR)",
+      "S  └─ R Sno line changesR\n\n+line\n",
+    );
+  });
+
+  it("printWrite's └─ line shows the real added/removed line counts from the diff chunks", async () => {
+    await printWrite("/a.ts", [
+      { value: "kept\n", added: false, removed: false },
+      { value: "old1\nold2\n", added: false, removed: true },
+      { value: "new1\nnew2\nnew3\n", added: true, removed: false },
+    ]);
+    const [header, body] = appendDiff.mock.calls[0]!;
+    expect(header).toBe("* Updated(B/a.tsR)");
+    expect(body.startsWith("S  └─ R DAAdded 3 linesR, DRRemoved 2 linesR\n\n")).toBe(
+      true,
+    );
+  });
+
+  it("printWrite falls back to a '(no change)' body instead of a bare header when the rendered diff is empty", async () => {
+    diffRendererOutput = "";
+    await printWrite("/a.ts", []);
+    const [, body] = appendDiff.mock.calls[0]!;
+    expect(body).toContain("(no change)");
+  });
+
+  it("printNoChange appends a no-op write line", () => {
+    printNoChange("/a.ts");
+    expect(appendBlock).toHaveBeenCalled();
+    const [lines] = appendBlock.mock.calls[0]!;
+    expect(lines[0]).toContain("no change");
+    expect(lines[0]).toContain("/a.ts");
   });
 
   it("printCreate / printCreateDir / printDelete mutate ops", () => {

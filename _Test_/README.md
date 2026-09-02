@@ -39,7 +39,7 @@ _Test_/
 │   │   └── routerSanitize.test.ts     — stripProviderSecrets (keeps API keys out of responses)
 │   │
 │   ├── providers / ollama
-│   │   ├── contractTests.test.ts      — cross-backend contract validation (Ollama/vLLM/MLX-LM)
+│   │   ├── contractTests.test.ts      — cross-backend contract validation (Ollama/OpenAI-compatible/MLX-LM)
 │   │   ├── messageTranslation.test.ts — server providers/messageTranslation.ts
 │   │   ├── modelCapabilities.test.ts  — syncAgentToolSupport / syncSubagentToolSupport
 │   │   ├── modelSelectionHandlers.test.ts — client commands/modelSelectionHandlers.ts
@@ -74,7 +74,6 @@ _Test_/
 │   │
 │   ├── misc
 │   │   ├── authMiddleware.test.ts     — AuthMiddleware password validation, no-unauth-mode
-│   │   ├── detectHardware.test.ts     — server hardware/detectHardware.ts
 │   │   ├── diffEngine.test.ts         — packages/shared/src/diffEngine.ts
 │   │   ├── frames.test.ts             — encodeFrame / decodeFrame round-trip
 │   │   ├── skillManager.test.ts       — delete, selectForTask

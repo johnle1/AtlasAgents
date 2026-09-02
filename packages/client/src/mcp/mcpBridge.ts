@@ -1,10 +1,12 @@
 import { printError } from "../renderer.js";
+import { loadConfig } from "../config/index.js";
 import {
   enqueueTokenSaveOperation,
   getTokenSaveClient,
   hasTokenSaveIndex,
   disconnectTokenSaveClient,
 } from "./tokenSaveClient.js";
+import { callMcpToolOnServer } from "./mcpRegistry.js";
 
 export type McpCallResult = {
   isError: boolean;
@@ -106,4 +108,57 @@ export const callTokenSaveTool = async (
   return enqueueTokenSaveOperation(() =>
     invokeTokenSaveTool(workspaceRoot, tool, args),
   );
+};
+
+/**
+ * Calls a tool on any user-configured MCP server (i.e. everything added via
+ * `/mcp add` — not TokenSave, which keeps its own bespoke path above since
+ * it isn't part of `mcpServers` config).
+ *
+ * @param serverId - The `mcpServers` config key.
+ * @param toolName - Bare (non-namespaced) tool name.
+ * @param args - Tool call arguments.
+ */
+export const callMcpTool = async (
+  serverId: string,
+  toolName: string,
+  args: unknown,
+): Promise<McpCallResult> => {
+  const config = loadConfig();
+  const serverConfig = config.mcpServers[serverId];
+  if (!serverConfig) {
+    return {
+      isError: true,
+      errorMessage: `MCP server "${serverId}" is not configured. Run /mcp list to see configured servers.`,
+    };
+  }
+  const secrets = config.mcpSecrets[serverId] ?? {};
+
+  try {
+    const result = await callMcpToolOnServer(
+      serverId,
+      serverConfig,
+      secrets,
+      toolName,
+      (args ?? {}) as Record<string, unknown>,
+    );
+
+    if (result.isError) {
+      return {
+        isError: true,
+        errorMessage: formatToolContentAsString(result.content),
+        data: result.content,
+      };
+    }
+
+    return {
+      isError: false,
+      data: formatToolContent(result.content),
+    };
+  } catch (error) {
+    return {
+      isError: true,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
 };

@@ -35,8 +35,8 @@ vi.mock("../../../../packages/client/src/config/index.js", async (importOriginal
       server: "localhost",
       port: 7000,
       password: "p",
+      agentModel: "m",
       subagentModel: "m",
-      subsubagentModel: "m",
       agentTemp: 0,
       subagentTemp: 0.4,
       retries: 3,
@@ -74,6 +74,10 @@ vi.mock("../../../../packages/client/src/ui/uiBridge.js", () => ({
 
 vi.mock("../../../../packages/client/src/theme/themeManager.js", () => ({
   getTheme: () => ({}),
+}));
+
+vi.mock("../../../../packages/client/src/commands/modelSelectionHandlers.js", () => ({
+  handleSetModel: vi.fn(async () => {}),
 }));
 
 vi.mock("../../../../packages/client/src/skills/skills.js", async (importOriginal) => {
@@ -135,61 +139,27 @@ describe("handleSet / handleConfig", () => {
   });
 });
 
-describe("handleSet approval", () => {
+describe("handleSet approval (removed — Shift+Tab is the only way to change mode)", () => {
   const setDeps = (prompts: { question: ReturnType<typeof vi.fn> }) => ({
     connection: fakeConn(),
     prompts: prompts as never,
     handleSetModel: vi.fn(),
   });
 
-  it("parses /set approval auto and persistable modes (normal)", async () => {
-    const { updateConfig } = await import(
-      "../../../../packages/client/src/config/index.js"
-    );
-    const { getApprovalMode } = await import(
-      "../../../../packages/client/src/ui/bridge/allowlist.js"
-    );
-    await handleSet("approval", "auto", setDeps({ question: vi.fn() }));
-    expect(updateConfig).toHaveBeenCalledWith({ approvalMode: "auto" });
-    expect(getApprovalMode()).toBe("auto");
-
-    await handleSet(
-      "approval",
-      "accept-edits",
-      setDeps({ question: vi.fn() }),
-    );
-    expect(updateConfig).toHaveBeenCalledWith({
-      approvalMode: "accept_edits",
-    });
-  });
-
-  it("requires typing bypass to confirm and does not persist it (boundary)", async () => {
-    const { updateConfig } = await import(
-      "../../../../packages/client/src/config/index.js"
-    );
-    const { getApprovalMode, setSessionApprovalMode } = await import(
-      "../../../../packages/client/src/ui/bridge/allowlist.js"
-    );
-    setSessionApprovalMode("default");
-    const question = vi.fn(async () => "nope");
-    await handleSet("approval", "bypass", setDeps({ question }));
-    expect(question).toHaveBeenCalled();
-    expect(getApprovalMode()).toBe("default");
-    expect(updateConfig).not.toHaveBeenCalledWith({ approvalMode: "bypass" });
-
-    const confirm = vi.fn(async () => "bypass");
-    await handleSet("approval", "bypass", setDeps({ question: confirm }));
-    expect(getApprovalMode()).toBe("bypass");
-    expect(updateConfig).not.toHaveBeenCalledWith({ approvalMode: "bypass" });
-    setSessionApprovalMode("default");
-  });
-
-  it("rejects unknown approval modes (error)", async () => {
+  it("falls into the unknown-subcommand path for /set approval and /set agent (error)", async () => {
     const { printError } = await import(
       "../../../../packages/client/src/renderer.js"
     );
-    await handleSet("approval", "nope", setDeps({ question: vi.fn() }));
-    expect(printError).toHaveBeenCalled();
+    await handleSet("approval", "auto", setDeps({ question: vi.fn() }));
+    expect(printError).toHaveBeenCalledWith(
+      "Unknown /set subcommand. Use: password, server, port, or subagent.",
+    );
+
+    (printError as ReturnType<typeof vi.fn>).mockClear();
+    await handleSet("agent", "", setDeps({ question: vi.fn() }));
+    expect(printError).toHaveBeenCalledWith(
+      "Unknown /set subcommand. Use: password, server, port, or subagent.",
+    );
   });
 });
 
@@ -361,5 +331,15 @@ describe("CommandHandler", () => {
     const handler = new CommandHandler({ conn: fakeConn(), prompts });
     expect(await handler.handle("/notify on")).toBe(true);
     expect(configState.ui.notifications).toBe(true);
+  });
+
+  it("routes /model to handleSetModel with the agent role (normal)", async () => {
+    const { handleSetModel } = await import(
+      "../../../../packages/client/src/commands/modelSelectionHandlers.js"
+    );
+    const conn = fakeConn();
+    const handler = new CommandHandler({ conn, prompts });
+    expect(await handler.handle("/model")).toBe(true);
+    expect(handleSetModel).toHaveBeenCalledWith("agent", conn, prompts);
   });
 });

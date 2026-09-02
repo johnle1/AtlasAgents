@@ -7,6 +7,7 @@
  */
 
 import type { BridgeHooks, PendingApproval, PendingPrompt } from "./types.js";
+import type { PlanStepState } from "../types.js";
 
 export type { BridgeHooks, PendingApproval, PendingPrompt } from "./types.js";
 
@@ -18,9 +19,19 @@ type BridgeState = {
   inkUIActive: boolean;
   taskActive: boolean;
   pendingApproval: PendingApproval | null;
+  /**
+   * Approval requests that arrived while another was already active — see
+   * {@link enqueueApproval}. The UI only ever reads `pendingApproval` (the
+   * single active slot); this array exists purely so a second concurrent
+   * request waits its turn instead of failing outright, mirroring the
+   * server-side queue/active pattern in `workspace/review/planReviewBroker.ts`.
+   */
+  approvalQueue: PendingApproval[];
   pendingPrompt: PendingPrompt | null;
   streamingTokenHandler: ((token: string) => void) | null;
   activeTaskCancel: (() => void) | null;
+  /** Mirrors DataContext's `activePlan` so non-React code (e.g. modelSelectionHandlers.ts's post-switch confirmation) can read the current checklist without a React context. */
+  activePlan: PlanStepState[];
 };
 
 const bridgeGlobalState: BridgeState = {
@@ -28,9 +39,11 @@ const bridgeGlobalState: BridgeState = {
   inkUIActive: false,
   taskActive: false,
   pendingApproval: null,
+  approvalQueue: [],
   pendingPrompt: null,
   streamingTokenHandler: null,
   activeTaskCancel: null,
+  activePlan: [],
 };
 
 /**
@@ -101,6 +114,41 @@ export const setPendingApprovalEntry = (
 };
 
 /**
+ * Appends an approval request to the queue — used when one is already
+ * active, so a second concurrent request (e.g. a parallel batch's second
+ * file write) waits its turn instead of being rejected outright.
+ *
+ * @param approvalEntry - The request and its promise-resolver pair.
+ */
+export const enqueueApproval = (approvalEntry: PendingApproval): void => {
+  bridgeGlobalState.approvalQueue.push(approvalEntry);
+};
+
+/**
+ * Removes and returns the next queued approval request, in FIFO order.
+ *
+ * @returns The next queued entry, or `null` if the queue is empty.
+ */
+export const dequeueNextApproval = (): PendingApproval | null =>
+  bridgeGlobalState.approvalQueue.shift() ?? null;
+
+/**
+ * Removes and returns every queued approval request, clearing the queue.
+ *
+ * @remarks
+ * Used by `cancelPendingApprovals` — a session teardown must resolve every
+ * queued request, not just the one currently active, or a caller
+ * `await`ing one of the queued promises would hang forever.
+ *
+ * @returns The drained entries, in FIFO order.
+ */
+export const drainApprovalQueue = (): PendingApproval[] => {
+  const drained = bridgeGlobalState.approvalQueue;
+  bridgeGlobalState.approvalQueue = [];
+  return drained;
+};
+
+/**
  * Retrieves the currently active pending prompt entry.
  *
  * @returns The pending prompt entry, or `null`.
@@ -156,3 +204,17 @@ export const setActiveTaskCancelValue = (
  */
 export const getActiveTaskCancelValue = (): (() => void) | null =>
   bridgeGlobalState.activeTaskCancel;
+
+/**
+ * Returns the agent's current live checklist, as last reported via
+ * `update_plan` (see `PlanChecklist.tsx`). Read by non-React code — e.g.
+ * `modelSelectionHandlers.ts`'s post-switch "Plan carried over" message —
+ * that needs the current value without a React context.
+ */
+export const getActivePlanValue = (): PlanStepState[] =>
+  bridgeGlobalState.activePlan;
+
+/** Updates the mirrored checklist value. Called alongside the React state setter. */
+export const setActivePlanValue = (steps: PlanStepState[]): void => {
+  bridgeGlobalState.activePlan = steps;
+};

@@ -54,7 +54,7 @@ import type { MaxSubagentsParam } from "../maxSubagents.js";
 import type { SessionInfo, TaskModelOverrides } from "../types.js";
 import { runOrchestratorPipeline } from "./orchestratorPipeline.js";
 import type { IModelPlacementReporter } from "../../ollama/modelPlacement.js";
-import type { TaskApprovalMode } from "@atlasagents/shared";
+import type { TaskApprovalMode, ClientEnvPayload } from "@atlasagents/shared";
 
 export class AgentOrchestrator {
   /**
@@ -109,6 +109,7 @@ export class AgentOrchestrator {
     modelOverrides?: TaskModelOverrides,
     maxSubagents: MaxSubagentsParam = 3,
     approvalMode: TaskApprovalMode = "default",
+    clientEnv?: ClientEnvPayload,
   ): Promise<void> => {
     await runOrchestratorPipeline(
       {
@@ -130,6 +131,7 @@ export class AgentOrchestrator {
         modelOverrides,
         maxSubagents,
         approvalMode,
+        clientEnv,
       },
     );
   };

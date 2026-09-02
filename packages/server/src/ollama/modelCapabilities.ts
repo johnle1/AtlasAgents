@@ -51,3 +51,30 @@ export const modelSupportsNativeTools = (info: ModelInfo): boolean => {
   // Some models or misconfigured servers may omit this field entirely.
   return Array.isArray(caps) && caps.includes("tools");
 };
+
+/**
+ * Checks if a model supports Ollama's extended `think` mode based on its capabilities.
+ *
+ * @remarks
+ * Ollama's `/api/show` reports `"thinking"` in the `capabilities` array for
+ * reasoning-capable models (e.g. deepseek-r1, qwq). Requesting `think` on a
+ * model that lacks this capability fails the chat request outright with an
+ * HTTP 400 (`"<model>" does not support thinking`), so callers must gate on
+ * this before setting `think: true` on the request.
+ *
+ * @param info - Model metadata returned by `ollama.showModel()`.
+ * @returns True if the `capabilities` array includes `"thinking"`, false otherwise.
+ *   Returns false if `capabilities` is missing or not an array.
+ *
+ * @example
+ * ```ts
+ * const supports = modelSupportsThinking({
+ *   capabilities: ["completion", "thinking"]
+ * });
+ * console.log(supports); // true
+ * ```
+ */
+export const modelSupportsThinking = (info: ModelInfo): boolean => {
+  const caps = info.capabilities;
+  return Array.isArray(caps) && caps.includes("thinking");
+};

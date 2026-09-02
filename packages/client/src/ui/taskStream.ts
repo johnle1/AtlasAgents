@@ -26,6 +26,7 @@ import {
   requestApproval,
   requestPrompt,
   setActiveTaskCancel,
+  setActivePlan,
   setSubagentBoards,
   setSubagentStatus,
   setBusy,
@@ -37,7 +38,7 @@ import {
   setContextUsage,
 } from "./uiBridge.js";
 import { notifyUser } from "./notify.js";
-import { getApprovalMode } from "./bridge/allowlist.js";
+import { getApprovalMode, setSessionApprovalMode } from "./bridge/allowlist.js";
 import { spinnerForStatusFrame } from "./spinnerSync.js";
 import type { PlanDecision } from "./types.js";
 
@@ -331,20 +332,38 @@ export const runTaskStream = async (
       modeLabel: taskFrame.modeLabel,
     });
 
-    const planDecision = (await requestApproval({
+    const planChoice = await requestApproval({
       type: "planReview",
       task: taskFrame.task,
       stepCount: taskFrame.steps.length,
       agentCount: taskFrame.agentCount,
       execution: taskFrame.execution,
       modeLabel: taskFrame.modeLabel,
-    })) as PlanDecision;
+    });
+
+    // The two "Yes" rows both resolve to the wire's "implement" decision,
+    // but each also switches the session's approval mode (client-only,
+    // session-only — same as Shift+Tab) so the footer and subsequent local
+    // approval gating reflect what the user actually picked instead of
+    // staying stuck on "plan" once its one-time checklist gate has fired.
+    let decision: PlanDecision;
+    if (planChoice === "autoAcceptEdits") {
+      decision = "implement";
+      setSessionApprovalMode("accept_edits");
+    } else if (planChoice === "manualApprove") {
+      decision = "implement";
+      setSessionApprovalMode("default");
+    } else {
+      // "implement" (bare — from auto mode's short-circuit in approval.ts),
+      // "edit" (No, keep planning), or "skip" (Esc / disconnect / Ink-inactive).
+      decision = planChoice as PlanDecision;
+    }
 
     let planFeedback: string | undefined;
 
     // If user chose to give feedback, prompt for free-text feedback — the
     // agent re-plans from this; the user does not hand-edit steps.
-    if (planDecision === "edit") {
+    if (decision === "edit") {
       const feedbackResult = await requestPrompt({
         type: "planFeedback",
         initial: taskFrame.steps,
@@ -359,7 +378,7 @@ export const runTaskStream = async (
       });
     }
 
-    await connection.respondPlan(taskFrame.id, planDecision, planFeedback);
+    await connection.respondPlan(taskFrame.id, decision, planFeedback);
     // Resume spinner to show agent is now executing the approved plan.
     setSpinner({ active: true, label: "Agent", mode: "thinking" });
   };
@@ -426,6 +445,8 @@ export const runTaskStream = async (
           if (clamped) {
             setContextUsage(clamped);
           }
+        } else if (taskFrame.kind === "plan-update") {
+          setActivePlan(taskFrame.steps);
         }
       },
     });

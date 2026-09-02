@@ -7,7 +7,7 @@
  * ops call {@link beginBlockOutput} so the status bar yields to a history block.
  */
 
-import type { DiffChunk } from "@atlasagents/shared";
+import { getDiffStats, type DiffChunk } from "@atlasagents/shared";
 import { beginBlockOutput } from "../state/agentStatus.js";
 import { renderDiffFromChunks } from "../diff/diffRenderer.js";
 import { formatDisplayPath } from "../utils/pathDisplay.js";
@@ -41,6 +41,8 @@ const OPERATION_ICONS = {
   cd: ">",
   /** Search / TokenSave lookup. */
   search: "/",
+  /** Child row under an operation header (e.g. update stats). */
+  treeBranch: "└─",
 } as const;
 
 /**
@@ -157,11 +159,44 @@ export const printTokenSaveResult = (resultText: string): void => {
 };
 
 /**
+ * Formats a tree-style stats line beneath an update header — `└─ Added N
+ * lines, Removed M lines` — with the same `diffAdded`/`diffRemoved` colors
+ * the diff body uses for added/removed rows.
+ *
+ * @param stats - Line counts from {@link getDiffStats}.
+ * @returns A styled stats line, ready to prepend above the diff body.
+ */
+const formatDiffStatsLine = (stats: { added: number; removed: number }): string => {
+  const theme = getTheme();
+  const branch =
+    `${theme.textSecondary}  ${OPERATION_ICONS.treeBranch} ${theme.reset} `;
+  if (stats.added === 0 && stats.removed === 0) {
+    return `${branch}${theme.textSecondary}no line changes${theme.reset}`;
+  }
+  const addedWord = stats.added === 1 ? "line" : "lines";
+  const removedWord = stats.removed === 1 ? "line" : "lines";
+  return (
+    `${branch}` +
+    `${theme.diffAdded}Added ${stats.added} ${addedWord}${theme.reset}, ` +
+    `${theme.diffRemoved}Removed ${stats.removed} ${removedWord}${theme.reset}`
+  );
+};
+
+/**
  * Prints an upcoming file write as a syntax-highlighted diff for approval.
  *
  * @remarks
  * Renders {@link DiffChunk}s via {@link renderDiffFromChunks}, then stores the
- * body under a `"Write <path>"` diff history card.
+ * body under a two-line diff history card — `* Updated(<path>)` then
+ * `└─ Added N lines, Removed M lines` (from {@link getDiffStats}) — so the
+ * user can gauge change size before reading the diff. An empty rendered body
+ * (no visible added/removed/context
+ * rows — see {@link getDiffDisplayLines}) would otherwise print as a bare
+ * header with nothing underneath, so it falls back to a dim "(no change)"
+ * line instead. In practice this path is unreachable from
+ * {@link printNoChange}'s caller (`handleFileWrite` skips identical content
+ * before ever calling this), but stays here as a safety net for any other
+ * future caller of `printWrite`.
  *
  * @param path - File about to be written.
  * @param diffChunks - Unified-diff chunks (old → new).
@@ -169,6 +204,8 @@ export const printTokenSaveResult = (resultText: string): void => {
  * @example
  * ```ts
  * await printWrite("/proj/a.ts", chunks);
+ * // header: "* Updated(a.ts)"
+ * // body:   "  └─ Added 3 lines, Removed 1 lines\n\n<diff…>"
  * ```
  */
 export const printWrite = async (
@@ -177,7 +214,34 @@ export const printWrite = async (
 ): Promise<void> => {
   beginBlockOutput();
   const diffBody = await renderDiffFromChunks(path, diffChunks);
-  appendDiff(`Write ${formatDisplayPath(path)}`, diffBody);
+  const theme = getTheme();
+  const body =
+    diffBody.trim().length > 0
+      ? diffBody
+      : `${theme.textSecondary}(no change)${theme.reset}`;
+  const stats = getDiffStats(diffChunks);
+  const header = operationLineBoldPath(
+    OPERATION_ICONS.write,
+    "Updated",
+    path,
+  );
+  const statsLine = formatDiffStatsLine(stats);
+  appendDiff(header, `${statsLine}\n\n${body}`);
+};
+
+/**
+ * Prints a no-op write: the requested content already matches what's on
+ * disk. Shown instead of an empty diff card so the user sees why nothing
+ * happened, rather than a header with a blank body underneath.
+ *
+ * @param path - File the agent asked to write, unchanged from its current content.
+ */
+export const printNoChange = (path: string): void => {
+  beginBlockOutput();
+  const theme = getTheme();
+  appendBlock([
+    `${OPERATION_ICONS.write} Updated(${theme.textBold}${formatDisplayPath(path)}${theme.reset}) ${theme.textSecondary}— no change, file already matches${theme.reset}`,
+  ]);
 };
 
 /**

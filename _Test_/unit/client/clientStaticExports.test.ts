@@ -8,9 +8,16 @@ vi.hoisted(() => {
   const fs = require("node:fs") as typeof import("node:fs");
   const os = require("node:os") as typeof import("node:os");
   const path = require("node:path") as typeof import("node:path");
-  process.env.HOME = fs.mkdtempSync(
+  const dir = fs.mkdtempSync(
     path.join(os.tmpdir(), "atlas-client-static-exports-"),
   );
+  // os.homedir() reads HOME on POSIX but USERPROFILE on Windows — both must
+  // be set or Windows CI operates on the real home directory instead of this
+  // temp one. Duplicated here (rather than using helpers/tempHome.ts)
+  // because vi.hoisted() runs before ESM imports are bound, so it can't
+  // import that helper.
+  process.env.HOME = dir;
+  process.env.USERPROFILE = dir;
 });
 
 import { runConfigRepair } from "../../../packages/client/src/cli/configRepair.js";
@@ -63,8 +70,7 @@ import {
   renderHistoryItem,
 } from "../../../packages/client/src/ui/components/HistoryView.js";
 import { StatusSpinner } from "../../../packages/client/src/ui/components/Spinner.js";
-import { SubagentStatusBox } from "../../../packages/client/src/ui/components/SubagentStatusBox.js";
-import { SubagentTaskBoard } from "../../../packages/client/src/ui/components/SubagentTaskBoard.js";
+import { PlanChecklist } from "../../../packages/client/src/ui/components/PlanChecklist.js";
 
 vi.mock("ink", () => ({
   render: vi.fn(),
@@ -148,7 +154,6 @@ describe("client static exports", () => {
     expect(typeof LiveThinkView).toBe("function");
     expect(typeof renderHistoryItem).toBe("function");
     expect(typeof StatusSpinner).toBe("function");
-    expect(typeof SubagentStatusBox).toBe("function");
-    expect(typeof SubagentTaskBoard).toBe("function");
+    expect(typeof PlanChecklist).toBe("function");
   });
 });

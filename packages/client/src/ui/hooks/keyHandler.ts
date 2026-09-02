@@ -33,6 +33,7 @@ import {
   AUTOCOMPLETE_VISIBLE_COUNT,
 } from "../constants.js";
 import { completeMention } from "../mentions/expand.js";
+import { requestExpand } from "../multiline/expandHandle.js";
 import { hasTrailingBackslash } from "../multiline/textBuffer.js";
 
 /**
@@ -223,7 +224,7 @@ export const createKeyHandler =
       }
       const trimmed = input.trim();
       if (trimmed.length > 0) {
-        enqueueMessage(trimmed);
+        enqueueMessage(requestExpand(trimmed));
         setInput("");
       }
       return;

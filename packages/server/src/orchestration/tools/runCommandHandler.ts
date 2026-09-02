@@ -108,7 +108,12 @@ const summarizeCommandExecution = (
   } else if (wasSkipped) {
     statusMessage = "user skipped — command was NOT executed";
   } else if (hasNoOutput) {
-    statusMessage = "completed successfully (exit 0, no captured output)";
+    // Deliberately NOT "completed successfully" — exit 0 with no output is
+    // not proof the command did what it was supposed to (e.g. a scaffold
+    // tool that stalled on an interactive prompt and exited early). Nudge
+    // the agent to check the filesystem rather than trust a silent exit.
+    statusMessage =
+      "exit 0, but produced no output — this does not confirm the command actually did anything; check its expected effect (e.g. list the directory or read the file it should have created/changed) before relying on it";
   } else {
     statusMessage = `exit ${commandResult.exitCode}`;
   }

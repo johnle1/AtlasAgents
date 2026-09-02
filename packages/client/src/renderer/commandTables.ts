@@ -81,13 +81,13 @@ export const buildConfigLines = (config: Config): string[] => {
     `  ${theme.textAccent}server${theme.reset}         ${config.server}`,
     `  ${theme.textAccent}port${theme.reset}           ${config.port}`,
     `  ${theme.textAccent}password${theme.reset}       ${formatSecretDisplay(config.password)}`,
-    `  ${theme.textAccent}agent model${theme.reset}      ${config.subagentModel || theme.textSecondary + "(not set)" + theme.reset}`,
-    `  ${theme.textAccent}subagent model${theme.reset}   ${config.subsubagentModel || theme.textSecondary + "(not set)" + theme.reset}`,
+    `  ${theme.textAccent}agent model${theme.reset}      ${config.agentModel || theme.textSecondary + "(not set)" + theme.reset}`,
+    `  ${theme.textAccent}subagent model${theme.reset}   ${config.subagentModel || theme.textSecondary + "(not set)" + theme.reset}`,
     `  ${theme.textAccent}subagent cap${theme.reset}    ${config.subagentCap} (/subagent cap, ::max for no cap)`,
     `  ${theme.textAccent}ui.theme${theme.reset}       ${resolvedThemeName} (${config.ui.theme})`,
     `  ${theme.textAccent}show think${theme.reset}     ${config.showThinkOutput ? "on" : "off"} (/think on|off)`,
     `  ${theme.textAccent}show spinner${theme.reset}   ${spinnerState}`,
-    `  ${theme.textAccent}approval mode${theme.reset}  ${config.approvalMode} (/set approval; Shift+Tab cycles default/accept_edits/plan)`,
+    `  ${theme.textAccent}approval mode${theme.reset}  ${config.approvalMode} (Shift+Tab cycles default/accept_edits/plan/auto)`,
   ];
 };
 
@@ -182,7 +182,7 @@ export const buildGroupedModelsLines = (
 };
 
 /**
- * Prints a provider-grouped numbered model picker list for `/set agent|subagent`.
+ * Prints a provider-grouped numbered model picker list for `/model` / `/set subagent`.
  *
  * @param groups - Per-provider model lists from `providers.listModels`.
  * @param label - Role label in the header.
@@ -345,7 +345,7 @@ export const printConfig = (config: Config): void => {
 };
 
 /**
- * Prints a numbered model picker list for `/set agent|subagent`.
+ * Prints a numbered model picker list for `/model` / `/set subagent`.
  *
  * @param models - Available model names.
  * @param label - Role label in the header.
@@ -413,16 +413,12 @@ const helpGroupFor = (command: string): (typeof HELP_GROUP_ORDER)[number] => {
   ) {
     return "Connection";
   }
-  if (
-    command.startsWith("/set agent") ||
-    command.startsWith("/set subagent") ||
-    command.startsWith("/models")
-  ) {
+  if (command.startsWith("/model") || command.startsWith("/set subagent")) {
     return "Models";
   }
   if (command.startsWith("/providers")) return "Providers";
   if (command.startsWith("/agent")) return "Agent";
-  if (command === "/config" || command.startsWith("/set approval")) return "Config";
+  if (command === "/config") return "Config";
   if (command.startsWith("/skills")) return "Skills";
   if (command.startsWith("/memory")) return "Memory";
   if (command.startsWith("/workspace") || command === "/cwd") return "Workspace";

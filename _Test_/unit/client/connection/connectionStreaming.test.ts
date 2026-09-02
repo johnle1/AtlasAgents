@@ -79,8 +79,8 @@ const minimalConfig = {
   server: "localhost",
   port: 7000,
   password: "",
-  subagentModel: "m1",
-  subsubagentModel: "m2",
+  agentModel: "m1",
+  subagentModel: "m2",
   subagentCap: 3,
   agentProvider: "ollama",
   subagentProvider: "ollama",
@@ -120,7 +120,12 @@ describe("sendTask", () => {
       kind: "task",
       text: "do work",
       maxSubagents: 2,
-      subagentModel: "m1",
+      agentModel: "m1",
+      clientEnv: {
+        platform: process.platform,
+        shell: expect.any(String),
+        osRelease: expect.any(String),
+      },
     });
   });
 

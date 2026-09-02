@@ -27,7 +27,7 @@ describe("formatDisplayPath", () => {
   });
 
   it("leaves paths outside home unchanged (resolved)", () => {
-    const outside = path.resolve("/tmp/atlas-outside-test");
+    const outside = path.resolve(os.tmpdir(), "atlas-outside-test");
     if (outside.startsWith(home + path.sep)) {
       return; // skip on unusual homedir layouts
     }
@@ -59,7 +59,7 @@ describe("formatHumanError", () => {
     const file = path.join(home, "missing.txt");
     const msg = formatHumanError("read", file, { code: "ENOENT" });
     expect(msg).toBe(
-      "Cannot read ~/missing.txt — file or directory does not exist.",
+      `Cannot read ${path.join("~", "missing.txt")} — file or directory does not exist.`,
     );
   });
 
@@ -81,8 +81,9 @@ describe("formatHumanError", () => {
   });
 
   it("falls back to error message for unknown codes", () => {
+    const display = formatDisplayPath("/x");
     expect(
       formatHumanError("read", "/x", new Error("disk full")),
-    ).toBe("Cannot read /x — disk full");
+    ).toBe(`Cannot read ${display} — disk full`);
   });
 });

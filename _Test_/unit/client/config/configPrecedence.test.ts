@@ -64,7 +64,7 @@ describe("Config Precedence Hierarchy", () => {
     const diskConfig = {
       server: "custom-host.lan",
       port: 7500,
-      approvalMode: "auto" as const,
+      approvalMode: "accept_edits" as const,
     };
 
     const fromDisk = mergeConfigFromDisk(diskConfig);
@@ -74,6 +74,18 @@ describe("Config Precedence Hierarchy", () => {
 
     expect(finalConfig.server).toBe("custom-host.lan"); // Kept from disk
     expect(finalConfig.port).toBe(9000); // Overridden by CLI
-    expect(finalConfig.approvalMode).toBe("auto"); // Kept from disk
+    expect(finalConfig.approvalMode).toBe("accept_edits"); // Kept from disk
+  });
+
+  it("coerces a persisted session-only auto (old full-bypass) to default on load, CLI untouched", () => {
+    const diskConfig = {
+      approvalMode: "auto" as unknown as "default",
+    };
+
+    const fromDisk = mergeConfigFromDisk(diskConfig);
+    const cliResult = parseCliArgs(argv());
+    const finalConfig = applyCliOverrides(fromDisk, cliResult.overrides);
+
+    expect(finalConfig.approvalMode).toBe("default");
   });
 });

@@ -2,50 +2,20 @@
  * Provider management slash commands under `/providers`.
  *
  * @remarks
- * Providers are non-Ollama, OpenAI-compatible model backends (vLLM on a GPU
- * box, AWS Trainium, Google TPU, ...) registered on the server. `"ollama"`
- * always exists and is not managed here. Subcommands are one-shot commands
- * over RSocket.
+ * Providers are non-Ollama, OpenAI-compatible model backends (LM Studio,
+ * llama.cpp's server, a hosted API, ...) registered on the server. `"ollama"`
+ * always exists and is not managed here. There is no `/providers add` — add
+ * one by editing `providers` in the server's `user-data/config.json`
+ * directly (see the README's Providers section). Subcommands are one-shot
+ * commands over RSocket.
  */
 
 import type { Connection } from "../connection/index.js";
 import { formatErrorMessage } from "./utils.js";
 import { printProviders, printError, printSuccess } from "../renderer.js";
 
-/** Parsed `/providers add <name> --url <baseUrl> [--key <apiKey>]` arguments. */
-type ParsedAddArgs = { name: string; baseUrl: string; apiKey?: string };
-
 /**
- * Parses the free-text argument for `/providers add`.
- *
- * @param argument - Everything after `/providers add`, e.g.
- *   `"vllm-gpu --url http://localhost:8000/v1 --key secret"`.
- * @returns Parsed fields, or null when the name or `--url` is missing.
- */
-const parseAddArgs = (argument: string): ParsedAddArgs | null => {
-  const tokens = argument.trim().split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return null;
-
-  const name = tokens[0];
-  let baseUrl = "";
-  let apiKey: string | undefined;
-
-  for (let i = 1; i < tokens.length; i++) {
-    if (tokens[i] === "--url" && tokens[i + 1]) {
-      baseUrl = tokens[i + 1];
-      i++;
-    } else if (tokens[i] === "--key" && tokens[i + 1]) {
-      apiKey = tokens[i + 1];
-      i++;
-    }
-  }
-
-  if (!baseUrl) return null;
-  return { name, baseUrl, apiKey };
-};
-
-/**
- * Routes `/providers list | add | remove`.
+ * Routes `/providers list | remove`.
  *
  * @param subcommand - Operation name after `/providers`.
  * @param argument - Remaining raw argument text.
@@ -54,8 +24,7 @@ const parseAddArgs = (argument: string): ParsedAddArgs | null => {
  * @example
  * ```ts
  * await handleProviders("list", "", connection);
- * await handleProviders("add", "vllm-gpu --url http://localhost:8000/v1", connection);
- * await handleProviders("remove", "vllm-gpu", connection);
+ * await handleProviders("remove", "lmstudio", connection);
  * ```
  */
 export const handleProviders = async (
@@ -81,23 +50,6 @@ export const handleProviders = async (
       }
       break;
     }
-    case "add": {
-      const parsed = parseAddArgs(argument);
-      if (!parsed) {
-        printError(
-          "Usage: /providers add <name> --url <baseUrl> [--key <apiKey>]",
-        );
-        return;
-      }
-
-      try {
-        await connection.sendCommand("providers.add", parsed);
-        printSuccess(`Provider '${parsed.name}' added (${parsed.baseUrl}).`);
-      } catch (error) {
-        printError(`Failed: ${formatErrorMessage(error)}`);
-      }
-      break;
-    }
     case "remove": {
       const name = argument.trim();
       if (!name) {
@@ -114,8 +66,6 @@ export const handleProviders = async (
       break;
     }
     default:
-      printError(
-        "Usage: /providers list | add <name> --url <baseUrl> [--key <apiKey>] | remove <name>",
-      );
+      printError("Usage: /providers list | remove <name>");
   }
 };

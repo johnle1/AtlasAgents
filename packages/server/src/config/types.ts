@@ -38,6 +38,43 @@ export const NEW_PASSPHRASE_LABEL =
 export const EXISTING_PASSPHRASE_LABEL = "Enter your server config passphrase: ";
 
 /**
+ * Ollama's KV-cache quantization modes, from least to most memory-efficient.
+ * Defined here (rather than in `ollama/runtimeTuning.ts`, which derives the
+ * default) so `runtimeTuning.ts` can import it without creating a cycle back
+ * into `config/types.ts` — the same reason `EffortLevel` lives here too.
+ */
+export type KvCacheType = "f16" | "q8_0" | "q4_0";
+
+/**
+ * How much the agent turn's REASON phase (`orchestration/agent/reasoner.ts`)
+ * re-deliberates before acting.
+ *
+ * @remarks
+ * This buys re-deliberation, not persistence — the agent loop's own "keep
+ * going until the task is done" behavior (the iteration ceiling and the
+ * absence of any give-up-early counter, see `agentTurn.ts`) is unaffected by
+ * this setting at every level, `low` included. Hitting a level's refinement
+ * cap means the reasoner accepts its current decision and the loop acts on
+ * it — it never means the turn gives up.
+ *
+ * - `"low"` — REASON phase skipped entirely (1 model call per iteration,
+ *   the pre-reasoner behavior, no refinement-round check at all).
+ * - `"medium"` (default) — up to 1 refinement round, 1 finish-verification
+ *   pass. Chosen as the default over `"high"` because the fixed per-step
+ *   cost (the reasoning call plus the finish-verification pass) is overhead
+ *   on every iteration even when the model converges instantly — `"high"`'s
+ *   extra refinement headroom only pays off once a decision is already
+ *   stuck looping, which isn't the common case.
+ * - `"high"` — up to 2 refinement rounds, 2 finish-verification passes.
+ * - `"extra-high"` — up to 4 refinement rounds, 2 finish-verification passes.
+ * - `"max"` — up to 6 refinement rounds, 2 finish-verification passes (each
+ *   of which may itself re-refine).
+ */
+export const EFFORT_LEVELS = ["low", "medium", "high", "extra-high", "max"] as const;
+
+export type EffortLevel = (typeof EFFORT_LEVELS)[number];
+
+/**
  * Built-in fallback defaults applied when config keys are missing from disk.
  *
  * **Purpose:**
@@ -135,12 +172,29 @@ export const SERVER_DEFAULTS = {
   subagentModelSupportsTools: false,
 
   /**
+   * **agentModelSupportsThinking: false** — Does the agent model support Ollama's `think` mode?
+   *
+   * When true: the agent's planning call requests Ollama's extended reasoning
+   * output (`think: true`)
+   * When false: thinking is omitted from the request entirely
+   *
+   * Ollama rejects `think: true` with an HTTP 400 for models that don't
+   * advertise the `"thinking"` capability, so this must be probed before
+   * enabling it — never hardcode `true` at the call site.
+   *
+   * See: ollama/modelCapabilities.ts for model-specific thinking support detection.
+   * There is no subagent equivalent — the subagent's execution call
+   * deliberately never requests thinking (see subagent.ts).
+   */
+  agentModelSupportsThinking: false,
+
+  /**
    * **agentProvider / subagentProvider: "ollama"** — Which provider serves each role.
    *
    * A provider name of "ollama" always resolves to the native local Ollama client.
    * Any other value must have a matching entry in `providers` (added via
    * `/providers add` or ConfigManager.addProvider), pointing at an OpenAI-compatible
-   * endpoint (vLLM on a GPU box, AWS Trainium, Google TPU, ...).
+   * endpoint (LM Studio, llama.cpp's server, a hosted API, ...).
    */
   agentProvider: "ollama",
   subagentProvider: "ollama",
@@ -160,6 +214,22 @@ export const SERVER_DEFAULTS = {
    * fails the request with a 400.
    */
   keepAlive: "30m",
+
+  /**
+   * **effort: "medium"** — How much the REASON phase re-deliberates before
+   * acting. See {@link EFFORT_LEVELS}'s doc comment for the full table;
+   * `"medium"` keeps the REASON phase's fixed per-step cost (a reasoning
+   * call plus one finish-verification pass) as low as it can be while
+   * still running the phase at all — `"low"` skips it entirely, and every
+   * level above `"medium"` only adds latency that pays off once a decision
+   * is already stuck looping, not on the common, fast-converging step.
+   */
+  effort: "medium" as EffortLevel,
+
+  // 0 means "never explicitly changed" — always loses a newest-wins
+  // comparison against any client that has ever set a model, which is
+  // correct: an unconfigured server should adopt the client's config.
+  configChangedAt: 0,
 } as const;
 
 /**
@@ -222,6 +292,11 @@ export type ServerConfig = {
   subagentModelSupportsTools: boolean;
 
   /**
+   * When true, the agent model supports Ollama's extended `think` mode.
+   */
+  agentModelSupportsThinking: boolean;
+
+  /**
    * Temperature setting for agent model (0.0 to 1.0).
    * Lower values produce more deterministic, focused responses.
    */
@@ -282,9 +357,54 @@ export type ServerConfig = {
    *
    * Deliberately has no default: when unset, the effective value falls back
    * to Ollama's own default (4096) rather than a guessed number. Set via
-   * `atlas-detect-hardware --write` (sized to detected VRAM) or `/set numCtx`.
+   * `/set numCtx`.
    */
   numCtx?: number;
+
+  /**
+   * How many concurrent requests Ollama itself will serve at once
+   * (`OLLAMA_NUM_PARALLEL`, set as an env var when this process spawns
+   * `ollama serve` — see `ollama/lifecycle.ts` / `ollama/runtimeTuning.ts`).
+   * Ollama-only; ignored by OpenAI-compatible providers.
+   *
+   * Deliberately has no default, and unset does NOT mean "guess a value" —
+   * it means the env var is omitted entirely, so Ollama performs its own
+   * hardware-aware detection (via the CUDA/Metal/ROCm APIs it already links
+   * against) and picks a slot count for the real device it's running on.
+   * That's strictly better information than this codebase could derive —
+   * an earlier version tried estimating from `os.totalmem()`, which is only
+   * a valid proxy on unified-memory systems (Apple Silicon) and is
+   * confidently wrong on a discrete-GPU machine, where system RAM and VRAM
+   * are different pools of very different sizes. Set this only if you want
+   * to override Ollama's own choice. **Only takes effect when this process
+   * actually spawns Ollama** — if Ollama was already running, the env can't
+   * be applied retroactively (see `ensureOllamaRunning`'s early-return path).
+   */
+  numParallel?: number;
+
+  /**
+   * Whether to set `OLLAMA_FLASH_ATTENTION=1` when spawning `ollama serve`.
+   * Ollama-only; ignored by OpenAI-compatible providers.
+   *
+   * Deliberately has no default: unset means "let `runtimeTuning.ts`
+   * decide," which currently always means `true` — flash attention is a
+   * speed/memory win with no meaningful quality trade-off for coding-agent
+   * use on any backend, so unlike `numParallel` it needs no per-machine
+   * detection (or lack thereof) at all. Same "only applies if this process
+   * spawns Ollama" caveat.
+   */
+  flashAttention?: boolean;
+
+  /**
+   * `OLLAMA_KV_CACHE_TYPE` — quantization of Ollama's KV cache. `"q8_0"`
+   * roughly halves KV-cache memory versus `"f16"` for near-lossless
+   * quality, freeing headroom for more `numParallel` slots or a larger
+   * `numCtx`. Ollama-only; ignored by OpenAI-compatible providers.
+   *
+   * Deliberately has no default — see `numParallel`'s doc comment; unset
+   * means `runtimeTuning.ts` picks `"q8_0"`. Same spawn-time-only caveat.
+   */
+  kvCacheType?: KvCacheType;
 
   /**
    * How long Ollama keeps a model resident after use (`keep_alive`).
@@ -298,6 +418,24 @@ export type ServerConfig = {
    * `"-1"` to the number for exactly that reason.
    */
   keepAlive: string | number;
+
+  /**
+   * How much the agent turn's REASON phase re-deliberates before acting.
+   * See {@link EFFORT_LEVELS}.
+   */
+  effort: EffortLevel;
+
+  /**
+   * `Date.now()` epoch ms of the last write to any field the client also
+   * tracks (agent/subagent model, provider, or temperature) — NOT a general
+   * file-write timestamp. Compared against the client's own
+   * `configChangedAt` (`packages/client/src/config/types.ts`) by the
+   * `sync.check` route to decide which side's overlapping config values win
+   * on startup: whichever changed more recently. Deliberately excludes
+   * unrelated writes (e.g. `numCtx`, `retries`) so an unrelated `/set` call
+   * doesn't falsely look newer than a real model change on the other side.
+   */
+  configChangedAt: number;
 };
 
 /**

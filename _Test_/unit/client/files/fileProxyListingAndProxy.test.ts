@@ -78,15 +78,16 @@ describe("expandDirectory", () => {
     const listDirectoryEntriesFn = vi.fn(async () => [
       { name: "child", isDirectory: false },
     ]);
+    const workspaceRoot = path.resolve("/w");
     await expandDirectory(
       {
-        workspaceRoot: "/w",
+        workspaceRoot,
         listDirectoryEntries: listDirectoryEntriesFn,
       },
-      "/w",
+      workspaceRoot,
       0,
     );
-    expect(listDirectoryEntriesFn).toHaveBeenCalledWith("/w");
+    expect(listDirectoryEntriesFn).toHaveBeenCalledWith(workspaceRoot);
   });
 });
 

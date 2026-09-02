@@ -22,8 +22,7 @@ vi.mock("../../../../packages/client/src/ui/terminalEnv.js", () => ({
 import { Banner } from "../../../../packages/client/src/ui/components/Banner.js";
 import { ConnectionStatusLine } from "../../../../packages/client/src/ui/components/ConnectionStatusLine.js";
 import { StatusSpinner } from "../../../../packages/client/src/ui/components/Spinner.js";
-import { SubagentStatusBox } from "../../../../packages/client/src/ui/components/SubagentStatusBox.js";
-import { SubagentTaskBoard } from "../../../../packages/client/src/ui/components/SubagentTaskBoard.js";
+import { PlanChecklist } from "../../../../packages/client/src/ui/components/PlanChecklist.js";
 import { renderHistoryItem } from "../../../../packages/client/src/ui/components/HistoryView.js";
 
 const frame = (tree: ReturnType<typeof render>) =>
@@ -60,153 +59,45 @@ describe("Ink component smoke", () => {
     tree.unmount();
   });
 
-  it("SubagentStatusBox renders label", () => {
-    const tree = render(
-      React.createElement(SubagentStatusBox, {
-        id: 2,
-        label: "worker",
-        icon: "◌",
-        message: "Editing file",
-        stage: "writing",
-      }),
-    );
-    expect(frame(tree)).toContain("worker");
+  it("PlanChecklist renders nothing for an empty checklist", () => {
+    const tree = render(React.createElement(PlanChecklist, { steps: [] }));
+    expect(frame(tree)).toBe("");
     tree.unmount();
   });
 
-  it("SubagentTaskBoard renders task labels", () => {
+  it("PlanChecklist renders pending, in-progress, and done steps with the right markers", () => {
     const tree = render(
-      React.createElement(SubagentTaskBoard, {
-        board: {
-          id: 1,
-          label: "planner",
-          tasks: [
-            { id: 1, state: "complete", text: "Step one" },
-            { id: 2, state: "running", text: "Step two" },
-          ],
-        },
-      }),
-    );
-    expect(frame(tree)).toContain("planner");
-    tree.unmount();
-  });
-
-  it("SubagentTaskBoard renders a bordered card with a progress header and no dropped words", () => {
-    const originalColumns = process.stdout.columns;
-    // ink-testing-library's fake stdout hardcodes its OWN columns getter to
-    // 100 (see its Stdout class) independent of this stub — Ink's internal
-    // layout always measures against that fixed 100, while our app code
-    // reads this real (stubbed) process.stdout.columns directly. Keep this
-    // value comfortably below 100 so the two stay consistent in this test;
-    // in the real CLI both read the same real terminal width. See
-    // taskBoardInnerWidth's reservedColumns param for the width budget this
-    // guards.
-    Object.defineProperty(process.stdout, "columns", {
-      configurable: true,
-      value: 50,
-    });
-
-    try {
-      const longTaskText =
-        "Configure the continuous integration pipeline to run linting and unit tests on every pull request";
-
-      const tree = render(
-        React.createElement(SubagentTaskBoard, {
-          board: {
-            id: 3,
-            label: "ci-setup",
-            tasks: [
-              {
-                id: 1,
-                state: "complete",
-                text: "Read existing workflow files",
-              },
-              { id: 2, state: "running", text: longTaskText },
-            ],
-            activity: {
-              stage: "running",
-              message: "Running: npm test -- --watch=false",
-            },
-          },
-        }),
-      );
-
-      try {
-        const rendered = frame(tree);
-
-        // Round border chrome from Ink's native borderStyle="round".
-        expect(rendered).toContain("╭");
-        expect(rendered).toContain("╰");
-
-        // Progress summary header ("1/2 [bar] NN.N%").
-        expect(rendered).toContain("1/2");
-        expect(rendered).toMatch(/%/);
-
-        // Every word of the long task description survives wrapping inside
-        // the border, even on a narrow terminal — this is the exact
-        // regression a bordered card without a properly reserved wrap width
-        // would produce.
-        const flattened = rendered.replace(/\n/g, " ");
-        for (const word of longTaskText.split(" ")) {
-          expect(flattened).toContain(word);
-        }
-      } finally {
-        tree.unmount();
-      }
-    } finally {
-      Object.defineProperty(process.stdout, "columns", {
-        configurable: true,
-        value: originalColumns,
-      });
-    }
-  });
-
-  it("SubagentTaskBoard progress reaches 100% once every task is complete or failed", () => {
-    const tree = render(
-      React.createElement(SubagentTaskBoard, {
-        board: {
-          id: 5,
-          label: "runner",
-          tasks: [
-            { id: 1, state: "complete", text: "Build" },
-            { id: 2, state: "failed", text: "Deploy" },
-          ],
-        },
+      React.createElement(PlanChecklist, {
+        steps: [
+          { id: 1, text: "Read the config parser", status: "done" },
+          { id: 2, text: "Wire the flag into routerBuilder", status: "in_progress" },
+          { id: 3, text: "Update the tests", status: "pending" },
+        ],
       }),
     );
     try {
       const rendered = frame(tree);
-      expect(rendered).toContain("2/2");
-      expect(rendered).toContain("100.0%");
+      expect(rendered).toContain("Plan");
+      // Done and in-progress both render the [#] marker — status.ts.
+      expect(rendered).toContain("[#] Read the config parser");
+      expect(rendered).toContain("[#] Wire the flag into routerBuilder");
+      expect(rendered).toContain("[ ] Update the tests");
     } finally {
       tree.unmount();
     }
   });
 
-  it("SubagentTaskBoard hugs its content width instead of stretching to fill the terminal", () => {
-    // Ink's implicit root container is flexDirection="column" with the
-    // flexbox default alignItems="stretch", which would otherwise stretch
-    // this bordered Box to the full parent width regardless of content —
-    // alignSelf="flex-start" on the board's outer Box opts out of that.
-    // A near-empty board is the clearest way to catch a regression here:
-    // a stretched box would render a border spanning the whole (fake,
-    // 100-column) test terminal instead of hugging the short title text.
+  it("PlanChecklist marks a failed step", () => {
     const tree = render(
-      React.createElement(SubagentTaskBoard, {
-        board: { id: 9, label: "idle", tasks: [] },
+      React.createElement(PlanChecklist, {
+        steps: [{ id: 1, text: "Run the migration", status: "failed" }],
       }),
     );
-
-    const borderLines = frame(tree)
-      .split("\n")
-      .filter((line) => line.includes("─"));
-
-    expect(borderLines.length).toBeGreaterThan(0);
-    for (const line of borderLines) {
-      expect(line.length).toBeLessThan(40);
+    try {
+      expect(frame(tree)).toContain("[#] Run the migration (failed)");
+    } finally {
+      tree.unmount();
     }
-
-    tree.unmount();
   });
 
   it("renderHistoryItem maps text history", () => {
@@ -217,5 +108,60 @@ describe("Ink component smoke", () => {
     const tree = render(React.createElement(React.Fragment, null, node));
     expect(frame(tree)).toContain("hello world");
     tree.unmount();
+  });
+
+  it("renderHistoryItem maps a proposed plan as a flat [ ] checklist with risks", () => {
+    const node = renderHistoryItem(
+      {
+        kind: "plan",
+        task: "add a login form",
+        steps: ["scaffold the component", "wire up validation"],
+        risks: ["may need a new dependency"],
+        agents: [
+          { id: 1, label: "plan", steps: ["scaffold the component", "wire up validation"], dependsOn: [] },
+        ],
+        agentCount: 1,
+        execution: "sequential",
+        modeLabel: null,
+      },
+      "k-plan",
+    );
+    const tree = render(React.createElement(React.Fragment, null, node));
+    const rendered = frame(tree);
+    try {
+      expect(rendered).toContain("Plan");
+      expect(rendered).toContain("Task: add a login form");
+      // Proposed steps are all still pending — plain [ ], not [#] — and the
+      // old per-agent "┄┄ Agent N — label ┄┄" grouping is gone.
+      expect(rendered).toContain("[ ] scaffold the component");
+      expect(rendered).toContain("[ ] wire up validation");
+      expect(rendered).not.toContain("┄┄");
+      expect(rendered).toContain("Risks:");
+      expect(rendered).toContain("may need a new dependency");
+    } finally {
+      tree.unmount();
+    }
+  });
+
+  it("renderHistoryItem omits the Risks section when there are none", () => {
+    const node = renderHistoryItem(
+      {
+        kind: "plan",
+        task: "fix the typo",
+        steps: ["fix the typo in README"],
+        risks: [],
+        agents: [],
+        agentCount: 1,
+        execution: "sequential",
+        modeLabel: null,
+      },
+      "k-plan-2",
+    );
+    const tree = render(React.createElement(React.Fragment, null, node));
+    try {
+      expect(frame(tree)).not.toContain("Risks:");
+    } finally {
+      tree.unmount();
+    }
   });
 });

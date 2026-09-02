@@ -15,16 +15,13 @@ import type {
   ISkillManager,
 } from "../interfaces.js";
 import type { IProviderRegistry } from "../../providers/providerRegistry.js";
-import type {
-  SubagentPlan,
-} from "../types.js";
 import type { PerConnection } from "../../container/types.js";
 import type { MaxSubagentsParam } from "../maxSubagents.js";
 import type { SessionInfo, TaskModelOverrides } from "../types.js";
 import type { Agent } from "../agent/agent.js";
 import type { TaskFrame } from "../../transport/frames.js";
 import type { IModelPlacementReporter } from "../../ollama/modelPlacement.js";
-import type { TaskApprovalMode } from "@atlasagents/shared";
+import type { TaskApprovalMode, ClientEnvPayload } from "@atlasagents/shared";
 
 /**
  * Dependency injection container for the orchestrator pipeline.
@@ -101,15 +98,16 @@ export type OrchestratorPipelineParams = {
    * is enforced on the client.
    */
   approvalMode?: TaskApprovalMode;
+
+  /**
+   * Client platform info, so the agent's `run_command` guidance matches the
+   * shell it actually executes on (the client, not the server).
+   */
+  clientEnv?: ClientEnvPayload;
 };
 
-/** Context header and skill body assembled ahead of agent planning. */
+/** Context header and skill body assembled ahead of the agent turn. */
 export type PlanningContextResult = {
   contextHeader: string;
   skillBody: string;
 };
-
-/** Outcome of agent planning: a plan, or a user skip. */
-export type PlanningResult =
-  | { skipped: false; plan: SubagentPlan }
-  | { skipped: true };

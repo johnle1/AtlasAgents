@@ -108,7 +108,47 @@ export type ToolHandlerContext = {
   thinkText: string | null;
   /** The parent task's setup/verify/off-limits command breakdown. */
   commandPlan: CommandPlan;
+  /**
+   * Present only in the top-level agent turn (never for a dispatched
+   * parallel step) — backs the `update_plan` and `run_steps_parallel`
+   * tools. Absent from a parallel step's own context, since neither tool
+   * is offered there.
+   */
+  planTools?: {
+    /**
+     * Persists/emits the checklist and, in plan-review mode, blocks on user
+     * approval. Returns the decision so `update_plan`'s handler can report
+     * it back to the model (continue, stop, or revise with feedback).
+     */
+    updatePlan: (
+      steps: PlanStepInput[],
+      note?: string,
+    ) => Promise<PlanToolDecision>;
+    /**
+     * Runs a batch of independent step ids concurrently (each completed by
+     * the same unified agent loop as the top-level turn, not a distinct
+     * subagent) and marks them done/failed on the live checklist.
+     */
+    runStepsParallel: (stepIds: number[]) => Promise<{
+      ok: boolean;
+      summary: string;
+    }>;
+  };
 };
+
+/** Input shape for one `update_plan` step, before status defaults are applied. */
+export type PlanStepInput = {
+  id: number;
+  text: string;
+  status?: "pending" | "in_progress" | "done" | "failed";
+  dependsOn?: number[];
+};
+
+/** Outcome of an `update_plan` call once `planTools.updatePlan` resolves. */
+export type PlanToolDecision =
+  | { decision: "continue" }
+  | { decision: "stop" }
+  | { decision: "revise"; feedback: string };
 
 /**
  * Outcome of one tool execution, fed back into the agent loop.
@@ -159,6 +199,22 @@ export interface ToolHandler {
     args: Record<string, unknown>,
     ctx: ToolHandlerContext,
   ): Promise<ToolExecutionResult>;
+  /**
+   * Whether this handler only reads — never mutates the workspace, the
+   * checklist, or the turn's own control flow (never returns `done: true`).
+   *
+   * @remarks
+   * Lets `agentTurn.ts`'s `runToolCalls` execute a run of consecutive
+   * read-only calls concurrently instead of one at a time — safe because
+   * nothing about the workspace or conversation state a read observes can
+   * change from another read running alongside it. Omitted (`undefined`) is
+   * treated as `false`: every built-in tool defaults to sequential unless
+   * explicitly marked otherwise (currently only `readFileTool`). MCP tools
+   * carry the same concept under `readOnly` on their own schema
+   * (`mcp/mcpToolSchema.ts`) — see `agentTurn.ts`'s `getEffectiveReadOnly`
+   * helper, which checks both.
+   */
+  readOnly?: boolean;
 }
 
 /**

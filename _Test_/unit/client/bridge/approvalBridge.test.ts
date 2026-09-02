@@ -3,7 +3,7 @@
  *
  * Covers the pending-approval queue, Esc/disconnect defaults, notifications,
  * session allowlist short-circuits, and approval-mode short-circuits
- * (`accept_edits` / `auto` / `bypass`).
+ * (`accept_edits` / `auto`, where `auto` is full bypass).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +20,7 @@ import {
   setBridgeHooks,
   setInkUIActiveValue,
   setPendingApprovalEntry,
+  drainApprovalQueue,
 } from "../../../../packages/client/src/ui/bridge/state.js";
 import {
   cancelPendingApprovals,
@@ -36,6 +37,7 @@ beforeEach(() => {
   setBridgeHooks({});
   setInkUIActiveValue(false);
   setPendingApprovalEntry(null);
+  drainApprovalQueue();
   sessionAllowlist.clear();
   setSessionApprovalMode("default");
   mockNotifyUser.mockClear();
@@ -45,6 +47,7 @@ afterEach(() => {
   sessionAllowlist.clear();
   setSessionApprovalMode("default");
   setPendingApprovalEntry(null);
+  drainApprovalQueue();
 });
 
 describe("approval bridge", () => {
@@ -118,6 +121,91 @@ describe("approval bridge", () => {
   });
 });
 
+describe("concurrent approval requests queue instead of rejecting (regression guard — a parallel batch with 2+ writes used to fail outright)", () => {
+  it("a second concurrent request queues, then becomes active once the first resolves (normal)", async () => {
+    const onApprovalChange = vi.fn();
+    setInkUIActiveValue(true);
+    setBridgeHooks({ onApprovalChange });
+
+    const first = requestApproval({ type: "keepUndo", contextLabel: "a.ts" });
+    const second = requestApproval({ type: "keepUndo", contextLabel: "b.ts" });
+
+    // The second request never rejects — it's queued, invisible to the UI,
+    // which still only ever sees the one active entry.
+    expect(getPendingApproval()).toEqual({ type: "keepUndo", contextLabel: "a.ts" });
+    expect(onApprovalChange).toHaveBeenCalledTimes(1);
+    expect(onApprovalChange).toHaveBeenCalledWith({
+      type: "keepUndo",
+      contextLabel: "a.ts",
+    });
+
+    resolveApproval(true);
+    await expect(first).resolves.toBe(true);
+
+    // Resolving the first advances the queue: the second becomes active.
+    expect(getPendingApproval()).toEqual({ type: "keepUndo", contextLabel: "b.ts" });
+    expect(onApprovalChange).toHaveBeenCalledTimes(2);
+    expect(onApprovalChange).toHaveBeenLastCalledWith({
+      type: "keepUndo",
+      contextLabel: "b.ts",
+    });
+
+    resolveApproval(false);
+    await expect(second).resolves.toBe(false);
+    expect(getPendingApproval()).toBeNull();
+  });
+
+  it("three concurrent requests all resolve, in FIFO order, none rejected (normal)", async () => {
+    setInkUIActiveValue(true);
+
+    const requests = [
+      requestApproval({ type: "keepUndo", contextLabel: "a.ts" }),
+      requestApproval({ type: "keepUndo", contextLabel: "b.ts" }),
+      requestApproval({ type: "keepUndo", contextLabel: "c.ts" }),
+    ];
+
+    resolveApproval(true); // a.ts
+    resolveApproval(true); // b.ts
+    resolveApproval(true); // c.ts
+
+    await expect(Promise.all(requests)).resolves.toEqual([true, true, true]);
+  });
+
+  it("notifies again when the queue advances to the next request (normal)", async () => {
+    setInkUIActiveValue(true);
+
+    const first = requestApproval({ type: "runSkip", command: "a" });
+    requestApproval({ type: "runSkip", command: "b" });
+    expect(mockNotifyUser).toHaveBeenCalledTimes(1);
+
+    resolveApproval(true);
+    await first;
+    expect(mockNotifyUser).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancelPendingApprovals drains the queue too, not just the active entry (error/negative case)", async () => {
+    setInkUIActiveValue(true);
+
+    const first = requestApproval({ type: "keepUndo", contextLabel: "a.ts" });
+    const second = requestApproval({ type: "keepUndo", contextLabel: "b.ts" });
+    const third = requestApproval({
+      type: "planReview",
+      task: "x",
+      stepCount: 1,
+      agentCount: 1,
+      execution: "sequential",
+      modeLabel: null,
+    });
+
+    cancelPendingApprovals();
+
+    await expect(first).resolves.toBe(false);
+    await expect(second).resolves.toBe(false);
+    await expect(third).resolves.toBe("skip");
+    expect(getPendingApproval()).toBeNull();
+  });
+});
+
 describe("allowlist short-circuit (WS4)", () => {
   it("resolves a matching keepUndo immediately without notifying (normal)", async () => {
     setInkUIActiveValue(true);
@@ -156,24 +244,14 @@ describe("requestApproval mode short-circuits (WS-B)", () => {
     modeLabel: null,
   };
 
-  it("bypass auto-approves every request type without notifying (normal)", async () => {
+  it("auto (full bypass) auto-approves every request type without notifying (normal)", async () => {
     setInkUIActiveValue(true);
-    setSessionApprovalMode("bypass");
+    setSessionApprovalMode("auto");
 
     expect(await requestApproval(keepUndo)).toBe(true);
     expect(await requestApproval(runSkip)).toBe(true);
     // planReview resolves a PlanDecision — the server rejects boolean true.
     expect(await requestApproval(planReview)).toBe("implement");
-    expect(mockNotifyUser).not.toHaveBeenCalled();
-  });
-
-  it("auto auto-approves keepUndo without notifying (normal)", async () => {
-    setInkUIActiveValue(true);
-    setSessionApprovalMode("auto");
-
-    expect(
-      await requestApproval({ type: "keepUndo", contextLabel: "d.ts" }),
-    ).toBe(true);
     expect(mockNotifyUser).not.toHaveBeenCalled();
   });
 
@@ -185,24 +263,6 @@ describe("requestApproval mode short-circuits (WS-B)", () => {
     expect(mockNotifyUser).toHaveBeenCalledOnce();
     resolveApproval(false);
     expect(await pending).toBe(false);
-  });
-
-  it("auto still prompts runSkip — the command layer gates shell (boundary)", async () => {
-    setInkUIActiveValue(true);
-    setSessionApprovalMode("auto");
-
-    const pending = requestApproval(runSkip);
-    expect(mockNotifyUser).toHaveBeenCalledOnce();
-    resolveApproval(true);
-    expect(await pending).toBe(true);
-  });
-
-  it("auto auto-approves planReview with implement (normal)", async () => {
-    setInkUIActiveValue(true);
-    setSessionApprovalMode("auto");
-
-    expect(await requestApproval(planReview)).toBe("implement");
-    expect(mockNotifyUser).not.toHaveBeenCalled();
   });
 
   it("accept_edits still prompts planReview (boundary)", async () => {

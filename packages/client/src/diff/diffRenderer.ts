@@ -264,7 +264,7 @@ const fallbackPlainLine = (line: string): string => {
  * @example
  * ```ts
  * const body = await renderDiffFromChunks("src/a.ts", chunks);
- * appendDiff(`Write ${path}`, body);
+ * appendDiff(`Updated ${path}`, body);
  * ```
  */
 export const renderDiffFromChunks = async (

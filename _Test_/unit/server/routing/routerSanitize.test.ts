@@ -19,30 +19,30 @@ describe("stripProviderSecrets", () => {
 
   it("reports hasApiKey: false when no key is set", () => {
     const result = stripProviderSecrets({
-      vllm: { baseUrl: "http://localhost:8000" },
+      lmstudio: { baseUrl: "http://localhost:1234" },
     });
-    expect(result).toEqual({ vllm: { baseUrl: "http://localhost:8000", hasApiKey: false } });
+    expect(result).toEqual({ lmstudio: { baseUrl: "http://localhost:1234", hasApiKey: false } });
   });
 
   it("treats an empty-string apiKey as no key", () => {
     const result = stripProviderSecrets({
-      vllm: { baseUrl: "http://localhost:8000", apiKey: "" },
+      lmstudio: { baseUrl: "http://localhost:1234", apiKey: "" },
     });
-    expect(result.vllm?.hasApiKey).toBe(false);
+    expect(result.lmstudio?.hasApiKey).toBe(false);
   });
 
   it("preserves every provider name and baseUrl across multiple entries", () => {
     const result = stripProviderSecrets({
       openai: { baseUrl: "https://api.openai.com", apiKey: "sk-1" },
-      trainium: { baseUrl: "https://trainium.internal" },
+      customBackend: { baseUrl: "https://custom-backend.internal" },
     });
-    expect(Object.keys(result).sort()).toEqual(["openai", "trainium"]);
+    expect(Object.keys(result).sort()).toEqual(["customBackend", "openai"]);
     expect(result.openai).toEqual({
       baseUrl: "https://api.openai.com",
       hasApiKey: true,
     });
-    expect(result.trainium).toEqual({
-      baseUrl: "https://trainium.internal",
+    expect(result.customBackend).toEqual({
+      baseUrl: "https://custom-backend.internal",
       hasApiKey: false,
     });
   });

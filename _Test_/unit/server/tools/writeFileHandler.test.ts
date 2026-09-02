@@ -50,6 +50,20 @@ describe("writeFileTool", () => {
     expect(result.feedback).toContain("+added line");
   });
 
+  it("reports a no-change message instead of an empty diff when content already matched disk", async () => {
+    const writeFile = vi.fn().mockResolvedValue({ accepted: true, diff: "" });
+    const ctx = buildContext(writeFile);
+
+    const result = await writeFileTool.execute(
+      { path: "src/a.ts", content: "export {}\n" },
+      ctx,
+    );
+
+    expect(ctx.trackers.filesWrittenThisTask.has("src/a.ts")).toBe(true);
+    expect(result.feedback).toContain("no change");
+    expect(result.feedback).not.toContain("Diff:");
+  });
+
   it("reports a plain decline without touching trackers", async () => {
     const writeFile = vi.fn().mockResolvedValue({ accepted: false });
     const ctx = buildContext(writeFile);

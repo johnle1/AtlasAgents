@@ -173,6 +173,9 @@ export const loadConfig = (): Config => {
           typeof stored.server === "string"
             ? stored.server
             : DEFAULT_CONFIG.server,
+        // A legacy plaintext file (no $secrets yet) predates mcpSecrets
+        // entirely — there's nothing to read, so start empty.
+        mcpSecrets: DEFAULT_CONFIG.mcpSecrets,
       };
 
   const parsedConfig: Partial<Config> = {
@@ -209,8 +212,12 @@ export const loadConfig = (): Config => {
  */
 export const saveConfig = (config: Config): void => {
   ensureDirs();
-  const { password, server, ...rest } = config;
-  const secrets = encryptSecrets<SecretConfigFields>({ password, server });
+  const { password, server, mcpSecrets, ...rest } = config;
+  const secrets = encryptSecrets<SecretConfigFields>({
+    password,
+    server,
+    mcpSecrets,
+  });
   const onDisk: StoredConfig = { ...rest, $secrets: secrets };
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(onDisk, null, 2) + "\n", {
     encoding: "utf-8",

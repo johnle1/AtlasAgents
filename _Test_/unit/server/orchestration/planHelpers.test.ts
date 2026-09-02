@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 import {
   applyMaxAgentsConstraint,
   deriveExecution,
-  deriveSubagentPlans,
   modeLabelFromMaxAgents,
   validateNoCycles,
 } from "../../../../packages/server/src/orchestration/planHelpers.js";
@@ -80,36 +79,6 @@ describe("validateNoCycles", () => {
       subtask({ id: 2, text: "b", dependsOn: [1] }),
     ];
     expect(validateNoCycles(subtasks)).toBe(false);
-  });
-});
-
-describe("deriveSubagentPlans", () => {
-  it("groups steps by agent and records cross-agent dependencies", () => {
-    const subtasks = [
-      subtask({ id: 1, text: "setup env", agentId: 10, agentLabel: "setup" }),
-      subtask({
-        id: 2,
-        text: "implement feature",
-        agentId: 20,
-        agentLabel: "build",
-        dependsOn: [1],
-      }),
-    ];
-
-    const plans = deriveSubagentPlans(subtasks);
-    expect(plans).toHaveLength(2);
-    expect(plans[0]).toMatchObject({
-      id: 10,
-      label: "setup",
-      steps: ["setup env"],
-      dependsOn: [],
-    });
-    expect(plans[1]).toMatchObject({
-      id: 20,
-      label: "build",
-      steps: ["implement feature"],
-      dependsOn: [10],
-    });
   });
 });
 

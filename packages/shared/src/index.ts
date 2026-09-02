@@ -8,6 +8,7 @@ export type {
   StreamKind,
   TaskStreamPayload,
   TaskApprovalMode,
+  ClientEnvPayload,
 } from "./protocol/serverProtocol.js";
 export {
   ROUTE_IDS,
@@ -16,11 +17,12 @@ export {
   isStreamKind,
   normalizeTaskApprovalMode,
 } from "./protocol/serverProtocol.js";
-export type { DiffDisplayLine } from "./diff/diffEngine.js";
+export type { DiffDisplayLine, DiffStats } from "./diff/diffEngine.js";
 export {
   computeDiff,
   formatDiffPlain,
   getDiffDisplayLines,
+  getDiffStats,
 } from "./diff/diffEngine.js";
 export type {
   SubagentBoardSnapshot,
@@ -30,6 +32,8 @@ export type {
   SubagentTaskSnapshot,
   AgentStage,
   PlanExecution,
+  PlanStep,
+  PlanStepStatus,
   PullProgress,
   QueuedTaskSnapshot,
   StatusIcon,

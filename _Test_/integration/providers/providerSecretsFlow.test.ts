@@ -47,6 +47,7 @@ import { ConfigManager } from "../../../packages/server/src/config/index.js";
 import { lockCipher } from "@atlasagents/shared";
 import { OllamaClient } from "../../../packages/server/src/ollama/client.js";
 import { ProviderRegistry } from "../../../packages/server/src/providers/providerRegistry.js";
+import { McpToolsCacheStore } from "../../../packages/server/src/orchestration/mcp/mcpToolsCacheStore.js";
 
 const tempRoots: string[] = [];
 
@@ -101,6 +102,9 @@ const makeRouter = (config: ConfigManager) => {
       runTask: async () => {},
     },
     brokerByRequester: new Map(),
+    mcpToolsCacheStore: new McpToolsCacheStore({
+      rootDir: path.join(os.tmpdir(), "atlas-provider-secrets-flow-mcp-cache"),
+    }),
     createPerConnection: () => {
       throw new Error("not used by these tests");
     },
@@ -150,7 +154,7 @@ describe("provider secrets — routes never leak key material", () => {
   it("the encrypted key survives a simulated process restart through the route layer", async () => {
     const { config, root } = await makeConfigManager();
     await config.unlockOrSetupProvidersCipher(async () => "restart-flow-pass");
-    await config.addProvider("vllm", {
+    await config.addProvider("lmstudio", {
       baseUrl: "http://10.0.0.9:8000",
       apiKey: "sk-restart-key",
     });
@@ -163,11 +167,11 @@ describe("provider secrets — routes never leak key material", () => {
     const result = await router2.routeCommand(SESSION, "providers.list", {});
 
     expect(result).toMatchObject({
-      providers: { vllm: { baseUrl: "http://10.0.0.9:8000", hasApiKey: true } },
+      providers: { lmstudio: { baseUrl: "http://10.0.0.9:8000", hasApiKey: true } },
     });
     // And the plaintext key is genuinely still there for actual use, just not
     // in the client-facing route response above.
-    expect(await config2.getProvider("vllm")).toEqual({
+    expect(await config2.getProvider("lmstudio")).toEqual({
       baseUrl: "http://10.0.0.9:8000",
       apiKey: "sk-restart-key",
     });

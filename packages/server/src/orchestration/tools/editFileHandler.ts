@@ -94,10 +94,14 @@ export const editFileTool: ToolHandler = {
       if (outcome.accepted) {
         trackers.filesWrittenThisTask.add(path);
       }
-      // Three possible outcomes: accepted (show the diff), revised (user gave
-      // a reason — pass it back so the agent can adjust), or a bare decline.
+      // Three possible outcomes: accepted (show the diff, or say so if the
+      // content already matched — see WorkspaceManager.writeFile's no-op
+      // short-circuit), revised (user gave a reason — pass it back so the
+      // agent can adjust), or a bare decline.
       const resultBody = outcome.accepted
-        ? `accepted. Diff:\n${outcome.diff}`
+        ? outcome.diff && outcome.diff.length > 0
+          ? `accepted. Diff:\n${outcome.diff}`
+          : "accepted — no change: the file already has this content."
         : outcome.feedback
           ? userReviseMessage(
               "accepting this edit",

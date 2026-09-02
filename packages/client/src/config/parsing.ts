@@ -7,6 +7,7 @@
 import type { Config } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
 import { parsePersistedApprovalMode } from "./approvalMode.js";
+import { isSandboxMode } from "../fileProxy/sandbox/index.js";
 
 /**
  * Merges parsed config from disk with DEFAULT_CONFIG to fill missing keys.
@@ -37,6 +38,13 @@ export const mergeConfigFromDisk = (parsedConfig: Partial<Config>): Config => ({
       : DEFAULT_CONFIG.subagentCap,
   approvalMode: parsePersistedApprovalMode(parsedConfig.approvalMode),
   ui: { ...DEFAULT_CONFIG.ui, ...parsedConfig.ui },
+  sandbox: {
+    ...DEFAULT_CONFIG.sandbox,
+    ...parsedConfig.sandbox,
+    mode: isSandboxMode(parsedConfig.sandbox?.mode)
+      ? parsedConfig.sandbox.mode
+      : DEFAULT_CONFIG.sandbox.mode,
+  },
 });
 
 /**
@@ -61,13 +69,15 @@ export const configNeedsPersist = (
   parsedConfig: Partial<Config>,
 ): boolean => {
   for (const key of Object.keys(DEFAULT_CONFIG)) {
-    if (key === "ui") {
-      if (typeof storedConfig.ui !== "object" || storedConfig.ui === null) {
+    if (key === "ui" || key === "sandbox") {
+      const nested = storedConfig[key];
+      if (typeof nested !== "object" || nested === null) {
         return true;
       }
-      const uiObject = storedConfig.ui as Record<string, unknown>;
-      for (const uiKey of Object.keys(DEFAULT_CONFIG.ui)) {
-        if (!(uiKey in uiObject)) {
+      const nestedObject = nested as Record<string, unknown>;
+      const defaults = DEFAULT_CONFIG[key] as unknown as Record<string, unknown>;
+      for (const nestedKey of Object.keys(defaults)) {
+        if (!(nestedKey in nestedObject)) {
           return true;
         }
       }

@@ -54,6 +54,8 @@ export type {
   SubagentTaskSnapshot,
   AgentStage,
   PlanExecution,
+  PlanStep,
+  PlanStepStatus,
   PullProgress,
   QueuedTaskSnapshot,
   StatusIcon,

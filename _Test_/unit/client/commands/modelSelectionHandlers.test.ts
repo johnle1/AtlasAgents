@@ -23,8 +23,8 @@ const baseConfig = (): Config =>
     server: "localhost",
     port: 7000,
     password: "",
-    subagentModel: "old-agent-model",
-    subsubagentModel: "old-subagent-model",
+    agentModel: "old-agent-model",
+    subagentModel: "old-subagent-model",
     agentProvider: "ollama",
     subagentProvider: "ollama",
     agentTemp: 0.1,
@@ -96,7 +96,7 @@ const fakePrompts = (choice: number): PromptPort =>
 const GROUPED_MODELS_RESPONSE = {
   groups: [
     { provider: "ollama", models: ["gemma3:27b"] },
-    { provider: "vllm-gpu", models: ["Qwen2.5-7B-Instruct"] },
+    { provider: "lmstudio", models: ["Qwen2.5-7B-Instruct"] },
   ],
 };
 
@@ -113,18 +113,19 @@ describe("handleSetModel — selection", () => {
       updateConfig: connectionUpdateConfig,
     } as unknown as Connection;
 
-    // Entry #2 is the vllm-gpu model (continuous numbering after ollama's one model).
+    // Entry #2 is the lmstudio model (continuous numbering after ollama's one model).
     await handleSetModel("agent", connection, fakePrompts(2));
 
     expect(sendCommand).toHaveBeenNthCalledWith(1, "providers.listModels", {});
     expect(sendCommand).toHaveBeenNthCalledWith(2, "config.setModel", {
       role: "agent",
-      provider: "vllm-gpu",
+      provider: "lmstudio",
       model: "Qwen2.5-7B-Instruct",
     });
     expect(updateConfigMock).toHaveBeenCalledWith({
-      subagentModel: "Qwen2.5-7B-Instruct",
-      agentProvider: "vllm-gpu",
+      agentModel: "Qwen2.5-7B-Instruct",
+      agentProvider: "lmstudio",
+      configChangedAt: expect.any(Number),
     });
     expect(connectionUpdateConfig).toHaveBeenCalledWith(currentConfig);
   });
@@ -147,8 +148,9 @@ describe("handleSetModel — selection", () => {
       model: "gemma3:27b",
     });
     expect(updateConfigMock).toHaveBeenCalledWith({
-      subsubagentModel: "gemma3:27b",
+      subagentModel: "gemma3:27b",
       subagentProvider: "ollama",
+      configChangedAt: expect.any(Number),
     });
   });
 });
@@ -157,8 +159,8 @@ describe("handleSetModel — current selection markers", () => {
   it("treats whitespace-only model fields as unset (no picker markers)", async () => {
     currentConfig = {
       ...baseConfig(),
-      subagentModel: "   ",
-      subsubagentModel: "\t",
+      agentModel: "   ",
+      subagentModel: "\t",
     };
     const sendCommand = vi.fn().mockResolvedValueOnce(GROUPED_MODELS_RESPONSE);
     const connection = {
@@ -178,10 +180,10 @@ describe("handleSetModel — current selection markers", () => {
   it("trims padded model names before passing them as current markers", async () => {
     currentConfig = {
       ...baseConfig(),
-      subagentModel: "  gemma3:27b  ",
-      subsubagentModel: " Qwen2.5-7B-Instruct ",
+      agentModel: "  gemma3:27b  ",
+      subagentModel: " Qwen2.5-7B-Instruct ",
       agentProvider: "ollama",
-      subagentProvider: "vllm-gpu",
+      subagentProvider: "lmstudio",
     };
     const sendCommand = vi.fn().mockResolvedValueOnce(GROUPED_MODELS_RESPONSE);
     const connection = {
@@ -196,7 +198,7 @@ describe("handleSetModel — current selection markers", () => {
       "agent",
       {
         agent: { provider: "ollama", model: "gemma3:27b" },
-        subagent: { provider: "vllm-gpu", model: "Qwen2.5-7B-Instruct" },
+        subagent: { provider: "lmstudio", model: "Qwen2.5-7B-Instruct" },
       },
     );
   });
@@ -248,13 +250,13 @@ describe("handleSetModel — server rollback", () => {
     // Forward write, then rollback write — both go through updateConfig.
     expect(updateConfigMock).toHaveBeenCalledTimes(2);
     expect(updateConfigMock).toHaveBeenLastCalledWith({
-      subagentModel: "old-agent-model",
+      agentModel: "old-agent-model",
       agentProvider: "ollama",
     });
     // Connection-level config (and therefore the banner) must never see the
     // rejected change.
     expect(connectionUpdateConfig).not.toHaveBeenCalled();
-    expect(currentConfig.subagentModel).toBe("old-agent-model");
+    expect(currentConfig.agentModel).toBe("old-agent-model");
     expect(currentConfig.agentProvider).toBe("ollama");
   });
 });

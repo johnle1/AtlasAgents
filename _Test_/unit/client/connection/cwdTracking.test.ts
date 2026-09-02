@@ -29,18 +29,20 @@ describe("extractCwdFromOutput", () => {
   });
 
   it("strips marker and returns newCwd from the last occurrence", () => {
-    const stdout = `before output${CWD_MARKER}/tmp/project`;
+    const rawCwd = "/tmp/project";
+    const stdout = `before output${CWD_MARKER}${rawCwd}`;
     expect(extractCwdFromOutput(stdout)).toEqual({
       cleanedStdout: "before output",
-      newCwd: "/tmp/project",
+      newCwd: canonicalizeTrackedCwd(rawCwd),
     });
   });
 
   it("uses the last marker when output contains nested noise", () => {
-    const stdout = `noise ${CWD_MARKER}/wrong${CWD_MARKER}/correct/path`;
+    const rawCwd = "/correct/path";
+    const stdout = `noise ${CWD_MARKER}/wrong${CWD_MARKER}${rawCwd}`;
     expect(extractCwdFromOutput(stdout)).toEqual({
       cleanedStdout: `noise ${CWD_MARKER}/wrong`,
-      newCwd: "/correct/path",
+      newCwd: canonicalizeTrackedCwd(rawCwd),
     });
   });
 
@@ -53,7 +55,7 @@ describe("extractCwdFromOutput", () => {
     const stdout = `output${CWD_MARKER}C:\\Users\\dev\\project\r\n`;
     expect(extractCwdFromOutput(stdout)).toEqual({
       cleanedStdout: "output",
-      newCwd: path.resolve("C:\\Users\\dev\\project"),
+      newCwd: canonicalizeTrackedCwd("C:\\Users\\dev\\project"),
     });
   });
 });
@@ -64,14 +66,17 @@ describe("trackedCwdsEqual", () => {
   });
 
   it("canonicalizes relative segments before comparing", () => {
-    const base = path.resolve("/tmp/atlas-test");
+    const base = path.resolve(os.tmpdir(), "atlas-cwd-equal-test");
     expect(trackedCwdsEqual(path.join(base, "app"), path.join(base, "app", "."))).toBe(
       true,
     );
   });
 });
 
-describe("wrapCommandForCwdTracking — Unix shell integration", () => {
+const describeUnix =
+  process.platform === "win32" ? describe.skip : describe;
+
+describeUnix("wrapCommandForCwdTracking — Unix shell integration", () => {
   let tempDir: string;
 
   beforeEach(async () => {
@@ -135,7 +140,7 @@ describe("wrapCommandForCwdTracking — Windows wrapper shape", () => {
     const stdout = `some output${CWD_MARKER}C:\\Users\\dev\\my-app`;
     expect(extractCwdFromOutput(stdout)).toEqual({
       cleanedStdout: "some output",
-      newCwd: path.resolve("C:\\Users\\dev\\my-app"),
+      newCwd: canonicalizeTrackedCwd("C:\\Users\\dev\\my-app"),
     });
   });
 });
@@ -158,7 +163,11 @@ describeWindows("wrapCommandForCwdTracking — Windows shell integration", () =>
     const wrapped = wrapCommandForCwdTracking(command, true);
     const result = await runShell(wrapped, tempDir);
     const { cleanedStdout, newCwd } = extractCwdFromOutput(result.stdout);
-    return { ...result, stdout: cleanedStdout, newCwd };
+    return {
+      ...result,
+      stdout: cleanedStdout,
+      newCwd: newCwd ? canonicalizeTrackedCwd(newCwd) : undefined,
+    };
   };
 
   it("cd into a child directory updates newCwd on Windows", async () => {

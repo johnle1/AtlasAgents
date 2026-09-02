@@ -20,6 +20,11 @@ import {
 
 const cwd = os.tmpdir();
 
+// `false`/`sleep` are POSIX-only; `node -e` runs identically under /bin/sh
+// and cmd.exe since runShell always has node itself on PATH.
+const EXIT_1 = 'node -e "process.exit(1)"';
+const SLEEP_5S = 'node -e "setTimeout(function(){}, 5000)"';
+
 describe("shellPassthroughFlow — real runShell", () => {
   it("captures stdout from echo (happy path)", async () => {
     const entries = await handleBang({
@@ -28,7 +33,6 @@ describe("shellPassthroughFlow — real runShell", () => {
       cwd,
       timeoutMs: 5_000,
       classifyCommand: () => "safe",
-      requestApproval: async () => true,
     });
     const body = entries.map((entry) => entry.text).join("\n");
     expect(body).toMatch(/hi/);
@@ -36,24 +40,22 @@ describe("shellPassthroughFlow — real runShell", () => {
 
   it("yields a warning entry for a failing command (failure)", async () => {
     const entries = await handleBang({
-      command: "false",
+      command: EXIT_1,
       runShell,
       cwd,
       timeoutMs: 5_000,
       classifyCommand: () => "safe",
-      requestApproval: async () => true,
     });
     expect(entries.some((entry) => entry.variant === "warning")).toBe(true);
   });
 
   it("kills a long command at the timeout (system edge)", async () => {
     const entries = await handleBang({
-      command: "sleep 5",
+      command: SLEEP_5S,
       runShell,
       cwd,
       timeoutMs: 80,
       classifyCommand: () => "safe",
-      requestApproval: async () => true,
     });
     const body = entries.map((entry) => entry.text).join("\n");
     expect(body).toContain(SHELL_TIMEOUT_MARKER);

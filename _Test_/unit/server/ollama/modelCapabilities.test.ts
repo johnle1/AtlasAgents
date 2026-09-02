@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { modelSupportsNativeTools } from "../../../../packages/server/src/ollama/modelCapabilities.js";
+import {
+  modelSupportsNativeTools,
+  modelSupportsThinking,
+} from "../../../../packages/server/src/ollama/modelCapabilities.js";
 import { syncAdvisorToolSupport, syncAgentToolSupport } from "../../../../packages/server/src/ollama/syncAgentToolSupport.js";
+import { syncAgentThinkingSupport } from "../../../../packages/server/src/ollama/syncAgentThinkingSupport.js";
 import type { ModelInfo } from "../../../../packages/server/src/ollama/types.js";
 
 describe("modelSupportsNativeTools", () => {
@@ -21,6 +25,104 @@ describe("modelSupportsNativeTools", () => {
   it("returns false when capabilities is not an array", () => {
     const info = { capabilities: "tools" } as unknown as ModelInfo;
     expect(modelSupportsNativeTools(info)).toBe(false);
+  });
+});
+
+describe("modelSupportsThinking", () => {
+  it("returns true when capabilities includes thinking", () => {
+    const info: ModelInfo = { capabilities: ["completion", "thinking"] };
+    expect(modelSupportsThinking(info)).toBe(true);
+  });
+
+  it("returns false when capabilities omits thinking (regression — qwen:4b HTTP 400)", () => {
+    const info: ModelInfo = { capabilities: ["completion", "tools"] };
+    expect(modelSupportsThinking(info)).toBe(false);
+  });
+
+  it("returns false when capabilities is missing", () => {
+    expect(modelSupportsThinking({})).toBe(false);
+  });
+
+  it("returns false when capabilities is not an array", () => {
+    const info = { capabilities: "thinking" } as unknown as ModelInfo;
+    expect(modelSupportsThinking(info)).toBe(false);
+  });
+});
+
+describe("syncAgentThinkingSupport", () => {
+  it("persists true when showModel reports the thinking capability", async () => {
+    const sets: Array<[string, unknown]> = [];
+    const supports = await syncAgentThinkingSupport(
+      {
+        showModel: async () => ({ capabilities: ["thinking"] }),
+      },
+      {
+        set: async (key, value) => {
+          sets.push([key, value]);
+        },
+        getAgentModelSupportsThinking: async () => false,
+      },
+      "deepseek-r1:7b",
+    );
+
+    expect(supports).toBe(true);
+    expect(sets).toEqual([["agentModelSupportsThinking", true]]);
+  });
+
+  it("persists false for a model without the thinking capability (regression — qwen:4b HTTP 400)", async () => {
+    const sets: Array<[string, unknown]> = [];
+    const supports = await syncAgentThinkingSupport(
+      {
+        showModel: async () => ({ capabilities: ["completion", "tools"] }),
+      },
+      {
+        set: async (key, value) => {
+          sets.push([key, value]);
+        },
+        getAgentModelSupportsThinking: async () => true,
+      },
+      "qwen:4b",
+    );
+
+    expect(supports).toBe(false);
+    expect(sets).toEqual([["agentModelSupportsThinking", false]]);
+  });
+
+  it("returns the cached value without probing for an empty model name (boundary)", async () => {
+    const showModel = async () => {
+      throw new Error("should not be called");
+    };
+    const supports = await syncAgentThinkingSupport(
+      { showModel },
+      {
+        set: async () => {},
+        getAgentModelSupportsThinking: async () => true,
+      },
+      "   ",
+    );
+
+    expect(supports).toBe(true);
+  });
+
+  it("keeps the existing flag when showModel fails (error)", async () => {
+    const sets: Array<[string, unknown]> = [];
+    const supports = await syncAgentThinkingSupport(
+      {
+        showModel: async () => {
+          throw new Error("Ollama unreachable");
+        },
+      },
+      {
+        set: async (key, value) => {
+          sets.push([key, value]);
+        },
+        getAgentModelSupportsThinking: async () => true,
+      },
+      "deepseek-r1:7b",
+    );
+
+    expect(supports).toBe(true);
+    expect(sets).toHaveLength(0);
   });
 });
 

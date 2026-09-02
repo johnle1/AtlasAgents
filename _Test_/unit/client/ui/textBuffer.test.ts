@@ -14,7 +14,12 @@ import { describe, expect, it } from "vitest";
 import {
   bufferFromString,
   bufferToString,
+  cursorFromOffset,
+  cursorOffset,
   emptyBuffer,
+  hasTrailingBackslash,
+  normalizeNewlines,
+  stripTrailingBackslash,
   textBufferReducer,
   type TextBufferState,
 } from "../../../../packages/client/src/ui/multiline/textBuffer.js";
@@ -116,6 +121,41 @@ describe("backspace", () => {
     const start = bufferFromString("ab");
     const next = textBufferReducer(start, { type: "backspace" });
     expect(next).toEqual(start);
+  });
+});
+
+describe("delete", () => {
+  it("deletes the character at the cursor and leaves the cursor in place (normal)", () => {
+    const start = {
+      ...bufferFromString("abcd"),
+      cursor: { row: 0, col: 2 },
+    };
+
+    const next = textBufferReducer(start, { type: "delete" });
+
+    expect(bufferToString(next)).toBe("abd");
+    expect(next.cursor).toEqual({ row: 0, col: 2 });
+  });
+
+  it("joins with the following line when deleting at the end of a row (boundary)", () => {
+    const start = {
+      ...bufferFromString("ab\ncd"),
+      cursor: { row: 0, col: 2 },
+    };
+
+    const next = textBufferReducer(start, { type: "delete" });
+
+    expect(next.lines).toEqual(["abcd"]);
+    expect(next.cursor).toEqual({ row: 0, col: 2 });
+  });
+
+  it("is a no-op at the end of the final line (boundary)", () => {
+    const start = {
+      ...bufferFromString("ab\ncd"),
+      cursor: { row: 1, col: 2 },
+    };
+
+    expect(textBufferReducer(start, { type: "delete" })).toBe(start);
   });
 });
 
@@ -233,6 +273,78 @@ describe("setText", () => {
     });
     expect(next.lines).toEqual(["one", "two"]);
     expect(next.cursor).toEqual({ row: 1, col: 3 });
+  });
+});
+
+describe("cursorOffset / cursorFromOffset", () => {
+  it("maps cursor positions across multiline newline boundaries (normal)", () => {
+    const state = bufferFromString("ab\ncde\n");
+    const positions = [
+      { cursor: { row: 0, col: 0 }, offset: 0 },
+      { cursor: { row: 0, col: 2 }, offset: 2 },
+      { cursor: { row: 1, col: 0 }, offset: 3 },
+      { cursor: { row: 1, col: 3 }, offset: 6 },
+      { cursor: { row: 2, col: 0 }, offset: 7 },
+    ];
+
+    for (const { cursor, offset } of positions) {
+      expect(cursorOffset({ ...state, cursor })).toBe(offset);
+      expect(cursorFromOffset(state, offset)).toEqual(cursor);
+    }
+  });
+
+  it("clamps out-of-range offsets and cursors to the buffer bounds (boundary)", () => {
+    const state = bufferFromString("ab\nc");
+
+    expect(cursorFromOffset(state, -10)).toEqual({ row: 0, col: 0 });
+    expect(cursorFromOffset(state, 99)).toEqual({ row: 1, col: 1 });
+    expect(
+      cursorOffset({ ...state, cursor: { row: 99, col: 99 } }),
+    ).toBe(4);
+  });
+});
+
+describe("trailing continuation helpers", () => {
+  it("recognizes a trailing backslash and removes exactly one on continuation (normal)", () => {
+    expect(hasTrailingBackslash("echo hello\\")).toBe(true);
+    expect(stripTrailingBackslash("echo hello\\")).toBe("echo hello");
+    expect(stripTrailingBackslash("echo hello\\\\")).toBe("echo hello\\");
+  });
+
+  it("leaves text without a trailing backslash unchanged (boundary)", () => {
+    expect(hasTrailingBackslash("echo hello")).toBe(false);
+    expect(hasTrailingBackslash("")).toBe(false);
+    expect(stripTrailingBackslash("echo hello")).toBe("echo hello");
+  });
+});
+
+describe("normalizeNewlines", () => {
+  it("converts CRLF and bare CR to LF (normal)", () => {
+    expect(normalizeNewlines("a\r\nb")).toBe("a\nb");
+    expect(normalizeNewlines("a\rb")).toBe("a\nb");
+    expect(normalizeNewlines("a\r\nb\rc\r\nd")).toBe("a\nb\nc\nd");
+  });
+
+  it("leaves text with only LF or no line breaks unchanged (boundary)", () => {
+    expect(normalizeNewlines("a\nb")).toBe("a\nb");
+    expect(normalizeNewlines("plain text")).toBe("plain text");
+    expect(normalizeNewlines("")).toBe("");
+  });
+});
+
+describe("carriage returns in insertText / bufferFromString", () => {
+  it("normalizes a pasted CRLF block inserted via insertText (normal)", () => {
+    const next = textBufferReducer(emptyBuffer(), {
+      type: "insertText",
+      text: "line1\r\nline2\r\nline3",
+    });
+    expect(next.lines).toEqual(["line1", "line2", "line3"]);
+    expect(bufferToString(next)).toBe("line1\nline2\nline3");
+  });
+
+  it("normalizes bare CR line breaks in bufferFromString (boundary)", () => {
+    const state = bufferFromString("a\rb\rc");
+    expect(state.lines).toEqual(["a", "b", "c"]);
   });
 });
 

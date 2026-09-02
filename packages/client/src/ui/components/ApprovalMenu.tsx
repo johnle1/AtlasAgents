@@ -63,9 +63,8 @@ export const ApprovalMenu: React.FC = () => {
     request.type === "planReview"
       ? [
           `Plan: ${request.task.slice(0, 56)}`,
-          `${request.stepCount} step(s) · ${request.agentCount} agent${request.agentCount === 1 ? "" : "s"} · ${request.execution}`,
-          request.modeLabel ? `Mode: ${request.modeLabel}` : "",
-        ].filter((line) => line.length > 0)
+          `${request.stepCount} step${request.stepCount === 1 ? "" : "s"}`,
+        ]
       : request.type === "runSkip"
         ? [`Run command: ${request.command}`]
         : [request.contextLabel];

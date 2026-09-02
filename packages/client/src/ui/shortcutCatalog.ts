@@ -59,6 +59,21 @@ export const SHORTCUT_CATALOG: ShortcutEntry[] = [
     action: "Insert newline",
   },
   {
+    id: "ctrl+d",
+    keys: "Ctrl+D",
+    action: "Delete character under cursor",
+  },
+  {
+    id: "ctrl+a",
+    keys: "Ctrl+A",
+    action: "Move cursor to start of line",
+  },
+  {
+    id: "ctrl+e",
+    keys: "Ctrl+E",
+    action: "Move cursor to end of line",
+  },
+  {
     id: "shift+enter",
     keys: "Shift+Enter",
     action: "Insert newline",

@@ -10,7 +10,6 @@ import type {
   SubagentStage,
   AgentStage,
   StatusIcon,
-  TaskLifecycleState,
 } from "../types/frames.js";
 import { loadConfig } from "../config/index.js";
 import { inTmux, isScreenReaderLikely } from "./terminalEnv.js";
@@ -147,47 +146,3 @@ export const resolveWorkerVisual = (
   return { glyph: frameIcon, dim: true };
 };
 
-/**
- * Resolves visual representation characteristics for queue states.
- *
- * @param blocked - True if queue is currently blocked.
- * @returns Queue status visual properties.
- */
-export const resolveQueueVisual = (blocked: boolean): StatusVisual =>
-  blocked ? { glyph: "□", dim: true } : { glyph: "○", color: "cyan" };
-
-/**
- * Resolves task execution status rendering parameters.
- *
- * @param state - The lifecycle state.
- * @param pulseIndex - The animation index.
- * @returns State visual properties.
- */
-export const resolveTaskLifecycleVisual = (
-  state: TaskLifecycleState,
-  pulseIndex: number,
-): StatusVisual => {
-  switch (state) {
-    case "complete":
-      return { glyph: "✓", color: "green" };
-
-    case "running": {
-      const shouldAnimateCurrent = shouldAnimateWorker();
-
-      return {
-        glyph: shouldAnimateCurrent ? getWorkingFrame(pulseIndex) : "◉",
-        color: "cyan",
-        animate: shouldAnimateCurrent,
-      };
-    }
-
-    case "waiting":
-      return { glyph: "○", color: "cyan" };
-
-    case "blocked":
-      return { glyph: "□", dim: true };
-
-    case "failed":
-      return { glyph: "✗", color: "red" };
-  }
-};

@@ -32,7 +32,7 @@ import {
 
 describe("getCommandSuggestions — normal cases", () => {
   it("returns all commands starting with '/set' (normal — prefix match)", () => {
-    // Typing '/set' should surface the three /set sub-commands
+    // Typing '/set' should surface every /set sub-command
     const suggestions = getCommandSuggestions("/set");
     const commands = suggestions.map((s) => s.command);
     expect(commands).toContain("/set password");
@@ -217,6 +217,7 @@ describe("getCommandDescription — normal cases", () => {
     const desc = getCommandDescription("/models list");
     expect(desc.length).toBeGreaterThan(0);
   });
+
 });
 
 describe("getCommandDescription — boundary / error cases", () => {
@@ -232,6 +233,57 @@ describe("getCommandDescription — boundary / error cases", () => {
 // ---------------------------------------------------------------------------
 // Catalog entries for Phase 1 commands
 // ---------------------------------------------------------------------------
+
+describe("COMMAND_CATALOG — /set drift guard", () => {
+  it("has a catalog entry for every /set subcommand handleSetConfig accepts", () => {
+    // Mirrors the usage string in configHandlers.ts's handleSetConfig — keep
+    // this list in lockstep with that switch statement's case labels so a
+    // new /set subcommand can't ship without also being autocomplete-visible.
+    // `subagent` is deliberately excluded: it's still a valid /set subcommand
+    // (see configHandlers.ts), just not surfaced in autocomplete.
+    const subcommands = ["password", "server", "port"];
+    const commands = COMMAND_CATALOG.map((entry) => entry.command);
+    for (const subcommand of subcommands) {
+      expect(commands).toContain(`/set ${subcommand}`);
+    }
+  });
+});
+
+describe("COMMAND_CATALOG — /sandbox drift guard", () => {
+  it("has a catalog entry for every /sandbox mode handleSandbox accepts", () => {
+    // Mirrors sandboxHandlers.ts's VALID_MODES plus the bare status form —
+    // commands/index.ts routes /sandbox to handleSandbox independently of
+    // this catalog, and /tokensave previously shipped routed-but-uncataloged
+    // (no autocomplete, no /help entry), so this guards against the same gap.
+    const commands = COMMAND_CATALOG.map((entry) => entry.command);
+    for (const form of ["/sandbox", "/sandbox auto", "/sandbox container", "/sandbox off"]) {
+      expect(commands).toContain(form);
+    }
+  });
+});
+
+describe("COMMAND_CATALOG — /mcp and /tokensave drift guard", () => {
+  it("has a catalog entry for every /mcp subcommand handleMcp accepts", () => {
+    const commands = COMMAND_CATALOG.map((entry) => entry.command);
+    for (const form of [
+      "/mcp list",
+      "/mcp add",
+      "/mcp remove",
+      "/mcp enable",
+      "/mcp disable",
+      "/mcp tools",
+      "/mcp check",
+    ]) {
+      expect(commands).toContain(form);
+    }
+  });
+
+  it("has a catalog entry for every /tokensave subcommand (was previously missing entirely)", () => {
+    const commands = COMMAND_CATALOG.map((entry) => entry.command);
+    expect(commands).toContain("/tokensave init");
+    expect(commands).toContain("/tokensave status");
+  });
+});
 
 describe("COMMAND_CATALOG — Phase 1 entries", () => {
   it("includes /clear and /notify (normal)", () => {
@@ -252,5 +304,14 @@ describe("COMMAND_CATALOG — Phase 1 entries", () => {
     const description = getCommandDescription("/exit");
     expect(description).not.toMatch(/Ctrl\+L/i);
     expect(description).toMatch(/Ctrl\+C/);
+  });
+});
+
+describe("COMMAND_CATALOG — /model (replaces /set agent)", () => {
+  it("has a top-level /model entry and no /set agent or /set approval entries (normal)", () => {
+    const commands = COMMAND_CATALOG.map((entry) => entry.command);
+    expect(commands).toContain("/model");
+    expect(commands).not.toContain("/set agent");
+    expect(commands).not.toContain("/set approval");
   });
 });

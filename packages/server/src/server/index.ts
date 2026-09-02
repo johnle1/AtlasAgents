@@ -30,6 +30,7 @@ import {
 import { createContainer } from "../container/index.js";
 import { installUserDataDefaults } from "../setup/installUserDataDefaults.js";
 import { RSocketServer } from "./rsocket/rsocketServer.js";
+import { disposeConnection, performShutdown } from "./shutdown.js";
 import { promptListenPort, readPasswordAtStartup } from "./startupPrompts.js";
 import {
   certificateExpiry,
@@ -37,10 +38,12 @@ import {
 } from "./tls/certificateStore.js";
 import { describeCertExpiry, runCertRegen } from "./tls/certRegen.js";
 import { ensureOllamaRunning } from "../ollama/lifecycle.js";
+import { resolveOllamaTuning } from "../ollama/runtimeTuning.js";
 import {
   syncAgentToolSupport,
   syncSubagentToolSupport,
 } from "../ollama/syncAgentToolSupport.js";
+import { syncAgentThinkingSupport } from "../ollama/syncAgentThinkingSupport.js";
 import { cleanupOldSnapshots } from "../workspace/cleanup/snapshotCleanup.js";
 import { logger } from "../utils/logger.js";
 
@@ -163,7 +166,7 @@ const main = async (): Promise<void> => {
   }
 
   // Only bootstrap local Ollama when at least one role is actually configured
-  // to use the "ollama" provider — a pure vLLM/Trainium/TPU deployment has no
+  // to use the "ollama" provider — a pure OpenAI-compatible-only deployment has no
   // local Ollama to start or connect to.
   const configPreview = new ConfigManager({ rootDir: process.cwd() });
 
@@ -177,13 +180,24 @@ const main = async (): Promise<void> => {
     (await configPreview.getAgentProvider()) === "ollama" ||
     (await configPreview.getSubagentProvider()) === "ollama";
 
+  // Retained (not discarded) so the shutdown handler below can stop this
+  // process's own Ollama child, if it started one — see performShutdown.
+  // A pre-existing Ollama (startedByServer: false) is never spawned by us
+  // and stop() on it is a no-op, so this default is safe even when the
+  // "if" below never runs.
+  let ollamaLifecycle: Awaited<ReturnType<typeof ensureOllamaRunning>> = {
+    startedByServer: false,
+    stop: () => {},
+  };
+
   if (usesOllamaProvider) {
     // Verify Ollama connectivity
     const ollamaBaseUrl = OLLAMA_TAGS_URL.replace(/\/api\/tags$/, "");
     process.stdout.write(`Connecting to Ollama at ${ollamaBaseUrl}...`);
 
     try {
-      const ollamaLifecycle = await ensureOllamaRunning(OLLAMA_TAGS_URL);
+      const tuning = await resolveOllamaTuning(configPreview);
+      ollamaLifecycle = await ensureOllamaRunning(OLLAMA_TAGS_URL, tuning);
       if (ollamaLifecycle.startedByServer) {
         process.stdout.write(" started");
       }
@@ -241,6 +255,7 @@ const main = async (): Promise<void> => {
     const agentProvider = await app.config.getAgentProvider();
     const agentAdmin = await app.providerRegistry.getAdmin(agentProvider);
     await syncAgentToolSupport(agentAdmin, app.config, agentModel);
+    await syncAgentThinkingSupport(agentAdmin, app.config, agentModel);
   } catch (error) {
     if (error instanceof ConfigError) {
       logger.warn(
@@ -297,19 +312,7 @@ const main = async (): Promise<void> => {
     auth,
     router,
     // Cleanup per-connection resources when client disconnects
-    (requesterId) => {
-      const perConnection = app.brokerByRequester.get(requesterId);
-      if (perConnection) {
-        perConnection.planBroker.dispose();
-        perConnection.workspace.dispose();
-        perConnection.terminal.dispose();
-        app.brokerByRequester.delete(requesterId);
-      }
-      // The placement reporter is a process-lifetime singleton that dedupes
-      // by requesterId, so its state has to be released here too — otherwise
-      // it grows by an entry per connection for as long as the server runs.
-      app.modelPlacementReporter.forgetScope(requesterId);
-    },
+    (requesterId) => disposeConnection(app, requesterId),
     clientPeers,
     cert,
   );
@@ -323,6 +326,24 @@ const main = async (): Promise<void> => {
     "Share this fingerprint with clients out-of-band so they can verify it on first connect.",
   );
   logger.info("Waiting for connections...");
+
+  // Ctrl+C / SIGTERM: cancel in-flight work, stop accepting connections,
+  // release every connection's resources, stop Ollama if we started it, then
+  // exit. Registered with `.on` (not `.once`) so a second signal during
+  // teardown is still observed and force-exits immediately, rather than
+  // silently doing nothing because the first listener already fired.
+  let shuttingDown = false;
+  const onShutdownSignal = (): void => {
+    if (shuttingDown) {
+      logger.warn("Second interrupt — forcing exit.");
+      process.exit(1);
+    }
+    shuttingDown = true;
+    logger.info("Shutting down...");
+    performShutdown(app, server, ollamaLifecycle);
+  };
+  process.on("SIGINT", onShutdownSignal);
+  process.on("SIGTERM", onShutdownSignal);
 };
 
 // Global error handler for the main function

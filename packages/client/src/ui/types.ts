@@ -12,9 +12,13 @@ import type {
   SubagentStage,
   AgentStage,
   PlanExecution,
+  PlanStep,
   StatusIcon,
   TaskLifecycleState,
 } from "../types/frames.js";
+
+/** The agent's live `update_plan` checklist state — see `PlanChecklist.tsx`. */
+export type PlanStepState = PlanStep;
 
 /**
  * Display styling for plain-text history lines.
@@ -189,12 +193,18 @@ export type ApprovalRequest =
  *
  * @remarks
  * Shape depends on request type: booleans for file/command approvals,
- * {@link PlanDecision} for simple plan reviews, or a plan object with
- * optional edited steps when the user chooses `"edit"`.
+ * {@link PlanDecision} for simple plan reviews, `"autoAcceptEdits"` /
+ * `"manualApprove"` for the two plan-review "Yes" rows (client-only tokens —
+ * `handleConfirmPlanFrame` in `taskStream.ts` maps both down to the wire's
+ * `"implement"` `PlanDecision` plus a session approval-mode switch, so these
+ * never reach `Connection.respondPlan`), or a plan object with optional
+ * edited steps when the user chooses `"edit"`.
  */
 export type ApprovalResult =
   | boolean
   | PlanDecision
+  | "autoAcceptEdits"
+  | "manualApprove"
   | "always"
   | {
       type: "plan";

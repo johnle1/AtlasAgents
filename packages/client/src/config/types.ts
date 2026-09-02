@@ -12,6 +12,8 @@ import * as path from "node:path";
 import * as os from "node:os";
 import type { SecretsEnvelope } from "@atlasagents/shared";
 import type { ApprovalMode, PersistedApprovalMode } from "./approvalMode.js";
+import type { SandboxMode } from "../fileProxy/sandbox/index.js";
+import { DEFAULT_SANDBOX_IMAGE } from "../fileProxy/sandbox/index.js";
 
 /**
  * Footer / status presentation for a mode (icon + label + Ink color).
@@ -21,7 +23,7 @@ export type ApprovalModeDisplay = {
   label: string;
   /** Ink `color` hex when the mode should stand out; omit for dim default. */
   color?: string;
-  /** When true, render the label bold (bypass). */
+  /** When true, render the label bold (auto). */
   bold?: boolean;
 };
 
@@ -33,12 +35,74 @@ export const APPROVAL_MODE_DISPLAY: Record<ApprovalMode, ApprovalModeDisplay> =
     default: { label: "default" },
     accept_edits: { label: "⏵ Accept Edits", color: "#FB923C" },
     plan: { label: "⏸ Plan", color: "#60A5FA" },
-    auto: { label: "⏵⏵ Auto", color: "#A78BFA" },
-    bypass: { label: "⚠ BYPASS", color: "#FF5555", bold: true },
+    auto: { label: "⏵⏵ Auto", color: "#FF5555", bold: true },
   };
 
+/**
+ * `/sandbox` configuration persisted to disk.
+ *
+ * @remarks
+ * Not sensitive — safe to store in plaintext alongside every other
+ * non-secret `Config` field.
+ */
+export interface SandboxConfig {
+  /**
+   * `"auto"` (default) picks the strongest backend available per-platform;
+   * `"container"` forces the container backend even where an OS-native one
+   * exists; `"off"` disables sandboxing entirely. See
+   * `fileProxy/sandbox/index.ts` for what each mode resolves to.
+   */
+  mode: SandboxMode;
+
+  /**
+   * Image tag the container backend runs commands in. Defaults to the
+   * image built from `sandbox/Dockerfile`; override if your project
+   * needs a different toolchain baked in.
+   */
+  containerImage: string;
+}
+
+/**
+ * One configured MCP (Model Context Protocol) server — connection shape
+ * only, never credentials (those live in `mcpSecrets`, encrypted).
+ *
+ * @remarks
+ * `readOnly` is a manual, server-wide override: when set, every tool from
+ * this server skips the approval prompt and stays available in plan mode,
+ * regardless of what each tool's own MCP `annotations.readOnlyHint` says.
+ * Leave unset to trust each tool's own hint (falling back to "not
+ * read-only" — the safer default — when a tool declares none).
+ *
+ * `enabled` (default `true` when absent) lets `/mcp disable <name>` turn a
+ * server off without discarding its config/credentials — cheaper and more
+ * reversible than `/mcp remove` + re-adding. A disabled server is skipped by
+ * the automatic sync (`syncAllMcpTools`) and torn down if currently
+ * connected; `/mcp test`/`/mcp tools <name>`, naming it explicitly, still
+ * work so you can check it before re-enabling.
+ */
+export type McpServerConfig =
+  | {
+      transport: "stdio";
+      /** Executable to spawn (e.g. `"npx"`, `"tokensave"`). */
+      command: string;
+      /** Arguments passed to `command`. */
+      args?: string[];
+      readOnly?: boolean;
+      enabled?: boolean;
+    }
+  | {
+      transport: "http";
+      /** MCP streamable-HTTP endpoint URL. */
+      url: string;
+      readOnly?: boolean;
+      enabled?: boolean;
+    };
+
 /** The `Config` fields sensitive enough to encrypt at rest. */
-export type SecretConfigFields = Pick<Config, "password" | "server">;
+export type SecretConfigFields = Pick<
+  Config,
+  "password" | "server" | "mcpSecrets"
+>;
 
 /**
  * On-disk shape of config.json.
@@ -46,10 +110,13 @@ export type SecretConfigFields = Pick<Config, "password" | "server">;
  * @remarks
  * `password`/`server` appear at the top level only in a legacy,
  * not-yet-migrated (plaintext) file; once migrated they live exclusively
- * inside `$secrets`. Every other `Config` field stays a plain top-level key
- * either way — only these two are ever encrypted.
+ * inside `$secrets`. `mcpSecrets` has no such legacy plaintext era — it's
+ * always encrypted from the first write. Every other `Config` field stays a
+ * plain top-level key either way.
  */
-export type StoredConfig = Partial<Omit<Config, "password" | "server">> & {
+export type StoredConfig = Partial<
+  Omit<Config, "password" | "server" | "mcpSecrets">
+> & {
   password?: string;
   server?: string;
   $secrets?: SecretsEnvelope;
@@ -71,7 +138,7 @@ export type StoredConfig = Partial<Omit<Config, "password" | "server">> & {
  */
 export const omitSecretFields = (
   stored: StoredConfig,
-): Partial<Omit<Config, "password" | "server">> => {
+): Partial<Omit<Config, "password" | "server" | "mcpSecrets">> => {
   const rest = { ...stored };
   delete rest.$secrets;
   delete rest.password;
@@ -162,13 +229,13 @@ export interface UiConfig {
  *   server: "localhost",
  *   port: 7000,
  *   password: "secret",
- *   subagentModel: "gemma3:27b",
- *   subsubagentModel: "gemma3:4b",
+ *   agentModel: "gemma3:27b",
+ *   subagentModel: "gemma3:4b",
  *   agentTemp: 0.1,
  *   subagentTemp: 0.4,
  *   retries: 3,
  *   timeout: 600000,
- *   shellTimeoutMs: 120000,
+ *   shellTimeoutMs: 300000,
  *   maxContextBudget: 0.2,
  *   workspace: "/home/user/projects",
  *   showThinkOutput: false,
@@ -215,7 +282,7 @@ export interface Config {
    * for better reasoning. Example values: "gemma3:27b", "llama3:70b".
    * Empty until set by user or first-run prompts.
    */
-  subagentModel: string;
+  agentModel: string;
 
   /**
    * Ollama model name for the subagent role.
@@ -225,7 +292,7 @@ export interface Config {
    * typically sufficient for faster response times. Example values: "gemma3:4b",
    * "llama3:8b". Empty until set by user or first-run prompts.
    */
-  subsubagentModel: string;
+  subagentModel: string;
 
   /**
    * Provider serving the agent role.
@@ -233,7 +300,7 @@ export interface Config {
    * @remarks
    * `"ollama"` (the default) talks to the local Ollama instance. Any other
    * value must match a provider added on the server via `/providers add` —
-   * e.g. a vLLM server on a GPU box, AWS Trainium, or Google TPU.
+   * e.g. LM Studio, llama.cpp's server, or a hosted OpenAI-compatible API.
    */
   agentProvider: string;
 
@@ -285,8 +352,10 @@ export interface Config {
    *
    * @remarks
    * Shell commands initiated by the server through the file proxy will be killed
-   * after this duration. Default is 120000ms (2 minutes). Increase for long-running
-   * operations, decrease for faster failure detection.
+   * after this duration. Default is 300000ms (5 minutes) — scaffold/install
+   * commands (`npm create`, `npm install`, …) routinely take longer than the
+   * old 2-minute default. Increase further for long-running operations,
+   * decrease for faster failure detection.
    */
   shellTimeoutMs: number;
 
@@ -315,8 +384,8 @@ export interface Config {
    *
    * @remarks
    * When true, the CLI shows the internal reasoning process of the agent and
-   * subagent models. When false, only the final output is displayed. Default is false
-   * to reduce noise in the terminal.
+   * subagent models. When false, only the final output is displayed. Default
+   * is false — thinking is noisy for everyday use; `/think on` opts back in.
    */
   showThinkOutput: boolean;
 
@@ -343,11 +412,33 @@ export interface Config {
    * Session permission mode persisted across launches.
    *
    * @remarks
-   * `"default"` | `"accept_edits"` | `"plan"` | `"auto"`. `"bypass"` is
-   * session-only and is never stored here — a hand-edited `"bypass"` value
+   * `"default"` | `"accept_edits"` | `"plan"`. `"auto"` (full bypass) is
+   * session-only and is never stored here — a hand-edited `"auto"` value
    * is coerced to `"default"` on load.
    */
   approvalMode: PersistedApprovalMode;
+
+  /**
+   * `/sandbox` mode and container image — see {@link SandboxConfig}.
+   */
+  sandbox: SandboxConfig;
+
+  /**
+   * Configured MCP servers, keyed by a user-chosen server id (e.g.
+   * `"github"`, `"tokensave"`, `"my-tool"`). Connection shape only — never
+   * credentials; see {@link mcpSecrets}. Managed via `/mcp add|remove|list`.
+   */
+  mcpServers: Record<string, McpServerConfig>;
+
+  /**
+   * Per-server credential bundles, keyed by the same server id as
+   * {@link mcpServers}. Each value is a flat env-var-shaped map: for a
+   * `stdio` server these are merged into the spawned process's
+   * environment; for an `http` server, a `token` key is sent as
+   * `Authorization: Bearer <token>`. Encrypted at rest alongside
+   * `password`/`server` — see the Security section of the README.
+   */
+  mcpSecrets: Record<string, Record<string, string>>;
 
   /**
    * Pinned SHA-256 fingerprints of server TLS certificates, keyed by `"host:port"`.
@@ -364,6 +455,18 @@ export interface Config {
    * Not a secret — safe to store in plaintext even in an encrypted config.
    */
   serverFingerprints: Record<string, string>;
+
+  /**
+   * `Date.now()` epoch ms of the last write to a model/provider/temperature
+   * field the server also tracks — NOT a general file-write timestamp (the
+   * config file's own mtime is unusable for this, since it bumps on every
+   * unrelated write: theme, sandbox, `/mcp`, `/workspace`, …). Compared
+   * against the server's own `configChangedAt`
+   * (`packages/server/src/config/types.ts`) by the `sync.check` route to
+   * decide which side's overlapping values win on startup: whichever
+   * changed more recently.
+   */
+  configChangedAt: number;
 }
 
 /**
@@ -383,8 +486,8 @@ export const DEFAULT_CONFIG: Config = {
   password: "",
 
   // Model names (empty until set by user or first-run prompts)
+  agentModel: "",
   subagentModel: "",
-  subsubagentModel: "",
 
   // Native Ollama by default; switched via /providers + /set agent|subagent
   agentProvider: "ollama",
@@ -400,8 +503,8 @@ export const DEFAULT_CONFIG: Config = {
   // Prevents CLI hanging on slow or unresponsive models (10 minutes)
   timeout: 600_000,
 
-  // Kill shell commands after 2 minutes by default (npm create/install often need longer)
-  shellTimeoutMs: 120_000,
+  // Kill shell commands after 5 minutes by default (npm create/install often need longer)
+  shellTimeoutMs: 300_000,
 
   // Caps how much of the context window memory injection can consume (20%)
   maxContextBudget: 0.2,
@@ -409,7 +512,7 @@ export const DEFAULT_CONFIG: Config = {
   // Empty until set via `/workspace set <path>` or editing config.json
   workspace: "",
 
-  // Disable think output by default (shows agent/subagent think boxes when true)
+  // Hide agent/subagent think boxes by default; `/think on` opts in
   showThinkOutput: false,
 
   // Allow 3 parallel subagent groups by default (minimum 1)
@@ -426,8 +529,22 @@ export const DEFAULT_CONFIG: Config = {
   // Permission mode — Shift+Tab cycles default / accept_edits / plan
   approvalMode: "default",
 
+  // Strongest available backend per-platform; see fileProxy/sandbox/index.ts
+  sandbox: {
+    mode: "auto",
+    containerImage: DEFAULT_SANDBOX_IMAGE,
+  },
+
+  // Empty until added via /mcp add (or the bundled TokenSave/GitHub/Jira/Slack presets)
+  mcpServers: {},
+  mcpSecrets: {},
+
   // No servers trusted yet — populated on first connect to each host:port (TOFU)
   serverFingerprints: {},
+
+  // 0 means "never explicitly changed" — always loses a newest-wins
+  // comparison against a server that has ever had a model set.
+  configChangedAt: 0,
 };
 
 /** Config directory path (~/.atlasagents) where config, history, and skills live. */

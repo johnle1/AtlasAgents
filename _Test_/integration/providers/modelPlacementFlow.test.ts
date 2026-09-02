@@ -1,15 +1,13 @@
 /**
- * Integration tests — hardware detection → num_ctx wire value, and loaded-model
+ * Integration tests — configured num_ctx → wire value, and loaded-model
  * placement → spill warnings.
  *
  * @remarks
  * Two flows, both offline, fakes only at the outer boundaries:
  *
- *  A. VRAM/unified-memory figure (the vramProbe output level — pure
- *     `deriveAppleNumCtxInput`/`recommendNumCtx`) → config `getNumCtx()` →
- *     REAL `ContextWindowResolver` (fake `showModel` admin) → the exact
- *     `num_ctx` sent to Ollama. Probes themselves are exec-based and already
- *     unit-tested; this layer starts from their return values.
+ *  A. A configured `numCtx` figure → config `getNumCtx()` → REAL
+ *     `ContextWindowResolver` (fake `showModel` admin) → the exact `num_ctx`
+ *     sent to Ollama.
  *
  *  B. `GET /api/ps` rows (fake `listRunning`) → REAL
  *     `createModelPlacementReporter` → the warning messages a client would
@@ -22,10 +20,6 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  deriveAppleNumCtxInput,
-  recommendNumCtx,
-} from "../../../packages/server/src/hardware/vramProbe.js";
 import {
   ContextWindowResolver,
   MIN_NUM_CTX,
@@ -41,7 +35,7 @@ import type { RunningModel } from "../../../packages/server/src/ollama/types.js"
 import type { ModelSummary } from "../../../packages/shared/src/index.js";
 
 // ---------------------------------------------------------------------------
-// A. Detected memory → recommended numCtx → resolved wire value
+// A. A configured numCtx → resolved wire value
 // ---------------------------------------------------------------------------
 
 /** A config fake whose numCtx can be swapped mid-test (the `/set` case). */
@@ -66,36 +60,24 @@ const adminWithTrainedLength = (trainedContextLength: number) => {
   };
 };
 
-describe("hardware → numCtx chain — Apple Silicon unified memory", () => {
-  it("96GB unified memory derates to the 48GB+ tier and flows to the wire unclamped", async () => {
-    const unifiedMemoryMb = 96 * 1024;
-    // The exact pipeline detectHardware runs for Apple Silicon.
-    const recommended = recommendNumCtx(
-      deriveAppleNumCtxInput(unifiedMemoryMb),
-    );
-    // 96GB * 2/3 = 64GB usable → top tier.
-    expect(recommended).toBe(65536);
+describe("numCtx chain — a large configured context window", () => {
+  it("a 64K configured value flows to the wire unclamped under a larger trained ceiling", async () => {
+    const configuredNumCtx = 65536;
 
-    const { config } = configWithNumCtx(recommended);
+    const { config } = configWithNumCtx(configuredNumCtx);
     const { admin, showModel } = adminWithTrainedLength(131072);
     const resolver = new ContextWindowResolver({ ollama: admin, config });
 
     // Configured 65536 fits under the 128K trained ceiling.
     await expect(resolver.resolve("gemma3:27b")).resolves.toBe(65536);
   });
-
-  it("a smaller Mac drops a tier but still beats the 4096 default", () => {
-    // 16GB unified → 10.6GB usable → 8192 tier (not 16384).
-    expect(recommendNumCtx(deriveAppleNumCtxInput(16 * 1024))).toBe(8192);
-  });
 });
 
-describe("hardware → numCtx chain — discrete GPU with probed VRAM", () => {
-  it("24GB VRAM recommends 32768, clamped down to the model's trained ceiling", async () => {
-    const recommended = recommendNumCtx(24 * 1024);
-    expect(recommended).toBe(32768);
+describe("numCtx chain — configured value exceeding the model's trained ceiling", () => {
+  it("32768 configured against an 8K-trained model clamps down to the trained ceiling", async () => {
+    const configuredNumCtx = 32768;
 
-    const { config } = configWithNumCtx(recommended);
+    const { config } = configWithNumCtx(configuredNumCtx);
     // A small model trained at 8K: the trained length is a hard ceiling.
     const { admin } = adminWithTrainedLength(8192);
     const resolver = new ContextWindowResolver({ ollama: admin, config });
@@ -104,12 +86,8 @@ describe("hardware → numCtx chain — discrete GPU with probed VRAM", () => {
   });
 });
 
-describe("hardware → numCtx chain — probe failure fallback (never-throw path)", () => {
-  it("unmeasured VRAM falls back to the conservative default end to end", async () => {
-    // Every probe returned null — the recommendation is the safe default.
-    const recommended = recommendNumCtx(null);
-    expect(recommended).toBe(OLLAMA_DEFAULT_NUM_CTX);
-
+describe("numCtx chain — no configured value (never-throw path)", () => {
+  it("falls back to the conservative default end to end", async () => {
     // And when detection never wrote a config value at all (getNumCtx →
     // undefined), the resolver still lands on Ollama's own default, floored
     // at MIN_NUM_CTX — never a wild number from a failed probe.

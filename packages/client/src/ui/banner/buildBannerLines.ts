@@ -87,7 +87,7 @@ const borderedBlank = (borderColor: string, resetCode: string): string =>
  * 4. Agent / subagent model lines (left-labeled, padded to the right border)
  * 5. Bottom border
  *
- * Model names come from `configuration.subagentModel` / `configuration.subsubagentModel`
+ * Model names come from `configuration.agentModel` / `configuration.subagentModel`
  * and fall back to `"not set"` when missing so the layout never shows empty labels.
  *
  * **Padding note:** padding for model lines uses {@link visibleLength} on the
@@ -107,8 +107,8 @@ const borderedBlank = (borderColor: string, resetCode: string): string =>
  * import type { Config } from "../../config/index.js";
  *
  * const configuration = {
- *   subagentModel: "llama3.2:3b",
- *   subsubagentModel: "qwen2.5-coder:7b",
+ *   agentModel: "llama3.2:3b",
+ *   subagentModel: "qwen2.5-coder:7b",
  * } as Config;
  *
  * for (const line of buildBannerLines(configuration, "0.4.0")) {
@@ -134,8 +134,8 @@ export const buildBannerLines = (
   const borderColor = fg(BANNER_BORDER_HEX);
   const resetCode = theme.reset;
 
+  const agentModelName = configuration.agentModel || "not set";
   const subagentModelName = configuration.subagentModel || "not set";
-  const subsubagentModelName = configuration.subsubagentModel || "not set";
 
   // Only call out the provider when it's not the default "ollama", so the
   // common case stays visually uncluttered.
@@ -184,14 +184,14 @@ export const buildBannerLines = (
   bannerLines.push(borderedBlank(borderColor, resetCode));
 
   // Pad from the uncolored label so theme accent escapes do not inflate width.
-  const agentInfoLine = `  Agent: ${subagentModelName}${agentProviderSuffix}`;
+  const agentInfoLine = `  Agent: ${agentModelName}${agentProviderSuffix}`;
   bannerLines.push(
-    `${borderColor}│${resetCode}  Agent: ${theme.textAccent}${subagentModelName}${resetCode}${theme.textSecondary}${agentProviderSuffix}${resetCode}${" ".repeat(Math.max(0, BANNER_INNER - visibleLength(agentInfoLine)))}${borderColor}│${resetCode}`,
+    `${borderColor}│${resetCode}  Agent: ${theme.textAccent}${agentModelName}${resetCode}${theme.textSecondary}${agentProviderSuffix}${resetCode}${" ".repeat(Math.max(0, BANNER_INNER - visibleLength(agentInfoLine)))}${borderColor}│${resetCode}`,
   );
 
-  const subagentInfoLine = `  Subagent: ${subsubagentModelName}${subagentProviderSuffix}`;
+  const subagentInfoLine = `  Subagent: ${subagentModelName}${subagentProviderSuffix}`;
   bannerLines.push(
-    `${borderColor}│${resetCode}  Subagent: ${theme.textAccent}${subsubagentModelName}${resetCode}${theme.textSecondary}${subagentProviderSuffix}${resetCode}${" ".repeat(Math.max(0, BANNER_INNER - visibleLength(subagentInfoLine)))}${borderColor}│${resetCode}`,
+    `${borderColor}│${resetCode}  Subagent: ${theme.textAccent}${subagentModelName}${resetCode}${theme.textSecondary}${subagentProviderSuffix}${resetCode}${" ".repeat(Math.max(0, BANNER_INNER - visibleLength(subagentInfoLine)))}${borderColor}│${resetCode}`,
   );
 
   bannerLines.push(borderedBlank(borderColor, resetCode));

@@ -19,6 +19,8 @@
  * await configManager.setModel("agent", "llama3.1");
  * ```
  */
+import type { EffortLevel, KvCacheType } from "../../config/types.js";
+
 export interface IConfigManager {
   /**
    * Returns the model name configured for the agent (planning) role.
@@ -71,6 +73,18 @@ export interface IConfigManager {
    * @returns `true` if the model supports native tool calling; `false` otherwise.
    */
   getSubagentModelSupportsTools(): Promise<boolean>;
+
+  /**
+   * Returns whether the agent model supports Ollama's extended `think` mode.
+   *
+   * @remarks
+   * Ollama rejects `think: true` with an HTTP 400 for models that don't
+   * advertise the `"thinking"` capability, so callers must check this
+   * before requesting it rather than assuming every model supports it.
+   *
+   * @returns `true` if the agent model supports extended thinking; `false` otherwise.
+   */
+  getAgentModelSupportsThinking(): Promise<boolean>;
 
   /**
    * Returns the sampling temperature for the agent (planning) role.
@@ -178,11 +192,42 @@ export interface IConfigManager {
    * @remarks
    * `undefined` means "not configured" — callers fall back to Ollama's own
    * default (4096) rather than guessing. Ollama-only; ignored for other
-   * providers. Set via `atlas-detect-hardware --write` or `/set numCtx`.
+   * providers. Set via `/set numCtx`.
    *
    * @returns Configured `num_ctx` in tokens, or `undefined` if unset.
    */
   getNumCtx(): Promise<number | undefined>;
+
+  /**
+   * Returns the configured `OLLAMA_NUM_PARALLEL` override, if set.
+   *
+   * @remarks
+   * `undefined` means "not configured" — `ollama/runtimeTuning.ts` derives
+   * a value from this machine's memory instead. Ollama-only; ignored for
+   * other providers. Only takes effect the next time this process spawns
+   * `ollama serve`. Set via `/set numParallel`.
+   */
+  getNumParallel(): Promise<number | undefined>;
+
+  /**
+   * Returns the configured `OLLAMA_FLASH_ATTENTION` override, if set.
+   *
+   * @remarks
+   * `undefined` means "not configured" — `ollama/runtimeTuning.ts` defaults
+   * to enabling it. Same spawn-time-only caveat as {@link getNumParallel}.
+   * Set via `/set flashAttention`.
+   */
+  getFlashAttention(): Promise<boolean | undefined>;
+
+  /**
+   * Returns the configured `OLLAMA_KV_CACHE_TYPE` override, if set.
+   *
+   * @remarks
+   * `undefined` means "not configured" — `ollama/runtimeTuning.ts` defaults
+   * to `"q8_0"`. Same spawn-time-only caveat as {@link getNumParallel}. Set
+   * via `/set kvCacheType`.
+   */
+  getKvCacheType(): Promise<KvCacheType | undefined>;
 
   /**
    * Returns the configured Ollama `keep_alive` duration.
@@ -197,6 +242,16 @@ export interface IConfigManager {
    *   unitless value, so never-unload must go on the wire as a number.
    */
   getKeepAlive(): Promise<string | number>;
+
+  /**
+   * Returns the configured REASON-phase effort level.
+   *
+   * @remarks
+   * Controls how much `orchestration/agent/reasoner.ts` re-deliberates
+   * before acting — see `config/types.ts`'s `EffortLevel`. Defaults to
+   * `"medium"`.
+   */
+  getEffort(): Promise<EffortLevel>;
 
   /**
    * Returns the complete merged configuration object.
@@ -395,5 +450,30 @@ export interface IConfigManager {
     role: "agent" | "subagent",
     providerName: string,
     modelName: string,
+  ): Promise<void>;
+
+  /**
+   * Overwrites every client-overlapping config field in one atomic write,
+   * stamping `configChangedAt` to `changedAt` rather than the current time.
+   *
+   * @remarks
+   * Used by the `sync.check` route's "client wins" reconciliation branch —
+   * see {@link "../../config/configManager.js".ConfigManager.applySyncedConfig}
+   * for why the caller-supplied timestamp matters.
+   *
+   * @param values - The six fields the client and server both track.
+   * @param changedAt - The winning side's `configChangedAt`, so both sides
+   *   converge to an identical value.
+   */
+  applySyncedConfig(
+    values: {
+      agentModel: string;
+      subagentModel: string;
+      agentProvider: string;
+      subagentProvider: string;
+      agentTemp: number;
+      subagentTemp: number;
+    },
+    changedAt: number,
   ): Promise<void>;
 }

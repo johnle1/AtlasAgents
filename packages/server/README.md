@@ -14,12 +14,6 @@ npm install -g atlasagents-server
 atlas-server start
 ```
 
-Detect local hardware (GPU/CPU capabilities used for model recommendations):
-
-```bash
-atlas-detect-hardware
-```
-
 See the [project README](https://github.com/johnle1/AtlasAgents#readme) for the full client/server architecture.
 
 ## License

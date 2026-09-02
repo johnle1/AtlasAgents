@@ -11,9 +11,10 @@
  * otherwise keep refusing a rebuilt server.
  *
  * `config/types.ts` derives its config directory from `os.homedir()` at module
- * load, so `HOME` is overridden before the modules are imported dynamically in
- * `beforeAll` — the same pattern as configUnlock.test.ts. Vitest isolates each
- * file's module registry, so this does not leak into other test files.
+ * load, so HOME/USERPROFILE are overridden (via {@link createTempHome}) before
+ * the modules are imported dynamically in `beforeAll` — the same pattern as
+ * configUnlock.test.ts. Vitest isolates each file's module registry, so this
+ * does not leak into other test files.
  *
  * `runConfigRepair` reuses one injected prompt for both the passphrase and the
  * new server password, so the scripted answers below are ordered: passphrase
@@ -22,8 +23,8 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { createTempHome, type TempHome } from "../../../helpers/tempHome.js";
 
 describe("configRepair.ts — offline connection-settings repair", () => {
   let runConfigRepair: typeof import("../../../../packages/client/src/cli/configRepair.js").runConfigRepair;
@@ -32,8 +33,7 @@ describe("configRepair.ts — offline connection-settings repair", () => {
   let isConnectionConfigured: typeof import("../../../../packages/client/src/config/index.js").isConnectionConfigured;
   let unlockOrSetupConfigCipher: typeof import("../../../../packages/client/src/config/index.js").unlockOrSetupConfigCipher;
   let lockCipher: typeof import("@atlasagents/shared").lockCipher;
-  let originalHome: string | undefined;
-  let tempHome: string;
+  let tempHome: TempHome;
   let configFile: string;
 
   /**
@@ -75,10 +75,8 @@ describe("configRepair.ts — offline connection-settings repair", () => {
   };
 
   beforeAll(async () => {
-    originalHome = process.env.HOME;
-    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-config-repair-test-"));
-    process.env.HOME = tempHome;
-    configFile = path.join(tempHome, ".atlasagents", "config.json");
+    tempHome = createTempHome("atlas-config-repair-test-");
+    configFile = path.join(tempHome.dir, ".atlasagents", "config.json");
 
     const configMod = await import("../../../../packages/client/src/config/index.js");
     loadConfig = configMod.loadConfig;
@@ -94,8 +92,7 @@ describe("configRepair.ts — offline connection-settings repair", () => {
   });
 
   afterAll(() => {
-    process.env.HOME = originalHome;
-    fs.rmSync(tempHome, { recursive: true, force: true });
+    tempHome.restore();
   });
 
   afterEach(() => {

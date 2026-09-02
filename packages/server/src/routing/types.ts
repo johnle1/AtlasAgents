@@ -5,11 +5,17 @@ import type {
 } from "../orchestration/types.js";
 import type { PreferenceRule } from "../orchestration/interfaces.js";
 import type { PerConnection } from "../container/types.js";
+import type { McpToolsCacheStore } from "../orchestration/mcp/mcpToolsCacheStore.js";
 import type { OllamaClient } from "../ollama/client.js";
 import type { ProviderRegistry } from "../providers/providerRegistry.js";
 import type { IConfigManager } from "../orchestration/interfaces/configInterfaces.js";
 import type { MaxSubagentsParam } from "../orchestration/maxSubagents.js";
-import type { RouteId, StreamKind, TaskApprovalMode } from "@atlasagents/shared";
+import type {
+  RouteId,
+  StreamKind,
+  TaskApprovalMode,
+  ClientEnvPayload,
+} from "@atlasagents/shared";
 
 /**
  * Represents an authenticated TCP/RSocket session for routing and cleanup.
@@ -235,6 +241,8 @@ export interface IOrchestrator {
    * @param modelOverrides - Optional model overrides for this task.
    * @param maxSubagents - Optional limits on concurrent subagent execution.
    * @param approvalMode - Session mode: `"plan"` stops after confirm-plan.
+   * @param clientEnv - Client platform info, so `run_command` guidance in the
+   *   agent's prompt matches the shell it actually executes on.
    */
   runTask(
     session: SessionInfo,
@@ -245,6 +253,7 @@ export interface IOrchestrator {
     modelOverrides?: TaskModelOverrides,
     maxSubagents?: MaxSubagentsParam,
     approvalMode?: TaskApprovalMode,
+    clientEnv?: ClientEnvPayload,
   ): Promise<void>;
 }
 
@@ -426,6 +435,16 @@ export type RouterBuilderDeps = {
     requesterId: string,
     emit: (frame: TaskFrame) => void,
   ) => PerConnection;
+
+  /**
+   * Disk-persisted cache of discovered MCP tools, keyed by client + workspace.
+   *
+   * @remarks
+   * Backs `mcp.tools.check`/`mcp.tools.sync` — lets a reconnecting client
+   * skip re-discovering identical MCP tools. See
+   * `orchestration/mcp/mcpToolsCacheStore.ts`.
+   */
+  mcpToolsCacheStore: McpToolsCacheStore;
 
   /**
    * Transformer function for converting preference rules to memory entries.

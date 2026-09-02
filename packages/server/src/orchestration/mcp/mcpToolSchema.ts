@@ -52,7 +52,7 @@ import type { ToolSchema } from "../tools/types.js";
  * if the server is lenient about schema validation.
  */
 export type McpToolSyncPayload = {
-  /** Tool name passed verbatim to the model (e.g. `"tokensave_search"`). */
+  /** Tool name passed verbatim to the model (e.g. `"tokensave_search"`, or a namespaced `"mcp__github__create_issue"`). */
   name: string;
 
   /** Human-readable description of what the tool does. Optional. */
@@ -60,6 +60,21 @@ export type McpToolSyncPayload = {
 
   /** JSON-schema describing the tool's input arguments (may be incomplete or missing fields). */
   inputSchema: Record<string, unknown>;
+
+  /**
+   * Whether this tool only reads (never mutates external state), as
+   * resolved client-side from the MCP tool's own `annotations.readOnlyHint`
+   * falling back to the server's configured `readOnly` default. Missing
+   * (from an older client) is treated as `false` — unknown tools require
+   * approval and are withheld in plan mode, the safer default.
+   */
+  readOnly?: boolean;
+};
+
+/** One MCP tool as tracked server-side: its model-facing schema plus read-only-ness. */
+export type McpToolEntry = {
+  schema: ToolSchema;
+  readOnly: boolean;
 };
 
 /**

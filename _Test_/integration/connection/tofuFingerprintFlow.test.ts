@@ -52,19 +52,20 @@ import {
 import { createTlsServerTransport } from "../../../packages/server/src/server/tls/tlsServerTransport.js";
 import { loadOrCreateServerCert } from "../../../packages/server/src/server/tls/certificateStore.js";
 import { createTlsClientTransport } from "../../../packages/client/src/connection/tls/tlsClientTransport.js";
+import { createTempHome, type TempHome } from "../../helpers/tempHome.js";
 
 /**
- * `config.ts` resolves its config directory from `os.homedir()` once at module
- * load, so `HOME` must be overridden *before* the module is first imported.
- * These are therefore imported dynamically in `beforeAll`, matching the
- * approach documented in `unit/fingerprintStore.test.ts`.
+ * `config.ts` resolves its config directory from `os.homedir()` once at
+ * module load, so HOME/USERPROFILE must be overridden (via
+ * {@link createTempHome}) *before* the module is first imported. These are
+ * therefore imported dynamically in `beforeAll`, matching the approach
+ * documented in `unit/fingerprintStore.test.ts`.
  */
 let checkAndPinFingerprint: typeof import("../../../packages/client/src/connection/tls/fingerprintStore.js").checkAndPinFingerprint;
 let clearFingerprint: typeof import("../../../packages/client/src/connection/tls/fingerprintStore.js").clearFingerprint;
 let loadConfig: typeof import("../../../packages/client/src/config/index.js").loadConfig;
 
-let originalHome: string | undefined;
-let tempHome: string;
+let tempHome: TempHome;
 
 /** Ports are allocated from a distinct range so this file can run beside tlsHandshakeFlow. */
 let nextPort = 58700;
@@ -72,9 +73,7 @@ const closeables: Array<{ close: () => void }> = [];
 const tempRoots: string[] = [];
 
 beforeAll(async () => {
-  originalHome = process.env.HOME;
-  tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-tofu-integration-"));
-  process.env.HOME = tempHome;
+  tempHome = createTempHome("atlas-tofu-integration-");
 
   const fingerprintModule = await import(
     "../../../packages/client/src/connection/tls/fingerprintStore.js"
@@ -86,12 +85,13 @@ beforeAll(async () => {
   loadConfig = configModule.loadConfig;
   // The client config file is encrypted at rest; unlock once for the whole
   // file so each test isn't entangled with an unrelated passphrase prompt.
+  // First-run, single call, against a fresh temp home with no leftover
+  // envelope — a constant answer can't loop even in principle.
   await configModule.unlockOrSetupConfigCipher(async () => "tofu-test-passphrase");
 });
 
 afterAll(() => {
-  process.env.HOME = originalHome;
-  fs.rmSync(tempHome, { recursive: true, force: true });
+  tempHome.restore();
 });
 
 afterEach(async () => {
