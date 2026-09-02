@@ -259,13 +259,18 @@ describe("CLI argument parsing — boundary --port values are accepted at parse 
 });
 
 describe("CLI argument parsing — host flag aliases and positionals", () => {
-  itWhenBuilt("--server behaves like --host (both reach the connect phase, not a parse error)", async () => {
-    const viaHost = await runCli(["--host", "127.0.0.1", "--port", "1"]);
-    const viaServer = await runCli(["--server", "127.0.0.1", "--port", "1"]);
-    // Both should fail the same way (unreachable connection), not one failing
-    // to parse — proves --server is a genuine alias, not silently ignored.
+  itWhenBuilt("--server behaves like --host (both fail the same parse, not an unknown option)", async () => {
+    const viaHost = await runCli(["--host", "127.0.0.1", "--port", "0"]);
+    const viaServer = await runCli(["--server", "127.0.0.1", "--port", "0"]);
+    // Invalid port is rejected at parse time, before connect/shutdown. That
+    // proves --server is accepted as a host alias (unknown-option would
+    // happen first) without comparing NTSTATUS codes from a refused socket.
+    expect(viaHost.exitCode).not.toBe(0);
     expect(viaServer.exitCode).not.toBe(0);
-    expect(viaHost.exitCode).toBe(viaServer.exitCode);
+    expect(viaHost.stderr).toMatch(/invalid --port/i);
+    expect(viaServer.stderr).toMatch(/invalid --port/i);
+    expect(viaHost.stderr).not.toMatch(/unknown option/i);
+    expect(viaServer.stderr).not.toMatch(/unknown option/i);
   });
 
   itWhenBuilt("accepts the positional 'start' argument without treating it as an error", async () => {
