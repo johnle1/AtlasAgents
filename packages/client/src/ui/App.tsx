@@ -455,8 +455,11 @@ const AppContent: React.FC = () => {
 
       {/* Agent's live checklist, if it has laid out multi-step work via
           update_plan. Hidden subagent work (run_steps_parallel) shows up
-          here only as steps flipping to done/failed — never as its own UI. */}
-      <PlanChecklist steps={activePlan} />
+          here only as steps flipping to done/failed — never as its own UI.
+          Shown only in plan mode — other modes track the checklist
+          internally (the completion gate still reads it) but don't surface
+          it as a persistent UI element. */}
+      {approvalMode === "plan" && <PlanChecklist steps={activePlan} />}
 
       {/* Status spinner: shows loading state for long-running operations */}
       <StatusSpinner state={spinner} />

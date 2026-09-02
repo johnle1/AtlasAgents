@@ -40,7 +40,6 @@ import type { SubmitLineContext } from "./types.js";
 import { sanitizeHistoryLine } from "../historySanitize.js";
 import { MAX_INPUT_HISTORY } from "../constants.js";
 import { runTaskStream } from "../taskStream.js";
-import { requestApproval } from "../uiBridge.js";
 import {
   dequeueSessionMessage,
   enqueueSessionMessage,
@@ -135,13 +134,6 @@ export const useSubmitLine = ({
             cwd: fileProxy.getCwd(),
             timeoutMs: taskConfiguration.shellTimeoutMs,
             classifyCommand: fileProxy.classifyCommand,
-            requestApproval: async (command) => {
-              const decision = await requestApproval({
-                type: "runSkip",
-                command,
-              });
-              return decision === true;
-            },
           });
           setHistory((previousHistory) => [...previousHistory, ...entries]);
         } else {

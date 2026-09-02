@@ -38,6 +38,7 @@ import {
 } from "./tls/certificateStore.js";
 import { describeCertExpiry, runCertRegen } from "./tls/certRegen.js";
 import { ensureOllamaRunning } from "../ollama/lifecycle.js";
+import { resolveOllamaTuning } from "../ollama/runtimeTuning.js";
 import {
   syncAgentToolSupport,
   syncSubagentToolSupport,
@@ -195,7 +196,8 @@ const main = async (): Promise<void> => {
     process.stdout.write(`Connecting to Ollama at ${ollamaBaseUrl}...`);
 
     try {
-      ollamaLifecycle = await ensureOllamaRunning(OLLAMA_TAGS_URL);
+      const tuning = await resolveOllamaTuning(configPreview);
+      ollamaLifecycle = await ensureOllamaRunning(OLLAMA_TAGS_URL, tuning);
       if (ollamaLifecycle.startedByServer) {
         process.stdout.write(" started");
       }
