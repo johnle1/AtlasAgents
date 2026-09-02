@@ -42,8 +42,11 @@ describe("runShell — sandbox wrapping", () => {
       denialPattern: /never-matches/,
       wrapCommand: (command: string, ctx: { cwd: string }) => {
         capturedCwd = ctx.cwd;
-        // Re-exec through /bin/sh so the fake "sandbox" is actually runnable.
-        return { argv: ["/bin/sh", "-c", command] };
+        // Re-exec through the host shell so the fake "sandbox" is actually
+        // runnable on Windows (no /bin/sh) and POSIX alike.
+        return process.platform === "win32"
+          ? { argv: ["cmd.exe", "/d", "/s", "/v:on", "/c", command] }
+          : { argv: ["/bin/sh", "-c", command] };
       },
     };
     const policy = { writeRoots: [os.tmpdir()], readDenies: [], network: "allow" as const };

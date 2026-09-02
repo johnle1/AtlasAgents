@@ -81,8 +81,9 @@ describe("formatHumanError", () => {
   });
 
   it("falls back to error message for unknown codes", () => {
+    const display = formatDisplayPath("/x");
     expect(
       formatHumanError("read", "/x", new Error("disk full")),
-    ).toBe("Cannot read /x — disk full");
+    ).toBe(`Cannot read ${display} — disk full`);
   });
 });

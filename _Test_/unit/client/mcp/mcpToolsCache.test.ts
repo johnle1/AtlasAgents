@@ -7,6 +7,7 @@
  * - Error: missing directory, malformed JSON
  */
 
+import * as path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -55,6 +56,15 @@ import {
   writeCacheEntry,
   type CachedEntry,
 } from "../../../../packages/client/src/mcp/mcpToolsCache.js";
+
+const CONFIG_DIR = "/fake-home/.atlasagents";
+const cacheDir = path.join(CONFIG_DIR, "mcpToolsCache");
+const legacyCacheFile = path.join(CONFIG_DIR, "mcpToolsCache.json");
+const escapeRegExp = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const cacheFilePattern = new RegExp(
+  `^${escapeRegExp(cacheDir)}[\\\\/].+\\.json$`,
+);
 
 const githubEntry: CachedEntry = {
   serverId: "github",
@@ -105,9 +115,7 @@ describe("loadMcpToolsCache", () => {
 
   it("deletes the legacy single-blob cache file if present (boundary — migration)", () => {
     loadMcpToolsCache();
-    expect(mockUnlinkSync).toHaveBeenCalledWith(
-      "/fake-home/.atlasagents/mcpToolsCache.json",
-    );
+    expect(mockUnlinkSync).toHaveBeenCalledWith(legacyCacheFile);
   });
 
   it("does not throw when the legacy file is already gone (normal)", () => {
@@ -123,10 +131,7 @@ describe("writeCacheEntry", () => {
     writeCacheEntry(githubEntry);
 
     expect(mockEnsureDirs).toHaveBeenCalled();
-    expect(mockMkdirSync).toHaveBeenCalledWith(
-      "/fake-home/.atlasagents/mcpToolsCache",
-      { recursive: true },
-    );
+    expect(mockMkdirSync).toHaveBeenCalledWith(cacheDir, { recursive: true });
     const [writtenPath, writtenData] = mockWriteFileSync.mock.calls[0]!;
     expect(writtenPath).toMatch(/\.tmp-.+\.json$/);
     expect(JSON.parse(writtenData as string)).toEqual(githubEntry);
@@ -134,7 +139,7 @@ describe("writeCacheEntry", () => {
     const [fromPath, toPath] = mockRenameSync.mock.calls[0]!;
     expect(fromPath).toBe(writtenPath);
     expect(toPath).not.toBe(writtenPath);
-    expect(toPath).toMatch(/^\/fake-home\/\.atlasagents\/mcpToolsCache\/.+\.json$/);
+    expect(toPath).toMatch(cacheFilePattern);
   });
 
   it("writes different servers to different files (normal — O(Δ) isolation)", () => {
@@ -159,7 +164,7 @@ describe("deleteCacheEntry", () => {
   it("unlinks the entry's file (normal)", () => {
     deleteCacheEntry("github");
     expect(mockUnlinkSync).toHaveBeenCalledWith(
-      expect.stringMatching(/^\/fake-home\/\.atlasagents\/mcpToolsCache\/.+\.json$/),
+      expect.stringMatching(cacheFilePattern),
     );
   });
 

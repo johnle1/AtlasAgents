@@ -2,6 +2,7 @@
  * Unit tests — client config/clientId.ts
  */
 
+import * as path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockReadFileSync, mockWriteFileSync, mockEnsureDirs, mockRandomUUID } =
@@ -59,7 +60,7 @@ describe("getClientId", () => {
     expect(getClientId()).toBe("generated-id-456");
     expect(mockEnsureDirs).toHaveBeenCalled();
     expect(mockWriteFileSync).toHaveBeenCalledWith(
-      "/fake-home/.atlasagents/clientId",
+      path.join("/fake-home/.atlasagents", "clientId"),
       "generated-id-456",
       { encoding: "utf-8" },
     );

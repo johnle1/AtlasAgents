@@ -2,8 +2,9 @@
  * Child-process shell runner with timeout and AbortSignal support.
  *
  * @remarks
- * Spawns `cmd.exe /c` on Windows and `/bin/sh -c` elsewhere, captures stdout /
- * stderr, and always settles exactly once. Used by {@link DispatchContext.runShell}.
+ * Spawns `cmd.exe /c` on Windows (with delayed expansion) and `/bin/sh -c`
+ * elsewhere, captures stdout / stderr, and always settles exactly once. Used
+ * by {@link DispatchContext.runShell}.
  */
 
 import { spawn } from "node:child_process";
@@ -108,6 +109,9 @@ export const runShell = (
     // Step 2a: On Windows: use cmd.exe with specific flags
     //         /d = Disable AutoRun registry commands (avoids startup scripts)
     //         /s = Strip first and last quotes from command string
+    //         /v:on = Enable delayed expansion so cwd wrappers can read !cd!
+    //                 (`setlocal` is a batch-file-only command and is a no-op
+    //                 under `cmd /c`)
     //         /c = Execute the command and exit
     // Step 2b: On Unix: use /bin/sh with -c flag to execute command string
     // Step 2c: When a sandbox provider is present, spawn its argv as-is
@@ -124,7 +128,7 @@ export const runShell = (
     const spawnSpec = sandboxArgv
       ? { bin: sandboxArgv[0] ?? "/bin/sh", args: sandboxArgv.slice(1) }
       : isWindowsPlatform
-        ? { bin: "cmd.exe", args: ["/d", "/s", "/c", command] }
+        ? { bin: "cmd.exe", args: ["/d", "/s", "/v:on", "/c", command] }
         : { bin: "/bin/sh", args: ["-c", command] };
 
     // Scrubbed regardless of sandbox presence — most users start with no OS
