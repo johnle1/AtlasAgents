@@ -297,6 +297,34 @@ describe("workerCountFor", () => {
       ),
     ).toBe(3);
   });
+
+  describe("isLocalProvider ceiling", () => {
+    const sixIndependentSteps = plan([
+      subtask(1, "a"),
+      subtask(2, "b"),
+      subtask(3, "c"),
+      subtask(4, "d"),
+      subtask(5, "e"),
+      subtask(6, "f"),
+    ]);
+
+    it("caps maxSubagents=max at the local-provider ceiling instead of the full dag width (normal)", () => {
+      expect(workerCountFor("max", sixIndependentSteps, true)).toBe(4);
+    });
+
+    it("caps a custom number above the ceiling the same way (normal)", () => {
+      expect(workerCountFor(6, sixIndependentSteps, true)).toBe(4);
+    });
+
+    it("leaves a custom number already under the ceiling unaffected (boundary)", () => {
+      expect(workerCountFor(2, sixIndependentSteps, true)).toBe(2);
+    });
+
+    it("does not cap a remote/hosted provider — isLocalProvider defaults to false (regression guard)", () => {
+      expect(workerCountFor("max", sixIndependentSteps)).toBe(6);
+      expect(workerCountFor("max", sixIndependentSteps, false)).toBe(6);
+    });
+  });
 });
 
 describe("WorkSignal", () => {

@@ -67,10 +67,10 @@ describe("sink", () => {
   });
 
   it("appendDiff / appendStyledLines write history entries", () => {
-    appendDiff("Write a.ts", "+x\n");
+    appendDiff("Updated a.ts", "+x\n");
     expect(appendHistory).toHaveBeenCalledWith({
       kind: "diff",
-      path: "Write a.ts",
+      path: "Updated a.ts",
       body: "+x\n",
     });
     appendStyledLines(["x"]);

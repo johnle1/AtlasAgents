@@ -49,6 +49,8 @@ const fileProxy = {
 };
 
 import { App } from "../../../../packages/client/src/ui/App.js";
+import { setActivePlan } from "../../../../packages/client/src/ui/bridge/activePlan.js";
+import { setSessionApprovalMode } from "../../../../packages/client/src/ui/bridge/allowlist.js";
 
 describe("App smoke", () => {
   it("renders without throwing", () => {
@@ -100,5 +102,54 @@ describe("App smoke", () => {
     expect(occurrences).toBe(1);
 
     tree.unmount();
+  });
+
+  it("hides the live plan checklist outside plan mode, even with an active plan", async () => {
+    setSessionApprovalMode("default");
+    const inputRef = { current: [] as string[] };
+    const tree = render(
+      React.createElement(App, {
+        connection: connection as never,
+        commandHandler: { handle: vi.fn() } as never,
+        fileProxy: fileProxy as never,
+        initialHistoryLines: [],
+        onSaveHistory: vi.fn(),
+        initialInputHistory: [],
+        registerExit: vi.fn(),
+        onInputHistoryRef: inputRef,
+      }),
+    );
+    setActivePlan([{ id: 1, text: "Do the thing", status: "pending" }]);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(stripAnsi(tree.lastFrame() ?? "")).not.toContain("Do the thing");
+    tree.unmount();
+  });
+
+  it("shows the live plan checklist in plan mode", async () => {
+    const inputRef = { current: [] as string[] };
+    const tree = render(
+      React.createElement(App, {
+        connection: connection as never,
+        commandHandler: { handle: vi.fn() } as never,
+        fileProxy: fileProxy as never,
+        initialHistoryLines: [],
+        onSaveHistory: vi.fn(),
+        initialInputHistory: [],
+        registerExit: vi.fn(),
+        onInputHistoryRef: inputRef,
+      }),
+    );
+    // The DataContext mount effect seeds session mode from (mocked)
+    // persisted config, overwriting anything set before render — switch
+    // modes only after mount, the same way Shift+Tab does at runtime.
+    await new Promise((resolve) => setImmediate(resolve));
+    setSessionApprovalMode("plan");
+    setActivePlan([{ id: 1, text: "Do the thing", status: "pending" }]);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(stripAnsi(tree.lastFrame() ?? "")).toContain("Do the thing");
+    tree.unmount();
+    setSessionApprovalMode("default");
   });
 });

@@ -149,6 +149,8 @@ const nativeConfig = {
   getAgentModel: async () => "test-agent",
   getAgentTemperature: async () => 0,
   getAgentModelSupportsTools: async () => true,
+  getKeepAlive: async () => "30m",
+  getEffort: async () => "high" as const,
 } as unknown as IConfigManager;
 
 /** Minimal PerConnection stub — the direct-answer path never touches workspace/terminal/planBroker. */

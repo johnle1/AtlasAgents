@@ -25,6 +25,11 @@ const nativeConfig = {
   getAgentModel: async () => "test-agent",
   getAgentTemperature: async () => 0,
   getAgentModelSupportsTools: async () => true,
+  getKeepAlive: async () => "30m",
+  getEffort: async () => "high" as const,
+  getNumParallel: async () => 2,
+  getFlashAttention: async () => true,
+  getKvCacheType: async () => "q8_0" as const,
 } as unknown as IConfigManager;
 
 const legacyConfig = {
@@ -58,6 +63,37 @@ const baseParams = (perConn: PerConnection) => ({
   // with a small window to test compaction specifically.
   contextWindow: 100_000,
 });
+
+// `ollama.chat` is shared by two unrelated callers in the real loop: the
+// REASON phase (reasoner.ts, runs every iteration) and context compaction's
+// summary call (contextCompaction.ts, runs only once a small context window
+// is exceeded). Tests that care about compaction's own call count/behavior
+// must discriminate between the two rather than treating every `chat` call
+// as a compaction call — see contextCompaction.ts's `buildCompactionRequest`
+// for the exact system-prompt text this checks for.
+const COMPACTION_SYSTEM_MARKER =
+  "Summarize this coding agent's own conversation history";
+/** A cheap, silent reasoning-phase response — exits immediately, shows nothing (`conclude: null`), never names `finish` so it never triggers verification. */
+const REASON_STUB_RESPONSE = "exit: true\naction: continue\nconclude: null";
+
+/** Wraps a compaction-summary implementation so the same mock also answers (silently) for the REASON phase's unrelated `chat` calls. */
+const makeChatMock = (
+  compactionImpl: () => Promise<string>,
+): ReturnType<typeof vi.fn> =>
+  vi.fn(async (_model: string, messages: Message[]) => {
+    const isCompactionCall = messages.some(
+      (m) => m.role === "system" && m.content.includes(COMPACTION_SYSTEM_MARKER),
+    );
+    return isCompactionCall ? compactionImpl() : REASON_STUB_RESPONSE;
+  });
+
+/** Counts only the compaction-summary calls a {@link makeChatMock} mock received, ignoring REASON-phase calls. */
+const compactionCallCount = (chatMock: ReturnType<typeof vi.fn>): number =>
+  chatMock.mock.calls.filter(([, messages]: [string, Message[]]) =>
+    messages.some(
+      (m) => m.role === "system" && m.content.includes(COMPACTION_SYSTEM_MARKER),
+    ),
+  ).length;
 
 describe("runAgentTurn — direct answer (the core regression guard)", () => {
   it("answers a greeting with exactly one model call and no tool calls at all", async () => {
@@ -289,6 +325,138 @@ describe("runAgentTurn — malformed output recovery", () => {
 
     expect(result.ok).toBe(false);
     expect(result.content).toMatch(/exceeded the maximum/i);
+  });
+});
+
+describe("runAgentTurn — concurrent read-only tool execution", () => {
+  /** Tracks how many instrumented calls are in flight at once, to prove overlap (or its absence). */
+  const makeOverlapTracker = () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const wrap =
+      <T>(label: string, delayMs: number, value: T) =>
+      async (): Promise<T> => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        inFlight -= 1;
+        return value;
+      };
+    return { wrap, getMaxInFlight: () => maxInFlight };
+  };
+
+  it("runs 3 consecutive read_file calls concurrently, but still appends their results to history in original order", async () => {
+    const { wrap, getMaxInFlight } = makeOverlapTracker();
+    const readFile = vi.fn(async (path: string) => {
+      // Different delays so settle order (c, b, a) differs from call order
+      // (a, b, c) — proving the eventual history order comes from the
+      // latter, not whichever finished first.
+      const delayByPath: Record<string, number> = { "a.ts": 15, "b.ts": 10, "c.ts": 5 };
+      return wrap("read", delayByPath[path] ?? 5, `content of ${path}`)();
+    });
+    let call = 0;
+    const chatWithTools = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return {
+          content: "Reading three files.",
+          thinking: "",
+          toolCalls: [
+            { name: "read_file", args: { path: "a.ts" } },
+            { name: "read_file", args: { path: "b.ts" } },
+            { name: "read_file", args: { path: "c.ts" } },
+          ],
+        };
+      }
+      return { content: "All three read.", thinking: "", toolCalls: [] };
+    });
+
+    const result = await runAgentTurn(
+      {
+        ollama: { chatWithTools } as unknown as IOllamaClient,
+        config: nativeConfig,
+        experienceRecorder: {} as never,
+      },
+      {
+        ...baseParams(makePerConn({ workspace: { readFile } as never })),
+        emit: () => {},
+        emitToken: () => {},
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    // All 3 reads were in flight together at some point — proves they
+    // actually ran concurrently, not just that the code path exists.
+    expect(getMaxInFlight()).toBeGreaterThanOrEqual(2);
+
+    // History still reflects the model's original call order (a, b, c),
+    // even though c settled first — see runToolCalls's doc comment on why
+    // this matters: providers/messageTranslation.ts correlates results to
+    // calls by tool name, so out-of-order or interleaved appends for
+    // same-named calls would corrupt that correlation.
+    const followUpMessages = chatWithTools.mock.calls[1]![1] as Message[];
+    const toolResults = followUpMessages.filter((m) => m.role === "tool");
+    expect(toolResults.map((m) => m.content)).toEqual([
+      expect.stringContaining("content of a.ts"),
+      expect.stringContaining("content of b.ts"),
+      expect.stringContaining("content of c.ts"),
+    ]);
+  });
+
+  it("does not run a write concurrently with the reads on either side of it — a run is broken by any mutating call", async () => {
+    const { wrap, getMaxInFlight } = makeOverlapTracker();
+    const readFile = vi.fn((path: string) => wrap("read", 5, `content of ${path}`)());
+    const writeFile = vi.fn(() =>
+      wrap("write", 5, { accepted: true, diff: "+ x" })(),
+    );
+    let call = 0;
+    const chatWithTools = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return {
+          content: "",
+          thinking: "",
+          toolCalls: [
+            { name: "read_file", args: { path: "a.ts" } },
+            { name: "write_file", args: { path: "b.ts", content: "x" } },
+            { name: "read_file", args: { path: "c.ts" } },
+          ],
+        };
+      }
+      if (call === 2) {
+        // Reads the written file back — satisfies the completion gate's
+        // verify-before-finish requirement (finishHandler.ts), as a
+        // separate iteration from the batch above so it doesn't affect
+        // this test's overlap assertion.
+        return {
+          content: "",
+          thinking: "",
+          toolCalls: [{ name: "read_file", args: { path: "b.ts" } }],
+        };
+      }
+      return { content: "Confirmed.", thinking: "", toolCalls: [] };
+    });
+
+    const result = await runAgentTurn(
+      {
+        ollama: { chatWithTools } as unknown as IOllamaClient,
+        config: nativeConfig,
+        experienceRecorder: {} as never,
+      },
+      {
+        ...baseParams(makePerConn({ workspace: { readFile, writeFile } as never })),
+        emit: () => {},
+        emitToken: () => {},
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    // Every call in the first batch is its own run of length 1 (read, then
+    // write breaks the run, then read again) — nothing should ever overlap,
+    // including the follow-up verification read in call 2.
+    expect(getMaxInFlight()).toBe(1);
+    expect(readFile).toHaveBeenCalledTimes(3);
+    expect(writeFile).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -740,12 +908,12 @@ describe("runAgentTurn — completion gate on the implicit text exit", () => {
     expect(lastUserMessage?.content).toMatch(/verify/i);
   });
 
-  it("escalates for two stalls, then stops honestly on the third — a model stuck with nothing to show for it", async () => {
+  it("escalates the nudge after the first stall, but never gives up on its own — a model stuck with nothing to show for it keeps getting nudged", async () => {
     // The model never verifies its write and never takes any further
     // action — every empty-turn reply hits the same unverified-write gap.
     // Per the "Continue automatically" driver: 1st stall gets the plain
-    // gap, 2nd stall gets an escalating directive to act, 3rd stall stops
-    // honestly rather than looping forever.
+    // gap, every stall after that gets the escalating directive to act —
+    // there is no cap, so this runs for many stalls with no stop.
     const writeFile = vi.fn(async () => ({ accepted: true, diff: "+ x" }));
     // `messages` is mutated in place throughout the loop (push/splice), so
     // `chatWithTools.mock.calls[n][1]` is the SAME array reference at every
@@ -753,6 +921,7 @@ describe("runAgentTurn — completion gate on the implicit text exit", () => {
     // what call n actually saw. Snapshot (shallow-copy) it inside the mock
     // itself, at call time, to see each call's real input.
     const messagesSeenByCall: Message[][] = [];
+    const STALL_COUNT = 6;
     let call = 0;
     const chatWithTools = vi.fn(async (_model: string, msgs: Message[]) => {
       call += 1;
@@ -764,11 +933,23 @@ describe("runAgentTurn — completion gate on the implicit text exit", () => {
           toolCalls: [{ name: "write_file", args: { path: "a.ts", content: "x" } }],
         };
       }
-      return {
-        content: `Still not verifying, attempt ${call}.`,
-        thinking: "",
-        toolCalls: [],
-      };
+      if (call <= 1 + STALL_COUNT) {
+        return {
+          content: `Still not verifying, attempt ${call}.`,
+          thinking: "",
+          toolCalls: [],
+        };
+      }
+      if (call === 1 + STALL_COUNT + 1) {
+        // Finally verifies — the turn should still be alive to receive this.
+        return {
+          content: "",
+          thinking: "",
+          toolCalls: [{ name: "read_file", args: { path: "a.ts" } }],
+        };
+      }
+      // Verification satisfied — this closing reply should be accepted as final.
+      return { content: "Confirmed.", thinking: "", toolCalls: [] };
     });
     const emitted: string[] = [];
 
@@ -779,18 +960,23 @@ describe("runAgentTurn — completion gate on the implicit text exit", () => {
         experienceRecorder: {} as never,
       },
       {
-        ...baseParams(makePerConn({ workspace: { writeFile } as never })),
+        ...baseParams(
+          makePerConn({
+            workspace: {
+              writeFile,
+              readFile: vi.fn(async () => "content of a"),
+            } as never,
+          }),
+        ),
         emit: () => {},
         emitToken: (text) => emitted.push(text),
       },
     );
 
-    // 1 write + 3 stall replies: call 2 earns the plain-gap nudge, call 3
-    // earns the escalating directive, call 4's reply is the 3rd stall,
-    // which triggers the stop (no 4th nudge, no 5th call).
-    expect(chatWithTools).toHaveBeenCalledTimes(4);
-    expect(result.ok).toBe(false);
-    expect(emitted.join("")).toMatch(/stopped/i);
+    // 1 write + 6 stalls + 1 verifying read + 1 closing answer.
+    expect(chatWithTools).toHaveBeenCalledTimes(1 + STALL_COUNT + 2);
+    expect(result.ok).toBe(true);
+    expect(emitted.join("")).not.toMatch(/stopped/i);
 
     // 1st stall (call 2's reply) earns the plain gap — visible as the last
     // user message call 3 actually saw.
@@ -804,6 +990,12 @@ describe("runAgentTurn — completion gate on the implicit text exit", () => {
     const secondFollowUp = [...call4Messages].reverse().find((m) => m.role === "user");
     expect(secondFollowUp?.content).toMatch(/do not describe what you will do/i);
     expect(secondFollowUp?.content).toMatch(/verify/i);
+
+    // 6th stall (call 7's reply) still gets the escalating directive, not a
+    // give-up message — proving there is no cap.
+    const call7Messages = messagesSeenByCall[6]!;
+    const sixthFollowUp = [...call7Messages].reverse().find((m) => m.role === "user");
+    expect(sixthFollowUp?.content).toMatch(/do not describe what you will do/i);
   });
 
   it("a tool call between stalls resets the streak, so narrate-then-act never terminates early", async () => {
@@ -1002,7 +1194,9 @@ describe("runAgentTurn — context-window compaction", () => {
   it("compacts the conversation via a summary call once it outgrows a small context window, preserving the system prompt, the task, and the recent tail", async () => {
     const readFile = vi.fn(async () => HUGE_FILE_CONTENT);
     const chatWithTools = scriptFourReadsThenAnswer("All done reading.");
-    const chat = vi.fn(async () => "Summary: read file1.ts through file4.ts.");
+    const chat = makeChatMock(
+      async () => "Summary: read file1.ts through file4.ts.",
+    );
 
     const result = await runAgentTurn(
       {
@@ -1019,7 +1213,7 @@ describe("runAgentTurn — context-window compaction", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(chat).toHaveBeenCalledTimes(1);
+    expect(compactionCallCount(chat)).toBe(1);
 
     // Call 5 is the last call this test makes, so — unlike an intermediate
     // index — inspecting its recorded input after the run is safe: nothing
@@ -1043,7 +1237,7 @@ describe("runAgentTurn — context-window compaction", () => {
   it("falls back to plain elision when the summary call itself fails, and the turn still completes normally", async () => {
     const readFile = vi.fn(async () => HUGE_FILE_CONTENT);
     const chatWithTools = scriptFourReadsThenAnswer("All done reading.");
-    const chat = vi.fn(async () => {
+    const chat = makeChatMock(async () => {
       throw new Error("summarizer unreachable");
     });
 
@@ -1062,7 +1256,7 @@ describe("runAgentTurn — context-window compaction", () => {
     );
 
     // Compaction failing must never be what ends the turn early.
-    expect(chat).toHaveBeenCalledTimes(1);
+    expect(compactionCallCount(chat)).toBe(1);
     expect(result.ok).toBe(true);
     const fifthCallMessages = chatWithTools.mock.calls[4]![1] as Message[];
     const elided = fifthCallMessages.find((m) =>
@@ -1085,7 +1279,7 @@ describe("runAgentTurn — context-window compaction", () => {
       }
       return { content: "Done.", thinking: "", toolCalls: [] };
     });
-    const chat = vi.fn(async () => "should not be called");
+    const chat = makeChatMock(async () => "should not be called");
 
     const result = await runAgentTurn(
       {
@@ -1102,7 +1296,7 @@ describe("runAgentTurn — context-window compaction", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(chat).not.toHaveBeenCalled();
+    expect(compactionCallCount(chat)).toBe(0);
   });
 });
 
@@ -1245,7 +1439,7 @@ describe("runAgentTurn — cross-turn conversation memory", () => {
       }
       return { content: "All done.", thinking: "", toolCalls: [] };
     });
-    const chat = vi.fn(async () => "Summary of the reads.");
+    const chat = makeChatMock(async () => "Summary of the reads.");
     const perConn = makePerConn({
       workspace: { readFile } as never,
       conversation: [{ user: "earlier question", assistant: "earlier answer" }],
@@ -1267,7 +1461,7 @@ describe("runAgentTurn — cross-turn conversation memory", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(chat).toHaveBeenCalledTimes(1);
+    expect(compactionCallCount(chat)).toBe(1);
     // Call 5 is the last call, so its recorded input is safe to inspect
     // after the run (nothing is pushed to `messages` afterward).
     const fifthCallMessages = chatWithTools.mock.calls[4]![1] as Message[];
@@ -1367,5 +1561,214 @@ describe("runAgentTurn — run_steps_parallel respects the session's concurrency
     );
 
     expect(getMaxInFlight()).toBe(2);
+  });
+
+  it("drops a dependsOn id that points outside the batch instead of passing it through — regression guard for the deadlock this would otherwise cause (error/negative case)", async () => {
+    // Both steps declare a real dependency on step 1, which is NOT part of
+    // this run_steps_parallel batch (only steps 2 and 3 are). Passing
+    // dependsOn through unfiltered would mean readyQueue.ts's
+    // dependenciesDone() waits forever for id 1 to appear in `completed` —
+    // it never will, since this pool only ever tracks ids 2 and 3 — so the
+    // batch would hang and the deadlock guard would fire. The fix filters
+    // dependsOn down to ids within stepIds, treating an outside dependency
+    // as already satisfied (the model only requests steps it considers
+    // ready), so this must complete normally instead.
+    const scripted = [
+      {
+        toolCalls: [
+          {
+            name: "update_plan",
+            args: {
+              steps: [
+                { id: 1, text: "setup", status: "done" },
+                { id: 2, text: "build A", status: "pending", dependsOn: [1] },
+                { id: 3, text: "build B", status: "pending", dependsOn: [1] },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        toolCalls: [
+          { name: "run_steps_parallel", args: { stepIds: [2, 3] } },
+        ],
+      },
+    ];
+    const { chatWithTools } = makeTrackingChatWithTools(scripted);
+
+    const result = await runAgentTurn(
+      {
+        ollama: { chatWithTools } as unknown as IOllamaClient,
+        config: nativeConfig,
+        experienceRecorder: {} as never,
+      },
+      {
+        ...baseParams(makePerConn()),
+        maxSubagents: 3,
+        emit: () => {},
+        emitToken: () => {},
+      },
+    );
+
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("runAgentTurn — REASON phase", () => {
+  it("shows the reasoning record's conclude line ahead of the tool call it accompanies, when the model supports chat()", async () => {
+    const readFile = vi.fn(async () => "content of a");
+    let call = 0;
+    const chatWithTools = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return {
+          content: "",
+          thinking: "",
+          toolCalls: [{ name: "read_file", args: { path: "a.ts" } }],
+        };
+      }
+      return { content: "The file says hello.", thinking: "", toolCalls: [] };
+    });
+    const chat = vi.fn(async () =>
+      "exit: true\naction: read_file a.ts\nconclude: I'll read the file to answer this.",
+    );
+    const emitted: string[] = [];
+
+    const result = await runAgentTurn(
+      {
+        ollama: { chatWithTools, chat } as unknown as IOllamaClient,
+        config: nativeConfig,
+        experienceRecorder: {} as never,
+      },
+      {
+        ...baseParams(makePerConn({ workspace: { readFile } as never })),
+        emit: () => {},
+        emitToken: (text) => emitted.push(text),
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(chat).toHaveBeenCalledTimes(2); // one REASON call per iteration
+    expect(emitted.join("")).toContain("I'll read the file to answer this.");
+  });
+
+  it("surfaces a verification revision as 'Wait, I think ...' right before a finish call", async () => {
+    const chatWithTools = vi.fn(async () => ({
+      content: "",
+      thinking: "",
+      toolCalls: [{ name: "finish", args: { summary: "All done." } }],
+    }));
+    let reasonCall = 0;
+    const chat = vi.fn(async () => {
+      reasonCall += 1;
+      if (reasonCall === 1) {
+        return "exit: true\naction: finish\nconclude: The task is complete.";
+      }
+      if (reasonCall === 2) {
+        return "exit: true\naction: finish\nconclude: I should double check nothing is missing.";
+      }
+      return "exit: true\nconclude: null";
+    });
+    const emitted: string[] = [];
+
+    const result = await runAgentTurn(
+      {
+        ollama: { chatWithTools, chat } as unknown as IOllamaClient,
+        config: nativeConfig,
+        experienceRecorder: {} as never,
+      },
+      {
+        ...baseParams(makePerConn()),
+        emit: () => {},
+        emitToken: (text) => emitted.push(text),
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(emitted.join("")).toContain(
+      "Wait, I think I should double check nothing is missing.",
+    );
+  });
+
+  it("degrades silently when the model has no chat() support at all — behaves exactly as if reasoning didn't exist", async () => {
+    const chatWithTools = vi.fn(async () => ({
+      content: "Hello! How can I help?",
+      thinking: "",
+      toolCalls: [],
+    }));
+    const emitted: string[] = [];
+
+    const result = await runAgentTurn(
+      {
+        // No `chat` at all — matches every other fixture in this file.
+        ollama: { chatWithTools } as unknown as IOllamaClient,
+        config: nativeConfig,
+        experienceRecorder: {} as never,
+      },
+      {
+        ...baseParams(makePerConn()),
+        emit: () => {},
+        emitToken: (text) => emitted.push(text),
+      },
+    );
+
+    expect(chatWithTools).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(true);
+    expect(emitted.join("")).toBe("Hello! How can I help?");
+  });
+
+  it("never runs the REASON phase for a run_steps_parallel worker step — no chat() calls even when the model supports it", async () => {
+    const plan = [
+      { id: 1, text: "step one", status: "pending" as const },
+      { id: 2, text: "step two", status: "pending" as const },
+    ];
+    let call = 0;
+    const chatWithTools = vi.fn(async (_model: string, msgs: Message[]) => {
+      call += 1;
+      const isTopLevel = msgs.some((m) => m.content.includes("run_steps_parallel"));
+      if (call === 1) {
+        return {
+          content: "",
+          thinking: "",
+          toolCalls: [{ name: "update_plan", args: { steps: plan } }],
+        };
+      }
+      if (call === 2) {
+        return {
+          content: "",
+          thinking: "",
+          toolCalls: [{ name: "run_steps_parallel", args: { stepIds: [1, 2] } }],
+        };
+      }
+      if (isTopLevel) {
+        return { content: "All steps done.", thinking: "", toolCalls: [] };
+      }
+      return {
+        content: "",
+        thinking: "",
+        toolCalls: [{ name: "finish", args: { summary: "Worker step done." } }],
+      };
+    });
+    const chat = vi.fn(async () => "exit: true\naction: continue\nconclude: null");
+
+    const result = await runAgentTurn(
+      {
+        ollama: { chatWithTools, chat } as unknown as IOllamaClient,
+        config: nativeConfig,
+        experienceRecorder: {} as never,
+      },
+      {
+        ...baseParams(makePerConn()),
+        taskText: "do two independent things",
+        emit: () => {},
+        emitToken: () => {},
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    // Only the top-level turn's own 3 iterations (update_plan,
+    // run_steps_parallel, then the closing answer) reason — the two worker
+    // steps it dispatches never call chat() at all.
+    expect(chat).toHaveBeenCalledTimes(3);
   });
 });

@@ -52,6 +52,7 @@ const makeConfig = (): IConfigManager =>
     getSubagentProvider: async () => "ollama",
     getNumCtx: async () => undefined,
     getKeepAlive: async () => "30m",
+    getEffort: async () => "high" as const,
   }) as unknown as IConfigManager;
 
 const makeContextBuilder = (): IContextBuilder => ({

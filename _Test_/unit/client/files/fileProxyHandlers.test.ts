@@ -27,6 +27,7 @@ import { handleMcpCall } from "../../../../packages/client/src/fileProxy/handler
 vi.mock("../../../../packages/client/src/renderer.js", () => ({
   printRead: vi.fn(),
   printWrite: vi.fn(async () => {}),
+  printNoChange: vi.fn(),
   printCreateDir: vi.fn(),
   printDelete: vi.fn(),
   printCd: vi.fn(),
@@ -143,6 +144,32 @@ describe("handleFileWrite and mutations with approval", () => {
     expect(result.accepted).toBe(true);
     await expect(fs.readFile(path.join(workspace, "new.txt"), "utf8")).resolves.toBe(
       "data",
+    );
+  });
+
+  it("short-circuits a no-op write (content already matches disk) without a diff card or approval prompt", async () => {
+    await fs.writeFile(path.join(workspace, "same.txt"), "unchanged");
+    const { printWrite, printNoChange } = await import(
+      "../../../../packages/client/src/renderer.js"
+    );
+    const { requestApprovalWithFeedback } = await import(
+      "../../../../packages/client/src/ui/approvalFlow.js"
+    );
+    vi.mocked(printWrite).mockClear();
+    vi.mocked(printNoChange).mockClear();
+    vi.mocked(requestApprovalWithFeedback).mockClear();
+
+    const result = (await handleFileWrite(context, {
+      path: "same.txt",
+      content: "unchanged",
+    })) as { accepted: boolean; diff?: string };
+
+    expect(result).toEqual({ accepted: true, diff: "" });
+    expect(printNoChange).toHaveBeenCalledTimes(1);
+    expect(printWrite).not.toHaveBeenCalled();
+    expect(requestApprovalWithFeedback).not.toHaveBeenCalled();
+    await expect(fs.readFile(path.join(workspace, "same.txt"), "utf8")).resolves.toBe(
+      "unchanged",
     );
   });
 

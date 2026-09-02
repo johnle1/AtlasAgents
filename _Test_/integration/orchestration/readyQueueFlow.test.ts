@@ -139,6 +139,10 @@ const makeConfig = (): IConfigManager =>
     getAgentProvider: async () => "ollama",
     getNumCtx: async () => undefined,
     getKeepAlive: async () => "30m",
+    getEffort: async () => "high" as const,
+    getNumParallel: async () => 2,
+    getFlashAttention: async () => true,
+    getKvCacheType: async () => "q8_0" as const,
   }) as unknown as IConfigManager;
 
 const makeContextBuilder = (): IContextBuilder => ({

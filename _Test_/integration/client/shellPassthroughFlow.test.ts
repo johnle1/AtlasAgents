@@ -33,7 +33,6 @@ describe("shellPassthroughFlow — real runShell", () => {
       cwd,
       timeoutMs: 5_000,
       classifyCommand: () => "safe",
-      requestApproval: async () => true,
     });
     const body = entries.map((entry) => entry.text).join("\n");
     expect(body).toMatch(/hi/);
@@ -46,7 +45,6 @@ describe("shellPassthroughFlow — real runShell", () => {
       cwd,
       timeoutMs: 5_000,
       classifyCommand: () => "safe",
-      requestApproval: async () => true,
     });
     expect(entries.some((entry) => entry.variant === "warning")).toBe(true);
   });
@@ -58,7 +56,6 @@ describe("shellPassthroughFlow — real runShell", () => {
       cwd,
       timeoutMs: 80,
       classifyCommand: () => "safe",
-      requestApproval: async () => true,
     });
     const body = entries.map((entry) => entry.text).join("\n");
     expect(body).toContain(SHELL_TIMEOUT_MARKER);
