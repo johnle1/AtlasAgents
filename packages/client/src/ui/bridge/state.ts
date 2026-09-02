@@ -19,6 +19,14 @@ type BridgeState = {
   inkUIActive: boolean;
   taskActive: boolean;
   pendingApproval: PendingApproval | null;
+  /**
+   * Approval requests that arrived while another was already active — see
+   * {@link enqueueApproval}. The UI only ever reads `pendingApproval` (the
+   * single active slot); this array exists purely so a second concurrent
+   * request waits its turn instead of failing outright, mirroring the
+   * server-side queue/active pattern in `workspace/review/planReviewBroker.ts`.
+   */
+  approvalQueue: PendingApproval[];
   pendingPrompt: PendingPrompt | null;
   streamingTokenHandler: ((token: string) => void) | null;
   activeTaskCancel: (() => void) | null;
@@ -31,6 +39,7 @@ const bridgeGlobalState: BridgeState = {
   inkUIActive: false,
   taskActive: false,
   pendingApproval: null,
+  approvalQueue: [],
   pendingPrompt: null,
   streamingTokenHandler: null,
   activeTaskCancel: null,
@@ -102,6 +111,41 @@ export const setPendingApprovalEntry = (
   approvalEntry: PendingApproval | null,
 ): void => {
   bridgeGlobalState.pendingApproval = approvalEntry;
+};
+
+/**
+ * Appends an approval request to the queue — used when one is already
+ * active, so a second concurrent request (e.g. a parallel batch's second
+ * file write) waits its turn instead of being rejected outright.
+ *
+ * @param approvalEntry - The request and its promise-resolver pair.
+ */
+export const enqueueApproval = (approvalEntry: PendingApproval): void => {
+  bridgeGlobalState.approvalQueue.push(approvalEntry);
+};
+
+/**
+ * Removes and returns the next queued approval request, in FIFO order.
+ *
+ * @returns The next queued entry, or `null` if the queue is empty.
+ */
+export const dequeueNextApproval = (): PendingApproval | null =>
+  bridgeGlobalState.approvalQueue.shift() ?? null;
+
+/**
+ * Removes and returns every queued approval request, clearing the queue.
+ *
+ * @remarks
+ * Used by `cancelPendingApprovals` — a session teardown must resolve every
+ * queued request, not just the one currently active, or a caller
+ * `await`ing one of the queued promises would hang forever.
+ *
+ * @returns The drained entries, in FIFO order.
+ */
+export const drainApprovalQueue = (): PendingApproval[] => {
+  const drained = bridgeGlobalState.approvalQueue;
+  bridgeGlobalState.approvalQueue = [];
+  return drained;
 };
 
 /**
