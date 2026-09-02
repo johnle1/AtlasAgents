@@ -23,6 +23,8 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { TimeoutError } from "../errors/index.js";
+import { tuningToEnv, type OllamaTuning } from "./runtimeTuning.js";
+import { logger } from "../utils/logger.js";
 
 /** How long to wait between health-check polls (ms). Balances responsiveness vs. CPU load. */
 const POLL_INTERVAL_MS = 500;
@@ -137,7 +139,9 @@ export type OllamaLifecycle = {
  * The entry point for Ollama lifecycle management. On startup, this function:
  * 1. Checks if Ollama is already running (by probing the health endpoint)
  * 2. If it is, returns a no-op stop handler (Ollama was pre-existing)
- * 3. If it isn't, spawns `ollama serve` as a child process
+ * 3. If it isn't, spawns `ollama serve` as a child process — with the
+ *    caller-supplied `tuning` (see `ollama/runtimeTuning.ts`) applied as env
+ *    vars, if provided
  * 4. Waits for the child to become reachable (up to 30 seconds)
  * 5. Returns a handle containing a stop function to terminate the child
  *
@@ -147,6 +151,12 @@ export type OllamaLifecycle = {
  * handler). This module registers no process-level signal handlers itself.
  *
  * @param tagsUrl - Full URL to the `/api/tags` endpoint used for health checks.
+ * @param tuning - Runtime tuning to set as env vars when this call spawns
+ *   Ollama (see `ollama/runtimeTuning.ts`). Omit for no tuning (existing
+ *   behavior). **Only takes effect when this call actually spawns Ollama**
+ *   — env vars can't be applied to an already-running process, so on the
+ *   early-return path this is used only to log an informational note, never
+ *   to alter the pre-existing instance.
  * @returns Lifecycle handle. If `startedByServer` is true, caller must call `stop()` to clean up.
  * @throws {@link Error} if `ollama` command is not found, Ollama exited early, or failed to become reachable.
  * @throws {@link TimeoutError} if startup took longer than 30 seconds.
@@ -168,9 +178,21 @@ export type OllamaLifecycle = {
  */
 export const ensureOllamaRunning = async (
   tagsUrl: string,
+  tuning?: OllamaTuning,
 ): Promise<OllamaLifecycle> => {
-  // EARLY RETURN: Ollama is already running — no need to spawn it.
+  // EARLY RETURN: Ollama is already running — no need to spawn it. The env
+  // this process would have set can't retroactively apply to an instance it
+  // didn't start, so just let the operator know tuning was skipped.
   if (await isOllamaReachable(tagsUrl)) {
+    if (tuning) {
+      logger.info(
+        "Ollama is already running — runtime tuning (num_parallel, flash " +
+          "attention, kv cache type) only applies when this process starts " +
+          "Ollama itself, so it was skipped. Quit the existing Ollama and " +
+          "let atlas-server start it, or set these in its own environment, " +
+          "for the tuning to take effect.",
+      );
+    }
     return { startedByServer: false, stop: () => {} };
   }
 
@@ -182,6 +204,7 @@ export const ensureOllamaRunning = async (
     child = spawn("ollama", ["serve"], {
       detached: false,
       stdio: "ignore",
+      env: tuning ? { ...process.env, ...tuningToEnv(tuning) } : process.env,
     });
 
     // WAIT FOR SPAWN: Wait for the spawn event (process actually started) or an error/exit event.

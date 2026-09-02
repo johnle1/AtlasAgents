@@ -38,6 +38,7 @@ export {
   printTokenSaveOp,
   printTokenSaveResult,
   printWrite,
+  printNoChange,
   printCreate,
   printCreateDir,
   printDelete,
