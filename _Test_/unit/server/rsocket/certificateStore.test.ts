@@ -49,8 +49,14 @@ describe("loadOrCreateServerCert", () => {
     await loadOrCreateServerCert(root);
     const certStat = await fs.stat(path.join(root, "tls", "cert.pem"));
     const keyStat = await fs.stat(path.join(root, "tls", "key.pem"));
-    expect((certStat.mode & 0o777).toString(8)).toBe("600");
-    expect((keyStat.mode & 0o777).toString(8)).toBe("600");
+    if (process.platform === "win32") {
+      // Windows does not honor Unix-style mode bits on stat().
+      expect(certStat.isFile()).toBe(true);
+      expect(keyStat.isFile()).toBe(true);
+    } else {
+      expect((certStat.mode & 0o777).toString(8)).toBe("600");
+      expect((keyStat.mode & 0o777).toString(8)).toBe("600");
+    }
   });
 
   it("returns the same cert and fingerprint on a second call (idempotent)", async () => {
@@ -143,8 +149,13 @@ describe("regenerateServerCert", () => {
     await regenerateServerCert(root);
     const certStat = await fs.stat(path.join(root, "tls", "cert.pem"));
     const keyStat = await fs.stat(path.join(root, "tls", "key.pem"));
-    expect((certStat.mode & 0o777).toString(8)).toBe("600");
-    expect((keyStat.mode & 0o777).toString(8)).toBe("600");
+    if (process.platform === "win32") {
+      expect(certStat.isFile()).toBe(true);
+      expect(keyStat.isFile()).toBe(true);
+    } else {
+      expect((certStat.mode & 0o777).toString(8)).toBe("600");
+      expect((keyStat.mode & 0o777).toString(8)).toBe("600");
+    }
   });
 });
 

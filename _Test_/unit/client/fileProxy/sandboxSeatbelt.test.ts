@@ -25,7 +25,10 @@ const ctxFor = (
   policy: buildSandboxPolicy({ cwd, network, platform: "darwin" }),
 });
 
-describe("buildSeatbeltProfile", () => {
+const describeDarwin =
+  process.platform === "darwin" ? describe : describe.skip;
+
+describeDarwin("buildSeatbeltProfile", () => {
   it("denies by default and allows process/exec/mach (normal)", () => {
     const profile = buildSeatbeltProfile(ctxFor("/proj"));
     expect(profile).toContain("(deny default)");
@@ -37,9 +40,11 @@ describe("buildSeatbeltProfile", () => {
   it("allows writes under cwd and tmp (normal)", () => {
     const cwd = path.resolve("/proj");
     const profile = buildSeatbeltProfile(ctxFor(cwd));
-    expect(profile).toContain(`(allow file-write* (subpath "${cwd}"))`);
     expect(profile).toContain(
-      `(allow file-write* (subpath "${os.tmpdir()}"))`,
+      `(allow file-write* (subpath "${path.normalize(cwd)}"))`,
+    );
+    expect(profile).toContain(
+      `(allow file-write* (subpath "${path.normalize(os.tmpdir())}"))`,
     );
   });
 

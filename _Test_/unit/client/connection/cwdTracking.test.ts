@@ -64,14 +64,17 @@ describe("trackedCwdsEqual", () => {
   });
 
   it("canonicalizes relative segments before comparing", () => {
-    const base = path.resolve("/tmp/atlas-test");
+    const base = path.resolve(os.tmpdir(), "atlas-cwd-equal-test");
     expect(trackedCwdsEqual(path.join(base, "app"), path.join(base, "app", "."))).toBe(
       true,
     );
   });
 });
 
-describe("wrapCommandForCwdTracking — Unix shell integration", () => {
+const describeUnix =
+  process.platform === "win32" ? describe.skip : describe;
+
+describeUnix("wrapCommandForCwdTracking — Unix shell integration", () => {
   let tempDir: string;
 
   beforeEach(async () => {
