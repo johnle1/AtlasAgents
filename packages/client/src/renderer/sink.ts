@@ -53,7 +53,7 @@ export const appendText = (
  *
  * @remarks
  * `path` is the header label shown above the body (often
- * `"Write src/foo.ts"`). `body` is the pre-rendered diff text from the diff
+ * `"Updated src/foo.ts"`). `body` is the pre-rendered diff text from the diff
  * renderer.
  *
  * @param path - Non-empty header / file label for the diff card.
@@ -62,7 +62,7 @@ export const appendText = (
  *
  * @example
  * ```ts
- * appendDiff("Write src/a.ts", "+ export const x = 1;\n");
+ * appendDiff("Updated src/a.ts", "+ export const x = 1;\n");
  * ```
  */
 export const appendDiff = (path: string, body: string): void => {
