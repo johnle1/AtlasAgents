@@ -2,9 +2,9 @@
  * Child-process shell runner with timeout and AbortSignal support.
  *
  * @remarks
- * Spawns `cmd.exe /c` on Windows (with delayed expansion) and `/bin/sh -c`
- * elsewhere, captures stdout / stderr, and always settles exactly once. Used
- * by {@link DispatchContext.runShell}.
+ * Spawns `cmd.exe /c` on Windows (delayed expansion + verbatim quoting) and
+ * `/bin/sh -c` elsewhere, captures stdout / stderr, and always settles
+ * exactly once. Used by {@link DispatchContext.runShell}.
  */
 
 import { spawn } from "node:child_process";
@@ -113,6 +113,10 @@ export const runShell = (
     //                 (`setlocal` is a batch-file-only command and is a no-op
     //                 under `cmd /c`)
     //         /c = Execute the command and exit
+    //         The command is wrapped in quotes and passed with
+    //         windowsVerbatimArguments — same pattern Node's exec() uses —
+    //         so inner quotes in `node -e "..."` survive CreateProcess quoting
+    //         and the child's exit code is preserved.
     // Step 2b: On Unix: use /bin/sh with -c flag to execute command string
     // Step 2c: When a sandbox provider is present, spawn its argv as-is
     //         (argv array — no string-interpolation quoting)
@@ -126,10 +130,22 @@ export const runShell = (
         ? options.sandbox.wrapCommand(command, { cwd, policy: options.policy }).argv
         : undefined;
     const spawnSpec = sandboxArgv
-      ? { bin: sandboxArgv[0] ?? "/bin/sh", args: sandboxArgv.slice(1) }
+      ? {
+          bin: sandboxArgv[0] ?? "/bin/sh",
+          args: sandboxArgv.slice(1),
+          windowsVerbatimArguments: false,
+        }
       : isWindowsPlatform
-        ? { bin: "cmd.exe", args: ["/d", "/s", "/v:on", "/c", command] }
-        : { bin: "/bin/sh", args: ["-c", command] };
+        ? {
+            bin: "cmd.exe",
+            args: ["/d", "/s", "/v:on", "/c", `"${command}"`],
+            windowsVerbatimArguments: true,
+          }
+        : {
+            bin: "/bin/sh",
+            args: ["-c", command],
+            windowsVerbatimArguments: false,
+          };
 
     // Scrubbed regardless of sandbox presence — most users start with no OS
     // sandbox backend installed, so this is the one credential-leak
@@ -138,6 +154,7 @@ export const runShell = (
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       env: scrubEnv(),
+      windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments,
     });
 
     // ===== STEP 3: Initialize output buffers =====

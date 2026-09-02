@@ -31,6 +31,15 @@ describe("runShell — timeout handling", () => {
     expect(result.stderr).not.toContain(SHELL_TIMEOUT_MARKER);
     expect(result.stdout.trim()).toBe("ok");
   });
+
+  it("preserves a non-zero exit code from a quoted node -e command", async () => {
+    const result = await runShell(
+      'node -e "process.exit(1)"',
+      os.tmpdir(),
+      5_000,
+    );
+    expect(result.exitCode).toBe(1);
+  });
 });
 
 describe("runShell — sandbox wrapping", () => {
