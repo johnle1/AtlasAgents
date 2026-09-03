@@ -36,6 +36,24 @@ export type PromptPort = {
    * @returns Resolves when theme selection is completed.
    */
   pickTheme: () => Promise<void>;
+
+  /**
+   * Prompts the user to pick one of `options` via the horizontal,
+   * left/right-navigable option bar — shared by `/model` and `/effort`.
+   *
+   * @param prompt - The question to display above the bar.
+   * @param options - Display labels in order.
+   * @param initialIndex - Index to highlight when the bar opens (the
+   *   current value). Defaults to `0`.
+   * @returns The chosen option's index, or `null` if the user cancelled
+   *   (Esc) — callers should treat `null` as "no change".
+   */
+  pickOption: (
+    prompt: string,
+    options: string[],
+    initialIndex?: number,
+    optionColors?: string[],
+  ) => Promise<number | null>;
 };
 
 /**
@@ -62,6 +80,18 @@ export const createInkPromptPort = (): PromptPort => ({
 
   pickTheme: async () => {
     await requestPrompt({ type: "theme" });
+  },
+
+  pickOption: async (prompt, options, initialIndex = 0, optionColors) => {
+    const response = await requestPrompt({
+      type: "optionBar",
+      prompt,
+      options,
+      initialIndex,
+      ...(optionColors ? { optionColors } : {}),
+    });
+
+    return typeof response === "number" ? response : null;
   },
 });
 

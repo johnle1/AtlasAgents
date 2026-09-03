@@ -2,16 +2,19 @@
  * Interactive agent/subagent model picker used by `/set agent` and `/set subagent`.
  *
  * @remarks
- * Loads provider-grouped model names from the server, prompts for a numbered
- * choice, writes local config, syncs via `config.setModel`, then refreshes the
- * Ink banner. Local config rolls back if the server rejects the change.
+ * Loads provider-grouped model names from the server, prompts via the
+ * shared horizontal option bar (`prompts.pickOption` — see
+ * `ui/components/PromptOverlay.tsx`'s `OptionBarPrompt`, also used by
+ * `/effort`), writes local config, syncs via `config.setModel`, then
+ * refreshes the Ink banner. Local config rolls back if the server rejects
+ * the change.
  */
 
 import { updateConfig, loadConfig } from "../config/index.js";
 import type { Connection } from "../connection/index.js";
 import type { PromptPort } from "../ui/promptPort.js";
 import { refreshInkBanner, getActivePlan } from "../ui/uiBridge.js";
-import { printGroupedModels, printError, printSuccess, printLine } from "../renderer.js";
+import { buildGroupedModelsLines, printError, printSuccess, printLine } from "../renderer.js";
 import type { ModelGroup, CurrentModelSelection } from "../renderer.js";
 import type { PlanStepState } from "../ui/types.js";
 import { formatErrorMessage } from "./utils.js";
@@ -63,7 +66,8 @@ export const buildPlanCarriedOverMessage = (
  * @remarks
  * Order of operations matters for consistency:
  * 1. Fetch provider-grouped models (`providers.listModels`)
- * 2. User picks a 1-based index (`prompts.choose`); out-of-range / cancel → no-op
+ * 2. User picks via the horizontal option bar (`prompts.pickOption`),
+ *    opening already highlighted on the current model; Esc / cancel → no-op
  * 3. Write local config for `subagentModel`/`agentProvider` (or subagent equivalents)
  * 4. Send `config.setModel` to the server
  * 5. Only then call `connection.updateConfig` + refresh the banner
@@ -76,7 +80,7 @@ export const buildPlanCarriedOverMessage = (
  *
  * @param modelRole - Which config fields to update (`"agent"` | `"subagent"`).
  * @param connection - Live RSocket connection.
- * @param prompts - Numbered choice prompt port.
+ * @param prompts - Prompt port backing the option-bar overlay.
  *
  * @example
  * ```ts
@@ -127,21 +131,33 @@ export const handleSetModel = async (
       : {}),
   };
 
-  const entries = printGroupedModels(groups, modelRole, current);
+  const { entries } = buildGroupedModelsLines(groups, modelRole, current);
 
   if (entries.length === 0) {
     printError("No models available on any configured provider.");
     return;
   }
 
-  const selectedNumber = await prompts.choose(
-    `  Pick a number (1-${entries.length}): `,
-    entries.length,
+  const labels = entries.map(
+    ({ provider, model }) => `${model} (${provider})`,
+  );
+  const currentSelection = current[modelRole];
+  const initialIndex = Math.max(
+    0,
+    entries.findIndex(
+      (entry) =>
+        entry.provider === currentSelection?.provider &&
+        entry.model === currentSelection?.model,
+    ),
   );
 
-  // prompts.choose is 1-based; 0 / out-of-range means cancel.
-  const entryIndex = selectedNumber - 1;
-  if (entryIndex < 0 || entryIndex >= entries.length) {
+  const entryIndex = await prompts.pickOption(
+    `Pick ${modelRole} model`,
+    labels,
+    initialIndex,
+  );
+
+  if (entryIndex === null) {
     printError("Cancelled — no change.");
     return;
   }

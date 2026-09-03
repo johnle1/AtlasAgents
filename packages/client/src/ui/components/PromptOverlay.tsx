@@ -5,6 +5,14 @@ import { resolvePrompt } from "../uiBridge.js";
 import { THEMES } from "../../theme/themes.js";
 import { setTheme } from "../../theme/themeManager.js";
 import { useAppContext } from "../../state/DataContext.js";
+import {
+  resolveOptionBarKey,
+  computeVisibleWindow,
+  computeOptionBarPointerOffset,
+  optionBarLabelColor,
+  OPTION_BAR_SEPARATOR,
+  OPTION_BAR_LEFT_EDGE,
+} from "./optionBarKeymap.js";
 
 /**
  * Router-style overlay component that selects and renders the active modal prompt based on the server request type.
@@ -15,6 +23,7 @@ import { useAppContext } from "../../state/DataContext.js";
  * - `theme`: interactive color palette picker
  * - `planFeedback`: free-text feedback box the agent re-plans from
  * - `choice`: numeric multiple-choice index entry
+ * - `optionBar`: horizontal left/right-navigable option bar (`/model`, `/effort`)
  * - default: standard single-line string prompt (with optional password masking)
  *
  * @example
@@ -42,6 +51,15 @@ export const PromptOverlay: React.FC = () => {
   }
   if (request.type === "choice") {
     return <ChoicePrompt prompt={request.prompt} max={request.max} />;
+  }
+  if (request.type === "optionBar") {
+    return (
+      <OptionBarPrompt
+        prompt={request.prompt}
+        options={request.options}
+        optionColors={request.optionColors}
+      />
+    );
   }
   return (
     <LinePrompt prompt={request.prompt} masked={request.masked === true} />
@@ -216,6 +234,104 @@ const ThemePicker: React.FC = () => {
           {THEMES[themeId]?.name ?? themeId}
         </Text>
       ))}
+    </Box>
+  );
+};
+
+/** Max options rendered at once — longer lists (e.g. `/model`) scroll instead of overflowing. */
+const OPTION_BAR_WINDOW_SIZE = 5;
+
+/**
+ * Renders a horizontal, left/right-navigable option bar — the shared
+ * picker behind both `/model` and `/effort`.
+ *
+ * @remarks
+ * Binds `useInput` left/right controls to move the highlight (via
+ * {@link resolveOptionBarKey}), confirming on `return` (resolves the
+ * selected index) or cancelling on `escape` (resolves `undefined`, leaving
+ * the caller's current value unchanged). Long option lists are windowed via
+ * {@link computeVisibleWindow} so the bar never overflows terminal width;
+ * `‹`/`›` mark truncated edges. A single `^` pointer renders on the line
+ * below, centered under the selected label via
+ * {@link computeOptionBarPointerOffset} — bold/color alone (the label's own
+ * styling) can be too weak a signal in a limited-color terminal, so this
+ * mirrors the `▸ ` glyph {@link ThemePicker}/`ApprovalMenu` use for the same
+ * reason, adapted to a horizontal layout. The pointer re-centers on every
+ * arrow move since it's derived straight from `selectedIndex`, not tracked
+ * separately. The starting highlight is seeded from
+ * `promptDraft.optionBarSelected`, which `DataContext`'s prompt-reset effect
+ * sets to the request's `initialIndex` (the current model/effort) rather
+ * than always starting at 0.
+ *
+ * @param props - Component parameters.
+ * @param props.prompt - Question shown above the bar.
+ * @param props.options - Display labels in order; the resolved value is the
+ *   chosen label's index.
+ * @param props.optionColors - Optional Ink palette; only the highlighted label is tinted.
+ */
+const OptionBarPrompt: React.FC<{
+  prompt: string;
+  options: string[];
+  optionColors?: string[];
+}> = ({ prompt, options, optionColors }) => {
+  const { promptDraft, setPromptDraft } = useAppContext();
+  const selectedIndex = promptDraft.optionBarSelected;
+
+  useInput((_input, key) => {
+    const action = resolveOptionBarKey(key, selectedIndex, options.length);
+    if (action.type === "move") {
+      setPromptDraft((previousDraft) => ({
+        ...previousDraft,
+        optionBarSelected: action.index,
+      }));
+    } else if (action.type === "confirm") {
+      resolvePrompt(action.index);
+    } else if (action.type === "dismiss") {
+      resolvePrompt(undefined);
+    }
+  });
+
+  const { indices, hasMore } = computeVisibleWindow(
+    selectedIndex,
+    options.length,
+    OPTION_BAR_WINDOW_SIZE,
+  );
+  const visibleLabels = indices.map((optionIndex) => options[optionIndex]!);
+  const selectedPosition = indices.indexOf(selectedIndex);
+  const pointerColumn = computeOptionBarPointerOffset(
+    visibleLabels,
+    selectedPosition,
+    hasMore.left,
+  );
+
+  return (
+    <Box flexDirection="column" borderStyle="round" paddingX={1}>
+      <Text bold>{prompt}</Text>
+      <Box flexDirection="row">
+        {hasMore.left ? <Text dimColor>{OPTION_BAR_LEFT_EDGE}</Text> : null}
+        {indices.map((optionIndex, position) => (
+          <React.Fragment key={optionIndex}>
+            {position > 0 ? (
+              <Text dimColor>{OPTION_BAR_SEPARATOR}</Text>
+            ) : null}
+            <Text
+              bold={optionIndex === selectedIndex}
+              color={optionBarLabelColor(
+                optionColors,
+                optionIndex,
+                selectedIndex,
+              )}
+            >
+              {options[optionIndex]}
+            </Text>
+          </React.Fragment>
+        ))}
+        {hasMore.right ? <Text dimColor> ›</Text> : null}
+      </Box>
+      {/* Single centered pointer under the selected label — re-centers on
+          every arrow move since it's derived straight from selectedIndex. */}
+      <Text dimColor>{" ".repeat(pointerColumn)}^</Text>
+      <Text dimColor>←/→ move · Enter confirm · Esc cancel</Text>
     </Box>
   );
 };

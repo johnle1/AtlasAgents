@@ -54,6 +54,11 @@ export {
   isUnlocked,
   lockCipher,
 } from "./crypto/configCipher.js";
+export {
+  EFFORT_LEVELS,
+  type EffortLevel,
+  isEffortLevel,
+} from "./config/effortLevels.js";
 export type { ModelSummary, ModelDetails } from "./models/modelSummary.js";
 export type {
   ModelStorageReport,

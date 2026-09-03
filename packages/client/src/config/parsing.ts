@@ -8,6 +8,7 @@ import type { Config } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
 import { parsePersistedApprovalMode } from "./approvalMode.js";
 import { isSandboxMode } from "../fileProxy/sandbox/index.js";
+import { isEffortLevel } from "@atlasagents/shared";
 
 /**
  * Merges parsed config from disk with DEFAULT_CONFIG to fill missing keys.
@@ -37,6 +38,9 @@ export const mergeConfigFromDisk = (parsedConfig: Partial<Config>): Config => ({
       ? parsedConfig.subagentCap
       : DEFAULT_CONFIG.subagentCap,
   approvalMode: parsePersistedApprovalMode(parsedConfig.approvalMode),
+  effort: isEffortLevel(parsedConfig.effort)
+    ? parsedConfig.effort
+    : DEFAULT_CONFIG.effort,
   ui: { ...DEFAULT_CONFIG.ui, ...parsedConfig.ui },
   sandbox: {
     ...DEFAULT_CONFIG.sandbox,
