@@ -20,6 +20,7 @@ export { buildBannerLines } from "./banner.js";
 export {
   buildConfigLines,
   buildHelpLines,
+  buildGroupedModelsLines,
   printConfig,
   printModels,
   printGroupedModels,

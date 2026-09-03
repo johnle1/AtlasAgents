@@ -42,6 +42,7 @@ import {
   handleConfig,
 } from "./configHandlers.js";
 import { handleSetModel } from "./modelSelectionHandlers.js";
+import { handleSetEffort } from "./effortHandlers.js";
 import { handleModels } from "./modelHandlers.js";
 import { handleProviders } from "./providerHandlers.js";
 import { handleSkills } from "./skillHandlers.js";
@@ -217,6 +218,9 @@ export class CommandHandler {
         break;
       case "model":
         await handleSetModel("agent", this.conn, this.prompts);
+        break;
+      case "effort":
+        await handleSetEffort(this.conn, this.prompts);
         break;
       case "help":
         printHelp();

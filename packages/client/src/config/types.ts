@@ -10,7 +10,7 @@
 
 import * as path from "node:path";
 import * as os from "node:os";
-import type { SecretsEnvelope } from "@atlasagents/shared";
+import type { EffortLevel, SecretsEnvelope } from "@atlasagents/shared";
 import type { ApprovalMode, PersistedApprovalMode } from "./approvalMode.js";
 import type { SandboxMode } from "../fileProxy/sandbox/index.js";
 import { DEFAULT_SANDBOX_IMAGE } from "../fileProxy/sandbox/index.js";
@@ -310,6 +310,14 @@ export interface Config {
   subagentProvider: string;
 
   /**
+   * How much the agent turn's REASON phase re-deliberates before acting —
+   * see `EffortLevel`'s doc comment (`@atlasagents/shared`) for the full
+   * per-level table. Set via `/effort`; mirrors the server's own config key
+   * of the same name (`packages/server/src/config/types.ts`).
+   */
+  effort: EffortLevel;
+
+  /**
    * Sampling temperature for the agent model (0.0-1.0).
    *
    * @remarks
@@ -492,6 +500,9 @@ export const DEFAULT_CONFIG: Config = {
   // Native Ollama by default; switched via /providers + /set agent|subagent
   agentProvider: "ollama",
   subagentProvider: "ollama",
+
+  // Matches the server's own SERVER_DEFAULTS.effort — set via /effort
+  effort: "medium",
 
   // Low for agent (deterministic planning), moderate for subagents (creative code)
   agentTemp: 0.1,

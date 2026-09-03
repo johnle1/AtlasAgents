@@ -72,6 +72,11 @@ export const COMMAND_CATALOG: CommandEntry[] = [
       "Choose agent model (from any configured provider) — same model as subagent is fine",
   },
   {
+    command: "/effort",
+    description:
+      "Choose how much the agent re-deliberates before acting (low/medium/high/extra-high/max)",
+  },
+  {
     command: "/skills list",
     description: "List local skill files",
   },

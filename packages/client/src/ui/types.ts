@@ -240,6 +240,19 @@ export type PromptRequest =
     }
   | {
       type: "theme";
+    }
+  | {
+      type: "optionBar";
+      prompt: string;
+      /** Display labels in order; the resolved value is the chosen label's index. */
+      options: string[];
+      /** Index to highlight when the bar first opens (the current value). */
+      initialIndex: number;
+      /**
+       * Optional Ink colors per option — only the highlighted label is tinted
+       * (`/effort`). When omitted, the selected label uses cyan (`/model`).
+       */
+      optionColors?: string[];
     };
 
 /** Response payload for a resolved {@link PromptRequest}. */

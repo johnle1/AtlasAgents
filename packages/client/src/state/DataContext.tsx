@@ -44,6 +44,7 @@ export type PromptDraft = {
   lineValue: string;
   choiceValue: string;
   themeSelected: number;
+  optionBarSelected: number;
 };
 
 /** Returns a zeroed {@link PromptDraft} for overlay initialization. */
@@ -51,6 +52,7 @@ export const emptyPromptDraft = (): PromptDraft => ({
   lineValue: "",
   choiceValue: "",
   themeSelected: 0,
+  optionBarSelected: 0,
 });
 
 const buildBannerEntries = (configuration: Config): StaticEntry[] =>
@@ -354,7 +356,14 @@ export const AppProvider: React.FC<AppProviderProps> = ({
 
   useEffect(() => {
     if (promptReq !== null) {
-      setPromptDraft(emptyPromptDraft());
+      // An optionBar prompt opens already highlighting the current value
+      // (the model/effort in effect) rather than always starting at index
+      // 0 — every other draft field still resets to its zeroed default.
+      setPromptDraft(
+        promptReq.type === "optionBar"
+          ? { ...emptyPromptDraft(), optionBarSelected: promptReq.initialIndex }
+          : emptyPromptDraft(),
+      );
     }
   }, [promptReq, setPromptDraft]);
 

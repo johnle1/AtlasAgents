@@ -5,6 +5,8 @@
  * `parsing.ts` and `manager.ts`.
  */
 
+import type { EffortLevel } from "@atlasagents/shared";
+
 // ===== CONSTANTS =====
 /**
  * Relative path to persisted config under the server data root.
@@ -41,38 +43,18 @@ export const EXISTING_PASSPHRASE_LABEL = "Enter your server config passphrase: "
  * Ollama's KV-cache quantization modes, from least to most memory-efficient.
  * Defined here (rather than in `ollama/runtimeTuning.ts`, which derives the
  * default) so `runtimeTuning.ts` can import it without creating a cycle back
- * into `config/types.ts` — the same reason `EffortLevel` lives here too.
+ * into `config/types.ts`.
  */
 export type KvCacheType = "f16" | "q8_0" | "q4_0";
 
 /**
  * How much the agent turn's REASON phase (`orchestration/agent/reasoner.ts`)
- * re-deliberates before acting.
- *
- * @remarks
- * This buys re-deliberation, not persistence — the agent loop's own "keep
- * going until the task is done" behavior (the iteration ceiling and the
- * absence of any give-up-early counter, see `agentTurn.ts`) is unaffected by
- * this setting at every level, `low` included. Hitting a level's refinement
- * cap means the reasoner accepts its current decision and the loop acts on
- * it — it never means the turn gives up.
- *
- * - `"low"` — REASON phase skipped entirely (1 model call per iteration,
- *   the pre-reasoner behavior, no refinement-round check at all).
- * - `"medium"` (default) — up to 1 refinement round, 1 finish-verification
- *   pass. Chosen as the default over `"high"` because the fixed per-step
- *   cost (the reasoning call plus the finish-verification pass) is overhead
- *   on every iteration even when the model converges instantly — `"high"`'s
- *   extra refinement headroom only pays off once a decision is already
- *   stuck looping, which isn't the common case.
- * - `"high"` — up to 2 refinement rounds, 2 finish-verification passes.
- * - `"extra-high"` — up to 4 refinement rounds, 2 finish-verification passes.
- * - `"max"` — up to 6 refinement rounds, 2 finish-verification passes (each
- *   of which may itself re-refine).
+ * re-deliberates before acting. Re-exported from `@atlasagents/shared` (see
+ * that module's doc comment for the full per-level table) so the client's
+ * `/effort` picker and this module's validation share one literal list with
+ * no risk of drift.
  */
-export const EFFORT_LEVELS = ["low", "medium", "high", "extra-high", "max"] as const;
-
-export type EffortLevel = (typeof EFFORT_LEVELS)[number];
+export { EFFORT_LEVELS, type EffortLevel } from "@atlasagents/shared";
 
 /**
  * Built-in fallback defaults applied when config keys are missing from disk.

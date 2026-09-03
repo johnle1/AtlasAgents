@@ -11,7 +11,7 @@ AtlasAgents is a self-hosted, client/server AI coding agent, built for individua
 - **Persistent memory** — session continuity, learned preferences, and reusable patterns are extracted from past tasks and consolidated over time.
 - **Skills** — markdown instruction files that the client syncs to the server; the server picks the most relevant one per task.
 - **Sandboxed command execution** — shell commands run inside an OS-level sandbox (Seatbelt on macOS, bubblewrap on Linux, a container on Windows) rather than directly in your shell; see [Sandboxing](#sandboxing).
-- **Extensible via MCP** — add your own Model Context Protocol servers (GitHub, Jira, Slack, or anything else) with `/mcp add`; see [MCP servers](#mcp-servers).
+- **Experimental MCP** — `/mcp add` can attach Model Context Protocol servers, but this path is **not guaranteed to work**; see [MCP servers](#mcp-servers).
 - **Optional code-index integration** — [TokenSave](#optional-tokensave) speeds up workspace search/navigation via MCP.
 
 `atlasagents` and `atlasagents-server` are published to npm — install them directly, or build from this monorepo if you're contributing.
@@ -127,7 +127,9 @@ or point `sandbox.containerImage` in `config.json` at your own.
 
 ## MCP servers
 
-Atlas connects to any number of [Model Context Protocol](https://modelcontextprotocol.io) servers — GitHub, Jira, Slack, TokenSave (see below), or your own — and offers their tools to the agent alongside the built-in file/command tools.
+MCP support is **experimental and not guaranteed**. Connecting a server, discovering tools, and having the agent use them can fail depending on the server, transport, and tool metadata. Treat `/mcp` as best-effort, not a supported production integration.
+
+When it does connect, Atlas can attach [Model Context Protocol](https://modelcontextprotocol.io) servers — GitHub, Jira, Slack, TokenSave (see below), or your own — and offer their tools to the agent alongside the built-in file/command tools.
 
 ```
 /mcp list                # configured servers
@@ -145,7 +147,7 @@ Atlas connects to any number of [Model Context Protocol](https://modelcontextpro
 
 Every tool from a server added via `/mcp add` is namespaced `mcp__<server>__<tool>` (e.g. `mcp__github__create_issue`) so two servers can never collide on a shared tool name. **Any tool not marked read-only prompts for approval before it runs**, the same run/skip/revise prompt as a shell command — read-only-ness comes from the tool's own MCP metadata, or from `--readonly` on a custom server that doesn't declare it. Credentials (`mcpSecrets` in `config.json`) are encrypted at rest the same way the server password is — see [Config encryption at rest](#config-encryption-at-rest).
 
-**Verify preset endpoints before relying on them**: GitHub/Jira/Slack's MCP offerings are still evolving — if a preset's default looks stale, `/mcp add <name> --command ... | --url ...` overrides it, or edit `mcpServers` in `config.json` directly.
+**Verify preset endpoints before relying on them**: GitHub/Jira/Slack's MCP offerings are still evolving — if a preset's default looks stale, `/mcp add <name> --command ... | --url ...` overrides it, or edit `mcpServers` in `config.json` directly. A successful `/mcp add` or `/mcp check` does not mean the agent will reliably call those tools.
 
 **Building your own MCP server?** [`examples/mcp-server/`](examples/mcp-server/) is a copy-me template covering the parts specific to Atlas — the `readOnlyHint` annotation that drives the approval prompt above, how credentials reach your process, and why stdout has to stay untouched on a stdio server.
 
@@ -255,7 +257,7 @@ atlas-server --regen-cert
 | `/new`                                            | Start a new task                                        |
 | `/explore`                                        | Explore-only mode (read, no edits)                      |
 | `/tokensave init\|status`                         | Manage the optional TokenSave code-index integration    |
-| `/mcp list\|add\|remove\|enable\|disable\|tools\|check` | Manage MCP servers (GitHub, Jira, Slack, custom)   |
+| `/mcp list\|add\|remove\|enable\|disable\|tools\|check` | Manage MCP servers (experimental; not guaranteed) |
 | `/workspace`                                      | Workspace info/controls                                 |
 | `/cwd`                                            | Show/change the working directory                       |
 | `/sandbox`, `/sandbox auto\|container\|off`       | Show or change the command sandbox mode                 |
@@ -316,7 +318,7 @@ refused). A line starting with `!` runs the rest as a local shell command
 
 ### Optional: TokenSave
 
-`/tokensave` integrates with TokenSave, a separate Rust-based code-intelligence indexer that speeds up workspace search/navigation via MCP. Install it with `cargo install tokensave`, then run `/tokensave init` inside the client. TokenSave is a built-in MCP integration with its own init step (`/mcp` doesn't manage it) — see [MCP servers](#mcp-servers) for GitHub/Jira/Slack and your own servers.
+`/tokensave` integrates with TokenSave, a separate Rust-based code-intelligence indexer that speeds up workspace search/navigation via MCP. Install it with `cargo install tokensave`, then run `/tokensave init` inside the client. TokenSave is a built-in MCP integration with its own init step (`/mcp` doesn't manage it). Like other MCP usage, it is not guaranteed to work — see [MCP servers](#mcp-servers) for GitHub/Jira/Slack and your own servers.
 
 ## Troubleshooting
 
