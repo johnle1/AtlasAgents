@@ -17,9 +17,13 @@ import type { McpServerConfig } from "../config/types.js";
 import { isMcpPresetId, MCP_PRESETS } from "../mcp/mcpPresets.js";
 import {
   disconnectMcpClient,
+  HEADER_SECRET_PREFIX,
   listMcpTools,
   namespaceToolName,
+  pinHttpTransportKind,
+  type HttpTransportKind,
 } from "../mcp/mcpRegistry.js";
+import { deriveServerId, validateServerId } from "../mcp/mcpServerName.js";
 import { isTokenSaveOnPath } from "../mcp/tokenSaveClient.js";
 import { syncAllMcpTools } from "./tokenSaveHandlers.js";
 import type { McpSyncMutation } from "../mcp/mcpSyncPlan.js";
@@ -27,37 +31,116 @@ import { printError, printLine, printSuccess } from "../renderer.js";
 import { formatErrorMessage } from "./utils.js";
 
 const USAGE =
-  "Usage: /mcp list | add <github|jira|slack|name> [--command <cmd> [--args a,b] | --url <url>] [--readonly] | remove <name> | enable <name> | disable <name> | tools [name] | check <name> | refresh [name]";
+  'Usage: /mcp list | add <github|jira|slack|name|url> [--command <cmd> [--args a,b] | --url <url>] [--token <tok>] [--header Name=value]... [--transport http|sse] [--readonly] | remove <name> | enable <name> | disable <name> | tools [name] | check <name> | refresh [name]';
 
-/** Parses `/mcp add <name> --command <cmd> [--args a,b] | --url <url> [--readonly]`. */
-const parseCustomAdd = (argument: string): { name: string; config: McpServerConfig } | null => {
-  const tokens = argument.trim().split(/\s+/).filter(Boolean);
-  const name = tokens[0];
-  if (!name) {
+/** Splits `--header Name=value` on the FIRST "=" so values containing "=" (base64, JWTs) survive. */
+const parseHeaderFlag = (raw: string): { name: string; value: string } | null => {
+  const eqIndex = raw.indexOf("=");
+  if (eqIndex <= 0) {
     return null;
   }
+  return { name: raw.slice(0, eqIndex), value: raw.slice(eqIndex + 1) };
+};
+
+/** Outcome of {@link parseCustomAdd}. */
+type CustomAddResult =
+  | {
+      kind: "parsed";
+      name: string;
+      config: McpServerConfig;
+      secrets: Record<string, string>;
+      /** True for an HTTP server added with no `--token`/`--header` — the caller should offer an optional credential prompt. */
+      promptForCredential: boolean;
+      /** Set only by an explicit `--transport` flag, so the caller can pin the probe result and skip the streamable-HTTP-then-SSE dance on first connect. */
+      pinTransportKind?: HttpTransportKind;
+    }
+  | { kind: "usage" }
+  | { kind: "invalid"; reason: string };
+
+/**
+ * Parses `/mcp add <name|url> [--command <cmd> [--args a,b] | --url <url>]
+ * [--token <tok>] [--header Name=value]... [--transport http|sse] [--readonly]`.
+ *
+ * @remarks
+ * A first token that parses as an `http(s)` URL is treated as `--url`
+ * implicitly, with the server name derived from its hostname (see
+ * {@link deriveServerId}) — this is what makes `/mcp add <link>` alone work.
+ *
+ * @param existingNames - Server ids already configured, so a name derived
+ *   from a bare URL doesn't collide with one already in use.
+ */
+const parseCustomAdd = (
+  argument: string,
+  existingNames: ReadonlySet<string>,
+): CustomAddResult => {
+  const tokens = argument.trim().split(/\s+/).filter(Boolean);
+  const first = tokens[0];
+  if (!first) {
+    return { kind: "usage" };
+  }
+
+  const isBareUrl = /^https?:\/\//i.test(first);
+  const name = isBareUrl ? deriveServerId(first, existingNames) : first;
 
   let command: string | undefined;
-  let url: string | undefined;
+  let url: string | undefined = isBareUrl ? first : undefined;
   let argsCsv: string | undefined;
   let readOnly = false;
+  let token: string | undefined;
+  let transportKind: HttpTransportKind | undefined;
+  const headerSecrets: Record<string, string> = {};
 
   for (let i = 1; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token === "--command" && tokens[i + 1]) {
+    const t = tokens[i];
+    if (t === "--command" && tokens[i + 1]) {
       command = tokens[++i];
-    } else if (token === "--url" && tokens[i + 1]) {
+    } else if (t === "--url" && tokens[i + 1]) {
       url = tokens[++i];
-    } else if (token === "--args" && tokens[i + 1]) {
+    } else if (t === "--args" && tokens[i + 1]) {
       argsCsv = tokens[++i];
-    } else if (token === "--readonly") {
+    } else if (t === "--readonly") {
       readOnly = true;
+    } else if (t === "--token" && tokens[i + 1]) {
+      token = tokens[++i];
+    } else if (t === "--header" && tokens[i + 1]) {
+      const raw = tokens[++i]!;
+      const header = parseHeaderFlag(raw);
+      if (!header) {
+        return { kind: "invalid", reason: `--header expects "Name=value", got "${raw}".` };
+      }
+      headerSecrets[`${HEADER_SECRET_PREFIX}${header.name}`] = header.value;
+    } else if (t === "--transport" && tokens[i + 1]) {
+      const value = tokens[++i];
+      if (value !== "http" && value !== "sse") {
+        return {
+          kind: "invalid",
+          reason: `--transport must be "http" or "sse", got "${value}".`,
+        };
+      }
+      // The user-facing flag says "http"; the internal HttpTransportKind
+      // names the concrete SDK transport class ("streamableHttp").
+      transportKind = value === "http" ? "streamableHttp" : "sse";
     }
   }
 
+  if (!command && !url) {
+    return { kind: "usage" };
+  }
+
+  const idCheck = validateServerId(name);
+  if (!idCheck.ok) {
+    return { kind: "invalid", reason: idCheck.reason };
+  }
+
   const readOnlyField = readOnly ? { readOnly: true as const } : {};
+  const secrets: Record<string, string> = { ...headerSecrets };
+  if (token) {
+    secrets.token = token;
+  }
+
   if (command) {
     return {
+      kind: "parsed",
       name,
       config: {
         transport: "stdio",
@@ -65,12 +148,28 @@ const parseCustomAdd = (argument: string): { name: string; config: McpServerConf
         args: argsCsv ? argsCsv.split(",").map((a) => a.trim()) : [],
         ...readOnlyField,
       },
+      secrets,
+      promptForCredential: false,
     };
   }
-  if (url) {
-    return { name, config: { transport: "http", url, ...readOnlyField } };
+
+  // Validated here purely to fail fast with a clear message — the string
+  // form (not a URL instance) is what's persisted to config; mcpRegistry's
+  // buildTransport re-parses it at connect time.
+  try {
+    void new URL(url!);
+  } catch {
+    return { kind: "invalid", reason: `"${url}" is not a valid URL.` };
   }
-  return null;
+
+  return {
+    kind: "parsed",
+    name,
+    config: { transport: "http", url: url!, ...readOnlyField },
+    secrets,
+    promptForCredential: Object.keys(secrets).length === 0,
+    pinTransportKind: transportKind,
+  };
 };
 
 const describeServerConfig = (config: McpServerConfig): string =>
@@ -140,7 +239,7 @@ export const handleMcp = async (
 
       if (names.length === 0 && !hasTokenSave) {
         printLine(
-          `  No MCP servers configured. Add one with /mcp add <github|jira|slack|name>.`,
+          `  No MCP servers configured. Add one with /mcp add <github|jira|slack|name>, or paste a link: /mcp add <url>.`,
         );
         return;
       }
@@ -163,23 +262,52 @@ export const handleMcp = async (
         return;
       }
 
-      const restLooksCustom = /--command|--url/.test(argument);
-      if (isMcpPresetId(first) && !restLooksCustom) {
+      // A bare link (no name) always takes the custom path, same as any of
+      // the credential/transport flags — none of these make sense for a
+      // built-in preset, whose connection shape is fixed.
+      const looksCustom =
+        /^https?:\/\//i.test(first) ||
+        /--command|--url|--token|--header|--transport/.test(argument);
+      if (isMcpPresetId(first) && !looksCustom) {
         await addPreset(first, prompts, conn, workspaceRoot);
         return;
       }
 
-      const parsed = parseCustomAdd(argument);
-      if (!parsed) {
+      const config = loadConfig();
+      const existingNames = new Set(Object.keys(config.mcpServers));
+      const parsed = parseCustomAdd(argument, existingNames);
+
+      if (parsed.kind === "usage") {
         printError(USAGE);
         return;
       }
+      if (parsed.kind === "invalid") {
+        printError(parsed.reason);
+        return;
+      }
 
-      const config = loadConfig();
+      let secrets = parsed.secrets;
+      if (parsed.promptForCredential) {
+        const token = await prompts.question(
+          `Optional credential for "${parsed.name}" (bearer token — leave blank if this server handles its own auth): `,
+          { masked: true },
+        );
+        if (token) {
+          secrets = { ...secrets, token };
+        }
+      }
+
       updateConfig({
         mcpServers: { ...config.mcpServers, [parsed.name]: parsed.config },
+        ...(Object.keys(secrets).length > 0
+          ? { mcpSecrets: { ...config.mcpSecrets, [parsed.name]: secrets } }
+          : {}),
       });
       printSuccess(`Added MCP server "${parsed.name}".`);
+
+      if (parsed.pinTransportKind) {
+        pinHttpTransportKind(parsed.name, parsed.pinTransportKind);
+      }
 
       const synced = await syncAllMcpTools(conn, workspaceRoot, {
         op: "add",
@@ -210,7 +338,7 @@ export const handleMcp = async (
       delete remainingSecrets[name];
       updateConfig({ mcpServers: remainingServers, mcpSecrets: remainingSecrets });
 
-      await disconnectMcpClient(name);
+      await disconnectMcpClient(name, { forgetTransportKind: true });
       printSuccess(`Removed MCP server "${name}".`);
 
       await syncAllMcpTools(conn, workspaceRoot, { op: "remove", serverId: name });

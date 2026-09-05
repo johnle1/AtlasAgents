@@ -20,10 +20,19 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { McpServerConfig } from "../config/types.js";
 
 /** Prefix marking a namespaced (non-tokensave) tool name. */
 export const MCP_NAMESPACE_PREFIX = "mcp__";
+
+/**
+ * Prefix marking an `mcpSecrets` entry as a raw HTTP header rather than the
+ * bearer `token` field — `mcpSecrets[serverId]["header:X-Api-Key"]` becomes
+ * the literal `X-Api-Key` request header. Lets a custom HTTP server
+ * authenticate with something other than `Authorization: Bearer`.
+ */
+export const HEADER_SECRET_PREFIX = "header:";
 
 /**
  * Builds the model-facing tool name for `toolName` on `serverId`.
@@ -186,10 +195,43 @@ export const enqueueMcpOperation = <T>(
   return run;
 };
 
-const buildTransport = (
+/** Builds the extra HTTP headers derived from one server's `mcpSecrets`. */
+const buildHttpHeaders = (secrets: Record<string, string>): Record<string, string> => {
+  const headers: Record<string, string> = {};
+  if (secrets.token) {
+    headers.Authorization = `Bearer ${secrets.token}`;
+  }
+  for (const [key, value] of Object.entries(secrets)) {
+    if (key.startsWith(HEADER_SECRET_PREFIX)) {
+      headers[key.slice(HEADER_SECRET_PREFIX.length)] = value;
+    }
+  }
+  return headers;
+};
+
+/** Which concrete HTTP transport class to build for a `transport: "http"` config. */
+export type HttpTransportKind = "streamableHttp" | "sse";
+
+/**
+ * Builds the transport for one server's connection.
+ *
+ * @remarks
+ * Exported (rather than module-private) so it's directly unit-testable —
+ * {@link getMcpClient} is the only real caller. `httpKind` only applies to
+ * `transport: "http"` configs; `getMcpClient` tries `"streamableHttp"`
+ * first and falls back to `"sse"` on a connect failure (see below), since
+ * most remote MCP servers speak streamable HTTP but some older ones only
+ * speak SSE.
+ *
+ * @param serverId - Used only to name the server in a thrown error message.
+ * @throws {@link Error} When `config.url` doesn't parse as a URL.
+ */
+export const buildTransport = (
+  serverId: string,
   config: McpServerConfig,
   secrets: Record<string, string>,
-): StdioClientTransport | StreamableHTTPClientTransport => {
+  httpKind: HttpTransportKind = "streamableHttp",
+): StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport => {
   if (config.transport === "stdio") {
     return new StdioClientTransport({
       command: config.command,
@@ -200,13 +242,18 @@ const buildTransport = (
       env: secrets,
     });
   }
-  const headers: Record<string, string> = {};
-  if (secrets.token) {
-    headers.Authorization = `Bearer ${secrets.token}`;
+
+  let endpoint: URL;
+  try {
+    endpoint = new URL(config.url);
+  } catch {
+    throw new Error(`MCP server "${serverId}" has an invalid URL: ${config.url}`);
   }
-  return new StreamableHTTPClientTransport(new URL(config.url), {
-    requestInit: { headers },
-  });
+
+  const headers = buildHttpHeaders(secrets);
+  return httpKind === "sse"
+    ? new SSEClientTransport(endpoint, { requestInit: { headers } })
+    : new StreamableHTTPClientTransport(endpoint, { requestInit: { headers } });
 };
 
 const closeConnectionIfCurrent = async (
@@ -220,6 +267,41 @@ const closeConnectionIfCurrent = async (
 };
 
 /**
+ * Remembers which HTTP transport kind last successfully connected for a
+ * server, so a later reconnect goes straight to the one that works instead
+ * of re-probing streamable-HTTP-then-SSE every time. Cleared only when a
+ * server is genuinely removed/dropped (see {@link disconnectMcpClient}'s
+ * `forgetTransportKind` option) — a transient connect error mid-session
+ * must not throw away a choice that was correct a moment ago.
+ */
+const httpTransportKindByServer = new Map<string, HttpTransportKind>();
+
+/**
+ * Pins `serverId`'s HTTP transport kind ahead of its first connect.
+ *
+ * @remarks
+ * Used by `/mcp add ... --transport sse` (or `--transport http`) to skip
+ * the streamable-HTTP-then-SSE probing dance entirely when the caller
+ * already knows which one the server speaks.
+ */
+export const pinHttpTransportKind = (
+  serverId: string,
+  kind: HttpTransportKind,
+): void => {
+  httpTransportKindByServer.set(serverId, kind);
+};
+
+const connectAndStore = async (
+  serverId: string,
+  transport: StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport,
+): Promise<Client> => {
+  const client = new Client({ name: "atlasagents", version: "1.0.0" });
+  await client.connect(transport);
+  connections.set(serverId, { client });
+  return client;
+};
+
+/**
  * Returns a connected client for `serverId`, reusing an existing live
  * connection when one exists and reconnecting otherwise.
  *
@@ -227,6 +309,13 @@ const closeConnectionIfCurrent = async (
  * Liveness is checked with a cheap `listTools` call before reuse — mirrors
  * the pattern the single-server TokenSave client used, generalized to any
  * number of servers each tracked independently.
+ *
+ * For `transport: "http"`, tries streamable HTTP first (or whichever kind
+ * previously won for this server), and falls back to SSE exactly once on
+ * failure — some remote MCP servers still only speak the older SSE
+ * transport. When both fail, the *original* (streamable-HTTP) error
+ * propagates, since that's the transport most servers actually implement
+ * and the more informative failure to surface.
  *
  * @param serverId - The `mcpServers` config key.
  * @param config - That server's connection shape.
@@ -247,19 +336,62 @@ export const getMcpClient = async (
     }
   }
 
-  const transport = buildTransport(config, secrets);
-  const client = new Client({ name: "atlasagents", version: "1.0.0" });
-  await client.connect(transport);
-  connections.set(serverId, { client });
-  return client;
+  if (config.transport !== "http") {
+    return connectAndStore(serverId, buildTransport(serverId, config, secrets));
+  }
+
+  const preferredKind = httpTransportKindByServer.get(serverId) ?? "streamableHttp";
+  try {
+    const client = await connectAndStore(
+      serverId,
+      buildTransport(serverId, config, secrets, preferredKind),
+    );
+    httpTransportKindByServer.set(serverId, preferredKind);
+    return client;
+  } catch (error) {
+    if (preferredKind === "sse") {
+      throw error; // Already on the fallback kind — nothing left to try.
+    }
+    try {
+      const client = await connectAndStore(
+        serverId,
+        buildTransport(serverId, config, secrets, "sse"),
+      );
+      httpTransportKindByServer.set(serverId, "sse");
+      return client;
+    } catch {
+      throw error; // Propagate the original streamable-HTTP failure, not the fallback's.
+    }
+  }
 };
 
-/** Closes and forgets the connection for `serverId`, if one exists. */
-export const disconnectMcpClient = async (serverId: string): Promise<void> => {
+/**
+ * Closes and forgets the connection for `serverId`, if one exists.
+ *
+ * @param forgetTransportKind - Pass `true` only when `serverId` is being
+ *   genuinely removed or dropped (e.g. `/mcp remove`, or a config change
+ *   that drops it from `mcpServers` entirely) — clears the remembered
+ *   streamable-HTTP-vs-SSE choice too, so a server later re-added under the
+ *   same id re-probes from scratch rather than trusting a stale answer.
+ *   Left `false` (default) for a transient reconnect, which should keep
+ *   the remembered choice.
+ */
+export const disconnectMcpClient = async (
+  serverId: string,
+  { forgetTransportKind = false }: { forgetTransportKind?: boolean } = {},
+): Promise<void> => {
   const existing = connections.get(serverId);
   if (existing) {
     await closeConnectionIfCurrent(serverId, existing);
   }
+  if (forgetTransportKind) {
+    httpTransportKindByServer.delete(serverId);
+  }
+};
+
+/** @internal Test-only reset of the module-level HTTP-transport-kind memory. */
+export const resetHttpTransportKindForTests = (): void => {
+  httpTransportKindByServer.clear();
 };
 
 /** Closes every open connection — used on shutdown and between tests. */

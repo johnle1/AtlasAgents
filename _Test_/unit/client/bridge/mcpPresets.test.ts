@@ -9,6 +9,7 @@ import {
   MCP_PRESET_IDS,
   MCP_PRESETS,
 } from "../../../../packages/client/src/mcp/mcpPresets.js";
+import { validateServerId } from "../../../../packages/client/src/mcp/mcpServerName.js";
 
 describe("MCP_PRESETS", () => {
   it("includes github, jira, and slack", () => {
@@ -38,6 +39,30 @@ describe("MCP_PRESETS", () => {
         expect(field.key.length).toBeGreaterThan(0);
         expect(field.prompt.length).toBeGreaterThan(0);
       }
+    }
+  });
+
+  it("every preset id passes validateServerId (normal)", () => {
+    for (const id of Object.keys(MCP_PRESETS)) {
+      expect(validateServerId(id)).toEqual({ ok: true });
+    }
+  });
+
+  it("the jira preset points at the current v2 Atlassian endpoint (normal — regression guard)", () => {
+    const jira = MCP_PRESETS.jira!;
+    expect(jira.config.transport).toBe("stdio");
+    if (jira.config.transport === "stdio") {
+      expect(jira.config.args).toContain("https://mcp.atlassian.com/v2/mcp");
+    }
+  });
+
+  it("no preset references a stale /v1/ Atlassian endpoint (error — the exact bug being fixed)", () => {
+    for (const preset of Object.values(MCP_PRESETS)) {
+      const endpoint =
+        preset.config.transport === "stdio"
+          ? (preset.config.args ?? []).join(" ")
+          : preset.config.url;
+      expect(endpoint).not.toMatch(/mcp\.atlassian\.com\/v1\//);
     }
   });
 });

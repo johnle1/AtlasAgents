@@ -1,4 +1,13 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { ConfigurationError } from "../errors/index.js";
+
+/**
+ * Fixed-width digest used so {@link timingSafeEqual} never sees two buffers
+ * of different lengths (it throws rather than compares in that case) — the
+ * password itself is never a fixed length, but its digest always is.
+ */
+const digest = (value: string): Buffer =>
+  createHash("sha256").update(value, "utf8").digest();
 
 /**
  * Authentication middleware for RSocket connections.
@@ -64,6 +73,14 @@ export class AuthMiddleware {
    * Both passwords are trimmed before comparison. This prevents accidental auth failures
    * due to leading/trailing spaces. For example, `" password "` and `"password"` match.
    *
+   * **Timing:**
+   * Compares SHA-256 digests of both sides via {@link timingSafeEqual} rather
+   * than `===` on the raw strings, so a mismatch takes the same time
+   * regardless of where the first differing character falls — a plain
+   * string comparison returns as soon as it finds a mismatch, which is a
+   * textbook (if hard to exploit over a real network) timing side channel
+   * for a value this security-critical.
+   *
    * @param metadataPassword - The password provided by the client in RSocket
    *                          connection metadata, extracted from JSON `{ password: "..." }`.
    *                          Empty or missing strings always fail auth.
@@ -85,9 +102,11 @@ export class AuthMiddleware {
     // from operator input at startup
     const expected = this.expectedPassword.trim();
 
-    // Compare trimmed client password to expected password.
-    // Trim client input too, so "password " matches "password"
+    // Compare trimmed client password to expected password via fixed-width
+    // digests, so a mismatch never returns early on the raw string content.
     // Return "shared" user ID on match, null (unauthorized) on mismatch
-    return metadataPassword.trim() === expected ? "shared" : null;
+    return timingSafeEqual(digest(metadataPassword.trim()), digest(expected))
+      ? "shared"
+      : null;
   };
 }

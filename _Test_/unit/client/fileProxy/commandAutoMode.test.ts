@@ -15,7 +15,10 @@
  * - Boundary: auto also skips the prompt for cautious/dangerous commands;
  *   auto's sandbox policy denies network while default's allows it
  * - Error: no sandbox backend available → runs unsandboxed regardless of mode,
- *   and warns once per process (not at all when `mode: "off"`)
+ *   and warns once per process (not at all when `mode: "off"`); a "safe"
+ *   command carrying an unresolved `$` indirection is escalated to a prompt
+ *   in that no-backend case specifically (see the "no-sandbox escalation"
+ *   describe block) — with a backend, or `mode: "off"`, it is left alone
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -186,6 +189,74 @@ describe("handleCommandRun — sandboxing is independent of the approval prompt"
     const [, options] = runShell.mock.calls[0] ?? [];
     expect(options?.sandbox).toBe(fakeSandbox);
     expect(options?.policy?.network).toBe("allow");
+  });
+});
+
+describe("handleCommandRun — no-sandbox escalation for unresolved $ indirection", () => {
+  // The command classifier's escaping-path pattern only recognizes $VAR when
+  // it's immediately followed by a path separator (see
+  // commandClassifier.test.ts's "env-var path expansion" cases) — a bare
+  // reference like $SECRETPATH stays classified "safe". With no sandbox
+  // backend to fall back on, that residual gap has to be closed by escalating
+  // to a prompt instead; with a backend (or an explicit "off" opt-out), it's
+  // left alone.
+  it("prompts for a safe command carrying $ when no backend is available (error — no backend)", async () => {
+    mockGetApprovalMode.mockReturnValue("default");
+    mockResolveConfiguredSandbox.mockReturnValue(null);
+    const runShell = vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 }));
+    const context = makeContext({ classifyCommand: () => "safe", runShell });
+
+    await handleCommandRun(context, { command: "cat $SECRETPATH" });
+
+    expect(mockRequestApprovalWithFeedback).toHaveBeenCalled();
+    expect(runShell).toHaveBeenCalled();
+  });
+
+  it("does not escalate a safe command with no $ when no backend is available (normal — no regression)", async () => {
+    mockGetApprovalMode.mockReturnValue("default");
+    mockResolveConfiguredSandbox.mockReturnValue(null);
+    const runShell = vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 }));
+    const context = makeContext({ classifyCommand: () => "safe", runShell });
+
+    await handleCommandRun(context, { command: "cat src/index.ts" });
+
+    expect(mockRequestApprovalWithFeedback).not.toHaveBeenCalled();
+    expect(runShell).toHaveBeenCalled();
+  });
+
+  it("does not escalate when a sandbox backend is available (boundary — its read-deny policy already covers this)", async () => {
+    mockGetApprovalMode.mockReturnValue("default");
+    mockResolveConfiguredSandbox.mockReturnValue(fakeSandbox);
+    const runShell = vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 }));
+    const context = makeContext({ classifyCommand: () => "safe", runShell });
+
+    await handleCommandRun(context, { command: "cat $SECRETPATH" });
+
+    expect(mockRequestApprovalWithFeedback).not.toHaveBeenCalled();
+    expect(runShell).toHaveBeenCalled();
+  });
+
+  it('does not escalate when sandbox.mode is "off" (boundary — explicit opt-out is respected)', async () => {
+    vi.resetModules();
+    vi.doMock("../../../../packages/client/src/config/index.js", () => ({
+      loadConfig: () => ({
+        sandbox: { mode: "off", containerImage: "atlas-sandbox:latest" },
+      }),
+    }));
+    const { handleCommandRun: freshHandleCommandRun } = await import(
+      "../../../../packages/client/src/fileProxy/handlers/commandHandlers.js"
+    );
+
+    mockGetApprovalMode.mockReturnValue("default");
+    mockResolveConfiguredSandbox.mockReturnValue(null);
+    const runShell = vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 }));
+    const context = makeContext({ classifyCommand: () => "safe", runShell });
+
+    await freshHandleCommandRun(context, { command: "cat $SECRETPATH" });
+
+    expect(mockRequestApprovalWithFeedback).not.toHaveBeenCalled();
+    expect(runShell).toHaveBeenCalled();
+    vi.doUnmock("../../../../packages/client/src/config/index.js");
   });
 });
 

@@ -16,6 +16,7 @@ const {
   mockIsTokenSaveOnPath,
   mockListMcpTools,
   mockDisconnectMcpClient,
+  mockPinHttpTransportKind,
   mockSyncAllMcpTools,
   mockPrintLine,
   mockPrintError,
@@ -26,6 +27,7 @@ const {
   mockIsTokenSaveOnPath: vi.fn(),
   mockListMcpTools: vi.fn(),
   mockDisconnectMcpClient: vi.fn(),
+  mockPinHttpTransportKind: vi.fn(),
   mockSyncAllMcpTools: vi.fn(),
   mockPrintLine: vi.fn(),
   mockPrintError: vi.fn(),
@@ -49,6 +51,7 @@ vi.mock("../../../../packages/client/src/mcp/mcpRegistry.js", async () => {
     ...actual,
     listMcpTools: mockListMcpTools,
     disconnectMcpClient: mockDisconnectMcpClient,
+    pinHttpTransportKind: mockPinHttpTransportKind,
   };
 });
 
@@ -248,7 +251,9 @@ describe("handleMcp — remove", () => {
       mcpServers: { slack: { transport: "stdio", command: "npx" } },
       mcpSecrets: {},
     });
-    expect(mockDisconnectMcpClient).toHaveBeenCalledWith("github");
+    expect(mockDisconnectMcpClient).toHaveBeenCalledWith("github", {
+      forgetTransportKind: true,
+    });
     expect(mockSyncAllMcpTools).toHaveBeenCalledWith(conn, "/workspace", {
       op: "remove",
       serverId: "github",
@@ -489,5 +494,212 @@ describe("handleMcp — unknown subcommand", () => {
   it("prints usage", async () => {
     await handleMcp("bogus", "", conn, fileProxy, prompts);
     expect(mockPrintError).toHaveBeenCalledWith(expect.stringContaining("Usage"));
+  });
+});
+
+describe("handleMcp — add (bare link)", () => {
+  it("derives a server id from the hostname and writes an http transport (normal)", async () => {
+    prompts.question.mockResolvedValueOnce(""); // decline the optional-credential prompt
+    await handleMcp("add", "https://mcp.example.com/mcp", conn, fileProxy, prompts);
+
+    expect(mockUpdateConfig).toHaveBeenCalledWith({
+      mcpServers: {
+        example: { transport: "http", url: "https://mcp.example.com/mcp" },
+      },
+    });
+  });
+
+  it("de-dupes the derived id against an existing server (boundary)", async () => {
+    mockLoadConfig.mockReturnValue({
+      mcpServers: { example: { transport: "http", url: "https://old" } },
+      mcpSecrets: {},
+    });
+    prompts.question.mockResolvedValueOnce("");
+
+    await handleMcp("add", "https://mcp.example.com/mcp", conn, fileProxy, prompts);
+
+    expect(mockUpdateConfig).toHaveBeenCalledWith({
+      mcpServers: {
+        example: { transport: "http", url: "https://old" },
+        "example-2": { transport: "http", url: "https://mcp.example.com/mcp" },
+      },
+    });
+  });
+});
+
+describe("handleMcp — add (credentials)", () => {
+  it("--token writes mcpSecrets, never mcpServers (normal)", async () => {
+    await handleMcp(
+      "add",
+      "myapi --url https://mcp.example.com/mcp --token abc123",
+      conn,
+      fileProxy,
+      prompts,
+    );
+
+    expect(mockUpdateConfig).toHaveBeenCalledWith({
+      mcpServers: {
+        myapi: { transport: "http", url: "https://mcp.example.com/mcp" },
+      },
+      mcpSecrets: { myapi: { token: "abc123" } },
+    });
+    expect(prompts.question).not.toHaveBeenCalled();
+  });
+
+  it("repeated --header accumulates under the header: prefix (normal)", async () => {
+    await handleMcp(
+      "add",
+      "myapi --url https://mcp.example.com/mcp --header X-Api-Key=k1 --header X-Team-Id=t1",
+      conn,
+      fileProxy,
+      prompts,
+    );
+
+    expect(mockUpdateConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mcpSecrets: {
+          myapi: { "header:X-Api-Key": "k1", "header:X-Team-Id": "t1" },
+        },
+      }),
+    );
+  });
+
+  it("a header value containing '=' is preserved (boundary)", async () => {
+    await handleMcp(
+      "add",
+      "myapi --url https://mcp.example.com/mcp --header X-Signed=abc=def",
+      conn,
+      fileProxy,
+      prompts,
+    );
+
+    expect(mockUpdateConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mcpSecrets: { myapi: { "header:X-Signed": "abc=def" } },
+      }),
+    );
+  });
+
+  it("a URL server with no credential flag prompts once, masked (normal)", async () => {
+    prompts.question.mockResolvedValueOnce("prompted-token");
+
+    await handleMcp("add", "myapi --url https://mcp.example.com/mcp", conn, fileProxy, prompts);
+
+    expect(prompts.question).toHaveBeenCalledTimes(1);
+    expect(prompts.question).toHaveBeenCalledWith(
+      expect.stringContaining("myapi"),
+      expect.objectContaining({ masked: true }),
+    );
+    expect(mockUpdateConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mcpSecrets: { myapi: { token: "prompted-token" } },
+      }),
+    );
+  });
+
+  it("an empty answer to the credential prompt stores no secrets and still adds the server (boundary)", async () => {
+    prompts.question.mockResolvedValueOnce("");
+
+    await handleMcp("add", "myapi --url https://mcp.example.com/mcp", conn, fileProxy, prompts);
+
+    expect(mockUpdateConfig).toHaveBeenCalledWith({
+      mcpServers: {
+        myapi: { transport: "http", url: "https://mcp.example.com/mcp" },
+      },
+    });
+  });
+
+  it("a stdio custom server is never prompted for a credential (boundary)", async () => {
+    await handleMcp("add", "mytool --command npx --args -y,@me/pkg", conn, fileProxy, prompts);
+    expect(prompts.question).not.toHaveBeenCalled();
+  });
+
+  it("writes servers and secrets in a single updateConfig call (normal)", async () => {
+    await handleMcp(
+      "add",
+      "myapi --url https://mcp.example.com/mcp --token abc123",
+      conn,
+      fileProxy,
+      prompts,
+    );
+    expect(mockUpdateConfig).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("handleMcp — add (transport selection)", () => {
+  it("--transport sse pins the transport kind after adding (normal)", async () => {
+    await handleMcp(
+      "add",
+      "myapi --url https://mcp.example.com/mcp --transport sse --token abc",
+      conn,
+      fileProxy,
+      prompts,
+    );
+    expect(mockPinHttpTransportKind).toHaveBeenCalledWith("myapi", "sse");
+  });
+
+  it("an unknown --transport value is rejected before updateConfig (error)", async () => {
+    await handleMcp(
+      "add",
+      "myapi --url https://mcp.example.com/mcp --transport carrier-pigeon",
+      conn,
+      fileProxy,
+      prompts,
+    );
+    expect(mockPrintError).toHaveBeenCalled();
+    expect(mockUpdateConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleMcp — add (validation)", () => {
+  it("rejects an invalid URL at add time, before updateConfig (error)", async () => {
+    await handleMcp("add", "myapi --url not-a-valid-url", conn, fileProxy, prompts);
+    expect(mockPrintError).toHaveBeenCalled();
+    expect(mockUpdateConfig).not.toHaveBeenCalled();
+  });
+
+  it("rejects the reserved server name 'tokensave' (error)", async () => {
+    await handleMcp(
+      "add",
+      "tokensave --url https://mcp.example.com/mcp",
+      conn,
+      fileProxy,
+      prompts,
+    );
+    expect(mockPrintError).toHaveBeenCalledWith(expect.stringContaining("reserved"));
+    expect(mockUpdateConfig).not.toHaveBeenCalled();
+  });
+
+  it("rejects a server name containing '__' (error)", async () => {
+    await handleMcp(
+      "add",
+      "my__server --url https://mcp.example.com/mcp",
+      conn,
+      fileProxy,
+      prompts,
+    );
+    expect(mockPrintError).toHaveBeenCalled();
+    expect(mockUpdateConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleMcp — add (preset id with custom flags)", () => {
+  it("--token on a preset id takes the custom path, not addPreset (boundary)", async () => {
+    await handleMcp(
+      "add",
+      "jira --url https://mcp.atlassian.com/v2/mcp --token api-tok",
+      conn,
+      fileProxy,
+      prompts,
+    );
+
+    expect(mockUpdateConfig).toHaveBeenCalledWith({
+      mcpServers: {
+        jira: { transport: "http", url: "https://mcp.atlassian.com/v2/mcp" },
+      },
+      mcpSecrets: { jira: { token: "api-tok" } },
+    });
+    // addPreset would have prompted for the preset's own secretFields — it must not have run.
+    expect(prompts.question).not.toHaveBeenCalled();
   });
 });
