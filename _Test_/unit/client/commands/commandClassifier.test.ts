@@ -99,6 +99,10 @@ describe("classifyCommand — metacharacter check gates the safe-git-subcommand 
 
 describe("classifyCommand — metacharacter boundary cases", () => {
   it("does not treat bare env-var expansion as a metacharacter", () => {
+    // A bare $VAR with nothing after it only ever prints a value — it
+    // doesn't read a file — so it's not a shell metacharacter and, per the
+    // "env-var path expansion" describe block below, not an escaping path
+    // either. $HOME/... used as a path *prefix* is a different, gated case.
     expect(classifyCommand("echo $HOME")).toBe("safe");
   });
 
@@ -143,6 +147,42 @@ describe("classifyCommand — arguments pointing outside the workspace", () => {
     expect(classifyCommand("find . -name *.ts")).toBe("safe");
     // A `..` inside a filename, not a traversal segment, is still fine.
     expect(classifyCommand("cat src/a..b.ts")).toBe("safe");
+  });
+});
+
+describe("classifyCommand — env-var path expansion", () => {
+  // $VAR/${VAR} spell the same "outside the workspace" paths as ~ and /,
+  // just via shell variable expansion — cat $HOME/.ssh/id_rsa reads the
+  // exact same file as cat ~/.ssh/id_rsa and must be gated the same way.
+  it.each([
+    ["cat $HOME/.ssh/id_rsa"],
+    ["cat ${HOME}/.ssh/id_rsa"],
+    ["tail -c 100 $HOME/.aws/credentials"],
+  ])("never auto-approves %s (normal)", (command) => {
+    expect(classifyCommand(command)).toBe("cautious");
+  });
+
+  it("catches the env-var form tucked into a flag value (normal)", () => {
+    expect(classifyCommand("grep --file=$HOME/.aws/credentials .")).toBe(
+      "cautious",
+    );
+  });
+
+  it("still catches it quoted (boundary)", () => {
+    expect(classifyCommand('cat "$HOME/.ssh/id_rsa"')).toBe("cautious");
+  });
+
+  it("does not flag a bare env-var reference with nothing after it (boundary)", () => {
+    // echo $HOME only prints a value — it doesn't read a file — so this is
+    // deliberately not treated the same as $HOME/... used as a path prefix.
+    expect(classifyCommand("echo $HOME")).toBe("safe");
+    expect(classifyCommand("echo $PATH")).toBe("safe");
+  });
+
+  it("does not flag a var embedded mid-path with no separator after it (boundary)", () => {
+    // $FILE here isn't being used as a path *prefix* — nothing about this
+    // shape points outside the workspace on its own.
+    expect(classifyCommand("cat src/$FILE.ts")).toBe("safe");
   });
 });
 

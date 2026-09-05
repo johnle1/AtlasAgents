@@ -136,8 +136,14 @@ When it does connect, Atlas can attach [Model Context Protocol](https://modelcon
 /mcp add github          # built-in preset — prompts for a personal access token
 /mcp add jira            # built-in preset — opens a browser for OAuth on first connect
 /mcp add slack           # built-in preset — prompts for a bot token + team id
-/mcp add my-tool --command npx --args -y,@me/my-mcp   # custom stdio server
-/mcp add my-api --url https://api.example.com/mcp     # custom HTTP server
+/mcp add https://mcp.example.com/mcp                    # paste a link — server name is derived from the host
+/mcp add my-tool --command npx --args -y,@me/my-mcp     # custom stdio server
+/mcp add my-api --url https://api.example.com/mcp \
+  --token <bearer-token>                                # custom HTTP server with a bearer credential
+/mcp add my-api --url https://api.example.com/mcp \
+  --header X-Api-Key=<value>                             # ...or a custom header (repeatable)
+/mcp add my-api --url https://api.example.com/sse \
+  --transport sse                                        # pin the SSE transport instead of probing
 /mcp tools [name]        # tools discovered from one or all servers
 /mcp check <name>        # connect and report the tool count
 /mcp disable <name>      # turn off without deleting its config/credentials
@@ -145,7 +151,9 @@ When it does connect, Atlas can attach [Model Context Protocol](https://modelcon
 /mcp remove <name>       # deletes its config and credentials
 ```
 
-Every tool from a server added via `/mcp add` is namespaced `mcp__<server>__<tool>` (e.g. `mcp__github__create_issue`) so two servers can never collide on a shared tool name. **Any tool not marked read-only prompts for approval before it runs**, the same run/skip/revise prompt as a shell command — read-only-ness comes from the tool's own MCP metadata, or from `--readonly` on a custom server that doesn't declare it. Credentials (`mcpSecrets` in `config.json`) are encrypted at rest the same way the server password is — see [Config encryption at rest](#config-encryption-at-rest).
+Adding a server by URL with no `--token`/`--header` prompts once for an optional bearer credential — leave it blank for a server that handles its own auth (OAuth, mTLS, ...). A `transport: "http"` server tries streamable HTTP first and falls back to SSE once automatically if that fails; `--transport` skips the probe when you already know which one it speaks.
+
+Every tool from a server added via `/mcp add` is namespaced `mcp__<server>__<tool>` (e.g. `mcp__github__create_issue`) so two servers can never collide on a shared tool name — server names may only contain letters, digits, `-`, and `_`, and can't be `tokensave` or contain `__`. **Any tool not marked read-only prompts for approval before it runs**, the same run/skip/revise prompt as a shell command — read-only-ness comes from the tool's own MCP metadata, or from `--readonly` on a custom server that doesn't declare it. Credentials (`mcpSecrets` in `config.json`, including `--token` and `--header` values) are encrypted at rest the same way the server password is — see [Config encryption at rest](#config-encryption-at-rest).
 
 **Verify preset endpoints before relying on them**: GitHub/Jira/Slack's MCP offerings are still evolving — if a preset's default looks stale, `/mcp add <name> --command ... | --url ...` overrides it, or edit `mcpServers` in `config.json` directly. A successful `/mcp add` or `/mcp check` does not mean the agent will reliably call those tools.
 

@@ -221,10 +221,19 @@ export const SHELL_METACHARACTER_PATTERN =
  * Matches a POSIX absolute path (`/etc/passwd`), a home-relative path
  * (`~/.aws`), a `..` traversal segment (`/` or `\` delimited, so it also
  * catches `..\`), a Windows drive-absolute path (`C:\Users\...`), a UNC
- * path (`\\server\share`), or any of those tucked into a flag value
- * (`--file=/etc/passwd`, `--file=C:\Users\...`). Workspace-relative
+ * path (`\\server\share`), an env-var reference used as a path prefix
+ * (`$HOME/.ssh`, `${HOME}/.ssh` — see below), or any of those tucked into a
+ * flag value (`--file=/etc/passwd`, `--file=C:\Users\...`). Workspace-relative
  * arguments (`src/a.ts`, `.`, `*.ts`) do not match and stay eligible for
  * `"safe"`.
+ *
+ * The env-var branch (`\$\{?[A-Za-z_][A-Za-z0-9_]*\}?[/\\]`) only matches a
+ * `$VAR`/`${VAR}` reference **immediately followed by a path separator** —
+ * `cat $HOME/.ssh/id_rsa` and `cat ${HOME}/.ssh/id_rsa` are the same
+ * "reads outside the workspace" shape as `cat ~/.ssh/id_rsa`, just spelled
+ * with a shell variable instead of `~`. A bare reference with nothing after
+ * it (`echo $HOME`, `echo $PATH`) only ever prints a value — it doesn't read
+ * a file — so it deliberately does not match and stays `"safe"`.
  */
 export const ESCAPING_PATH_PATTERN =
-  /^[/~]|^\.\.(?:[/\\]|$)|[/\\]\.\.(?:[/\\]|$)|=[/~]|^[A-Za-z]:[/\\]|^\\\\|=[A-Za-z]:[/\\]/;
+  /^[/~]|^\.\.(?:[/\\]|$)|[/\\]\.\.(?:[/\\]|$)|=[/~]|^[A-Za-z]:[/\\]|^\\\\|=[A-Za-z]:[/\\]|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?[/\\]/;

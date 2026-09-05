@@ -35,10 +35,10 @@ afterEach(async () => {
 });
 
 describe("tools/list", () => {
-  it("advertises all three tools with non-empty descriptions", async () => {
+  it("advertises all four tools with non-empty descriptions", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((tool) => tool.name).sort();
-    expect(names).toEqual(["demo_create", "demo_fail", "demo_search"]);
+    expect(names).toEqual(["demo_create", "demo_fail", "demo_search", "demo_whoami"]);
 
     for (const tool of tools) {
       expect(tool.description?.length ?? 0).toBeGreaterThan(0);
@@ -160,5 +160,19 @@ describe("demo_fail", () => {
     });
     const content = result.content as Array<{ type: string; text?: string }>;
     expect(content[0]?.text).toContain("on purpose");
+  });
+});
+
+describe("demo_whoami", () => {
+  // InMemoryTransport carries no HTTP request, so extra.requestInfo is
+  // undefined here — the real header-reporting behavior only exercises
+  // over a genuine HTTP/SSE connection (see
+  // _Test_/system/mcpHttpServer.e2e.test.ts). This just proves the tool
+  // degrades safely rather than throwing when there's no request to report on.
+  it("reports no auth-shaped headers when there is no underlying HTTP request", async () => {
+    const result = await client.callTool({ name: "demo_whoami", arguments: {} });
+    expect(result.isError).not.toBe(true);
+    const content = result.content as Array<{ type: string; text?: string }>;
+    expect(content[0]?.text).toContain("No auth-shaped headers");
   });
 });

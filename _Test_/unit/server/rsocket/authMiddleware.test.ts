@@ -28,6 +28,13 @@ describe("AuthMiddleware — password validation", () => {
   it("rejects an empty client password when a password is configured", () => {
     expect(new AuthMiddleware("secret123").validate("")).toBeNull();
   });
+
+  it("rejects a mismatch of a different length without throwing", () => {
+    // Validation compares fixed-width digests (see middleware.ts), not the
+    // raw strings directly — a length mismatch must still resolve to a
+    // clean reject, not an exception from a differing-length buffer compare.
+    expect(new AuthMiddleware("secret123").validate("a-much-longer-guess")).toBeNull();
+  });
 });
 
 describe("AuthMiddleware — no unauthenticated mode", () => {

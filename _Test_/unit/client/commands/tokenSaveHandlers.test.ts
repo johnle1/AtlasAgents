@@ -541,7 +541,9 @@ describe("syncAllMcpTools — mutation fast path (/mcp add|remove|enable|disable
 
     expect(count).toBe(0);
     expect(mockDeleteCacheEntry).toHaveBeenCalledWith("github");
-    expect(mockDisconnectMcpClient).toHaveBeenCalledWith("github");
+    expect(mockDisconnectMcpClient).toHaveBeenCalledWith("github", {
+      forgetTransportKind: true,
+    });
     expect(mockListMcpTools).not.toHaveBeenCalled();
     expect(mockSendCommand).not.toHaveBeenCalledWith("sync.check", expect.anything());
   });
@@ -561,8 +563,12 @@ describe("syncAllMcpTools — mutation fast path (/mcp add|remove|enable|disable
 
     await syncAllMcpTools(conn, "/workspace", { op: "remove", serverId: "github" });
 
-    expect(mockDisconnectMcpClient).toHaveBeenCalledWith("github");
-    expect(mockDisconnectMcpClient).not.toHaveBeenCalledWith("jira");
+    // Exactly one disconnect call, for github only — proves jira's
+    // connection/cache is untouched regardless of call-argument shape.
+    expect(mockDisconnectMcpClient).toHaveBeenCalledTimes(1);
+    expect(mockDisconnectMcpClient).toHaveBeenCalledWith("github", {
+      forgetTransportKind: true,
+    });
     expect(mockListMcpTools).not.toHaveBeenCalled();
   });
 

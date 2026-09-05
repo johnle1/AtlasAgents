@@ -340,7 +340,12 @@ const executeForegroundCommand = async (
  *   network policy switches to deny-by-default specifically because `auto`
  *   is the one mode with no human in the loop to catch an exfiltration
  *   attempt (see {@link networkPolicyForMode}).
- * - `safe` always runs free regardless of mode.
+ * - `"safe"` runs free regardless of mode — with one exception: if no
+ *   sandbox backend resolved (and `sandbox.mode` isn't the explicit `"off"`
+ *   opt-out) and the command contains an unresolved `$` indirection, it's
+ *   escalated to `"cautious"` before this check runs. With a backend
+ *   present, its read-deny policy already catches a path the classifier's
+ *   pattern checks missed; with no backend at all, nothing downstream would.
  *
  * Skipped commands return `exitCode: -1` and a stderr note — they do not throw.
  *
@@ -367,21 +372,35 @@ export const handleCommandRun = async (
     ? "background"
     : context.classifyCommand(command);
 
-  printBash(command, commandClassification);
-
   if (commandClassification === "background") {
+    printBash(command, commandClassification);
     return runBackgroundCommand(context, command);
   }
 
-  const skipPrompt = mode === "auto";
   const sandboxed = resolveSandboxForCommand(context.currentDir);
 
-  const needsPrompt = !skipPrompt && commandClassification !== "safe";
+  // No sandbox backend resolved: nothing downstream can catch a path
+  // spelling the classifier failed to see through (e.g. an env-var form its
+  // pattern checks don't recognize), so any unresolved `$` indirection in a
+  // "safe" command has to be confirmed by a human instead. With a backend
+  // active, its read-deny policy (see sandbox/policy.ts) already covers
+  // this, so the extra prompt isn't warranted. `sandbox.mode: "off"` is a
+  // deliberate opt-out and is respected, not overridden.
+  const unsandboxed = sandboxed === null && loadSandboxConfig().mode !== "off";
+  const effectiveClassification: BashClass =
+    unsandboxed && commandClassification === "safe" && /\$/.test(command)
+      ? "cautious"
+      : commandClassification;
+
+  printBash(command, effectiveClassification);
+
+  const skipPrompt = mode === "auto";
+  const needsPrompt = !skipPrompt && effectiveClassification !== "safe";
 
   if (needsPrompt) {
     const declineResult = await confirmForegroundCommand(
       command,
-      commandClassification,
+      effectiveClassification,
     );
     if (declineResult) {
       return declineResult;
@@ -391,7 +410,7 @@ export const handleCommandRun = async (
   const result = await executeForegroundCommand(
     context,
     command,
-    commandClassification,
+    effectiveClassification,
     sandboxed,
   );
 
@@ -405,7 +424,7 @@ export const handleCommandRun = async (
     return executeForegroundCommand(
       context,
       command,
-      commandClassification,
+      effectiveClassification,
       null,
     );
   }

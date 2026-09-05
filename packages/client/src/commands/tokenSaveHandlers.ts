@@ -265,7 +265,7 @@ const applyMcpSyncPlan = async (
   cached: Record<string, CachedEntry>,
 ): Promise<void> => {
   for (const serverId of plan.drop) {
-    await disconnectMcpClient(serverId);
+    await disconnectMcpClient(serverId, { forgetTransportKind: true });
     deleteCacheEntry(serverId);
     delete cached[serverId];
   }

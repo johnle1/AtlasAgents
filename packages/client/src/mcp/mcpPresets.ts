@@ -61,10 +61,13 @@ export const MCP_PRESETS: Record<string, McpPresetDefinition> = {
     config: {
       transport: "stdio",
       command: "npx",
-      args: ["-y", "mcp-remote", "https://mcp.atlassian.com/v1/mcp/authv2"],
+      args: ["-y", "mcp-remote", "https://mcp.atlassian.com/v2/mcp"],
     },
-    // mcp-remote opens a browser for OAuth on first connect — no static
-    // token to collect up front.
+    // mcp-remote opens a browser for OAuth 2.1 on first connect — no static
+    // token to collect up front. For headless/API-token auth instead
+    // (Atlassian supports both), skip this preset and use the direct URL
+    // path, which does accept a credential:
+    //   /mcp add jira --url https://mcp.atlassian.com/v2/mcp --token <api-token>
     secretFields: [],
   },
   slack: {
