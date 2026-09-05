@@ -12,7 +12,9 @@ All tests use **Vitest** and are structured as a three-layer pyramid.
 
 ```
 _Test_/
-├── unit/                              ← Layer 1: isolated module tests (49 files)
+├── unit/                              ← Layer 1: isolated module tests (representative subset shown below —
+│                                          this tree predates several later reorganizations; run
+│                                          `find _Test_/unit -name '*.test.ts' | wc -l` for a live count)
 │   ├── agent/orchestration
 │   │   ├── agent.test.ts              — Agent.plan search-then-plan loop, budget
 │   │   ├── agentConstants.test.ts     — MAX_AGENT_SEARCH_CALLS and friends
@@ -82,18 +84,26 @@ _Test_/
 │   └── bridge/
 │       └── state.test.ts              — all get/set bridge state accessors
 │
-├── integration/                       ← Layer 2: wires real modules, mocks at the boundary (7 files)
+├── integration/                       ← Layer 2: wires real modules, mocks at the boundary
 │   ├── spinnerBridge.test.ts          — frame → spinnerForStatusFrame → setSpinner → hook
 │   ├── commandCatalogFlow.test.ts     — full autocomplete pipeline round-trip
 │   ├── tlsHandshakeFlow.test.ts       — real TLS 1.3 RSocket handshake, fingerprint enforcement
 │   ├── tofuFingerprintFlow.test.ts    — TOFU pinning with the REAL disk-backed fingerprint store
 │   ├── providerSecretsFlow.test.ts    — provider API keys never leak through routeCommand
 │   ├── routerCommandFlow.test.ts      — config.setModel / config.set / models.delete via the real Router
-│   └── orchestratorPipelineFlow.test.ts — full runTask pipeline (plan → subagent pool → combine)
+│   ├── orchestratorPipelineFlow.test.ts — full runTask pipeline (plan → subagent pool → combine)
+│   └── mcp/
+│       ├── mcpAddFlow.test.ts          — /mcp add through the real encrypted config + tool cache
+│       ├── mcpJiraPreset.test.ts       — what's genuinely jira-specific (endpoint regression guard, API-token alternative)
+│       ├── mcpPresetFlow.test.ts       — every preset in MCP_PRESETS, table-driven against a golden fixture
+│       ├── mcpSyncFlow.test.ts         — syncAllMcpTools against a real server-side tool cache store
+│       └── mcpToolCallFlow.test.ts     — the real approval-gate chain for an MCP tool call
 │
-├── system/                            ← Layer 3: spawns the compiled binary (2 files)
+├── system/                            ← Layer 3: spawns a real subprocess — the compiled binary, or examples/mcp-server
 │   ├── cli.e2e.test.ts                — --help, flags, invalid/boundary ports, bad server env
-│   └── cliConfigLifecycle.e2e.test.ts — config bootstrap + encryption-at-rest on a real ~/.atlasagents/
+│   ├── cliConfigLifecycle.e2e.test.ts — config bootstrap + encryption-at-rest on a real ~/.atlasagents/
+│   ├── mcpStdioServer.e2e.test.ts     — real stdio MCP round trip against examples/mcp-server
+│   └── mcpHttpServer.e2e.test.ts      — real streamable-HTTP + SSE-fallback round trip against the same example, over HTTP
 │
 ├── vitest.config.ts                   — Vitest + Vite alias config
 ├── package.json                       — devDeps (vitest, execa, strip-ansi)
@@ -129,15 +139,31 @@ them on-the-fly). You do NOT need to run `tsc` first.
 
 ### System tests — build required
 
-System tests spawn the compiled `atlas` binary. Build it first:
+Most system tests spawn the compiled `atlas` binary. Build it first:
 
 ```bash
 cd packages/client
 npm run build
 ```
 
-System tests skip gracefully (`it.skip`) when `dist/index.js` is missing. `npm run test:e2e`
-(see below) builds automatically first, so E2E can't pass vacuously by skipping in CI.
+`mcpStdioServer.e2e.test.ts` and `mcpHttpServer.e2e.test.ts` instead spawn
+`examples/mcp-server`'s own build (a separate package, outside the root
+workspace — see `mcp-server-example` in `.github/workflows/test.yml`):
+
+```bash
+cd examples/mcp-server
+npm install
+npm run build
+```
+
+Every system test skips gracefully (`it.skip`) when the build it needs is
+missing — **except under CI** (`process.env.CI`), where a missing build is a
+hard failure instead, via `_Test_/helpers/ciExampleGuard.ts`'s
+`assertBuiltUnderCi`. `npm run test:e2e` (see below) builds `packages/client`
+automatically first, but does NOT build `examples/mcp-server` — the `system`
+job in `.github/workflows/test.yml` does that as its own step before invoking
+`test:e2e`, specifically so the MCP e2e tests can't silently skip in CI the
+way they once did.
 
 ---
 
@@ -169,11 +195,13 @@ npm run test:coverage
 
 ## Layer Reference
 
-| Layer | Scope | Mocks | Speed | Count |
-|-------|-------|-------|-------|-------|
-| Unit | 1 function / module | Mock all external deps | ms | 49 files |
-| Integration | Multiple real modules wired | Mock only the outermost boundary (network, UI hooks) | ~100ms–1s | 7 files |
-| System | Compiled CLI binary | Nothing | Seconds | 2 files |
+| Layer | Scope | Mocks | Speed |
+|-------|-------|-------|-------|
+| Unit | 1 function / module | Mock all external deps | ms |
+| Integration | Multiple real modules wired | Mock only the outermost boundary (network, subprocess, UI hooks) | ~100ms–1s |
+| System | A real subprocess — the compiled CLI binary, or `examples/mcp-server` for the MCP e2e tests | Nothing | Seconds |
+
+(File counts per layer drift as the suite grows — run `find _Test_/<layer> -name '*.test.ts' -o -name '*.e2e.test.ts' | wc -l` for a live count rather than trusting a number here.)
 
 ---
 

@@ -25,6 +25,11 @@
  *   throwing. A thrown error becomes a JSON-RPC protocol error the model
  *   never sees; an `isError` result is a readable failure it can recover
  *   from — this distinction is easy to get wrong and expensive to debug.
+ * - `demo_whoami` — only meaningful when this server is run over HTTP (see
+ *   `http.ts`), never over stdio. Reports which non-boilerplate headers
+ *   arrived with the call — never their values — to demonstrate that
+ *   Atlas's `/mcp add --token`/`--header` credentials really do reach an
+ *   HTTP MCP server as request headers, not just get stored in config.
  */
 
 import { randomUUID } from "node:crypto";
@@ -56,6 +61,47 @@ const seedRecords = (): DemoRecord[] => [
 ];
 
 const DEFAULT_SEARCH_LIMIT = 10;
+
+/**
+ * Headers every HTTP/SSE client adds on every request regardless of
+ * credentials (transport plumbing, MCP protocol negotiation, standard
+ * fetch/EventSource boilerplate) — never "auth-shaped", so `demo_whoami`
+ * excludes them rather than trying to allowlist every possible credential
+ * header name a user might pass via `--header`.
+ */
+const BORING_HEADERS = new Set([
+  "host",
+  "connection",
+  "accept",
+  "accept-encoding",
+  "accept-language",
+  "content-type",
+  "content-length",
+  "user-agent",
+  "cache-control",
+  "pragma",
+  "origin",
+  "referer",
+  "mcp-protocol-version",
+  "mcp-session-id",
+  // fetch/undici add these Fetch-metadata headers on every request; none
+  // of them carry credentials.
+  "sec-fetch-mode",
+  "sec-fetch-site",
+  "sec-fetch-dest",
+]);
+
+/**
+ * Describes a header's value without ever echoing it back — `demo_whoami`
+ * proves a credential arrived, not what it is.
+ */
+const describeHeaderValue = (raw: string): string => {
+  const bearerMatch = /^Bearer\s+(.+)$/i.exec(raw);
+  if (bearerMatch) {
+    return `Bearer <redacted, ${bearerMatch[1]!.length} chars>`;
+  }
+  return raw.length > 0 ? `present, <redacted, ${raw.length} chars>` : "present (empty)";
+};
 
 /**
  * Builds a fresh {@link McpServer} with the three demo tools registered.
@@ -175,6 +221,42 @@ export const createServer = (): McpServer => {
       ],
       isError: true,
     }),
+  );
+
+  server.registerTool(
+    "demo_whoami",
+    {
+      title: "Report request auth headers (demo)",
+      description:
+        "Reports which non-boilerplate headers arrived with THIS call, without echoing " +
+        "their values — proves a /mcp add --token or --header credential really reached " +
+        "the server as a request header. Only meaningful over HTTP/SSE (see http.ts); " +
+        "over stdio there is no HTTP request, so it reports none.",
+      inputSchema: {},
+      annotations: {
+        title: "Report request auth headers",
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (_args, extra) => {
+      const headers = extra.requestInfo?.headers ?? {};
+      const present = Object.keys(headers)
+        .filter((name) => !BORING_HEADERS.has(name.toLowerCase()))
+        .sort();
+
+      if (present.length === 0) {
+        return { content: [{ type: "text", text: "No auth-shaped headers on this request." }] };
+      }
+
+      const lines = present.map((name) => {
+        const value = headers[name];
+        const raw = Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
+        return `- ${name}: ${describeHeaderValue(raw)}`;
+      });
+      return { content: [{ type: "text", text: lines.join("\n") }] };
+    },
   );
 
   return server;

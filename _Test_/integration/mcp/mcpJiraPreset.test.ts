@@ -2,6 +2,18 @@
  * Integration tests — `/mcp add jira` end to end, through the real config
  * and discovery path, with only the `npx`/mcp-remote spawn stubbed.
  *
+ * @remarks
+ * What's true of every preset uniformly (writes its config verbatim,
+ * prompts for its declared secretFields in order, discovers tools
+ * namespaced `mcp__<id>__*`) now lives in `mcpPresetFlow.test.ts`, which
+ * checks it for jira too — table-driven over `MCP_PRESETS`, so a future
+ * preset gets it automatically. This file keeps only what's genuinely
+ * jira-specific: the exact-endpoint regression guard (jira is the preset
+ * whose URL actually went stale once — see the `/v1/`→`/v2/` history) and
+ * the API-token direct-URL alternative, which exists only because jira's
+ * default preset takes the unusual OAuth-via-mcp-remote path instead of a
+ * static token like every other preset.
+ *
  * Testing pyramid layer : Integration
  * Runner                 : Vitest
  * Real modules wired     : handleMcp (commands/mcpHandlers.ts), the Jira
@@ -13,10 +25,8 @@
  *   `conn.sendCommand` (captures the outgoing sync payload).
  *
  * Category checklist:
- *   ✅ Normal   — writes exactly the preset config with the v2 endpoint;
- *                 discovered tools land in the registry as mcp__jira__*
- *   ✅ Boundary — prompts for no secrets (mcp-remote owns OAuth); the
- *                 API-token direct-URL alternative stores the token
+ *   ✅ Normal   — writes exactly the preset config with the v2 endpoint
+ *   ✅ Boundary — the API-token direct-URL alternative stores the token
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -55,7 +65,6 @@ describe("integration — /mcp add jira", () => {
   let loadConfig: typeof import("../../../packages/client/src/config/index.js").loadConfig;
   let unlockOrSetupConfigCipher: typeof import("../../../packages/client/src/config/index.js").unlockOrSetupConfigCipher;
   let lockCipher: typeof import("@atlasagents/shared").lockCipher;
-  let getToolMetadata: typeof import("../../../packages/client/src/mcp/mcpRegistry.js").getToolMetadata;
   let resetToolRegistryForTests: typeof import("../../../packages/client/src/mcp/mcpRegistry.js").resetToolRegistryForTests;
   let disconnectAllMcpClients: typeof import("../../../packages/client/src/mcp/mcpRegistry.js").disconnectAllMcpClients;
 
@@ -73,7 +82,6 @@ describe("integration — /mcp add jira", () => {
     handleMcp = handlersMod.handleMcp;
 
     const registryMod = await import("../../../packages/client/src/mcp/mcpRegistry.js");
-    getToolMetadata = registryMod.getToolMetadata;
     resetToolRegistryForTests = registryMod.resetToolRegistryForTests;
     disconnectAllMcpClients = registryMod.disconnectAllMcpClients;
   });
@@ -131,22 +139,10 @@ describe("integration — /mcp add jira", () => {
     });
   });
 
-  it("prompts for no secrets — mcp-remote owns the OAuth handshake (boundary)", async () => {
-    const prompts = makePrompts();
-    await handleMcp("add", "jira", fakeConn, fakeFileProxy, prompts);
-    expect((prompts as { question: ReturnType<typeof vi.fn> }).question).not.toHaveBeenCalled();
-  });
-
-  it("discovers jira's tools, namespaced mcp__jira__*, into the registry (normal)", async () => {
-    await handleMcp("add", "jira", fakeConn, fakeFileProxy, makePrompts());
-
-    expect(listToolsMock).toHaveBeenCalledTimes(1);
-    expect(getToolMetadata("mcp__jira__search_issues")).toEqual({
-      serverId: "jira",
-      toolName: "search_issues",
-      readOnly: true,
-    });
-  });
+  // "Prompts for no secrets" and "discovers tools namespaced mcp__jira__*"
+  // moved to mcpPresetFlow.test.ts, which checks both for every preset
+  // (jira included) against an independent golden fixture rather than
+  // jira alone.
 
   it("the API-token direct-URL alternative produces an http server with the token in mcpSecrets (normal)", async () => {
     await handleMcp(

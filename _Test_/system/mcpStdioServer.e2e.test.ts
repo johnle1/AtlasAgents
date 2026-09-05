@@ -13,7 +13,9 @@
  * `examples/mcp-server` is the copy-me template referenced from the README
  * (`/mcp add demo --command node --args ./examples/mcp-server/dist/stdio.js`)
  * — its `demo_search`/`demo_create`/`demo_fail` tools exist specifically to
- * demonstrate the `readOnlyHint` contract this test exercises.
+ * demonstrate the `readOnlyHint` contract this test exercises. (Its fourth
+ * tool, `demo_whoami`, only does anything interesting over HTTP/SSE — see
+ * `mcpHttpServer.e2e.test.ts` — so this file only asserts it's discoverable.)
  *
  * Testing pyramid layer : System / E2E
  * Runner                 : Vitest
@@ -39,10 +41,12 @@ import {
   disconnectAllMcpClients,
   listMcpTools,
 } from "../../packages/client/src/mcp/mcpRegistry.js";
+import { assertBuiltUnderCi } from "../helpers/ciExampleGuard.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STDIO_ENTRY = path.resolve(__dirname, "../../examples/mcp-server/dist/stdio.js");
 const ENTRY_EXISTS = existsSync(STDIO_ENTRY);
+assertBuiltUnderCi("examples/mcp-server/dist/stdio.js", ENTRY_EXISTS);
 const itWhenBuilt = ENTRY_EXISTS ? it : it.skip;
 
 const serverConfig: McpServerConfig = {
@@ -65,18 +69,19 @@ describe("system — real stdio MCP round trip (examples/mcp-server)", () => {
   });
 
   itWhenBuilt(
-    "discovers all three demo tools, with readOnly resolved from real annotations (normal)",
+    "discovers all four demo tools, with readOnly resolved from real annotations (normal)",
     async () => {
       const tools = await listMcpTools("demo", serverConfig, {});
 
       const byName = new Map(tools.map((t) => [t.name, t]));
-      expect(byName.size).toBe(3);
+      expect(byName.size).toBe(4);
       expect(byName.get("demo_search")?.readOnly).toBe(true);
       expect(byName.get("demo_create")?.readOnly).toBe(false);
       // demo_fail declares no annotations at all — the safer default (not
       // read-only) applies, same as resolveToolReadOnly's documented
       // fallback for an unmarked tool.
       expect(byName.get("demo_fail")?.readOnly).toBe(false);
+      expect(byName.get("demo_whoami")?.readOnly).toBe(true);
     },
   );
 
@@ -93,6 +98,15 @@ describe("system — real stdio MCP round trip (examples/mcp-server)", () => {
     const text = JSON.stringify(result.content);
     expect(text).toContain("Welcome to the Atlas MCP server template");
   });
+
+  itWhenBuilt(
+    "demo_whoami reports no auth-shaped headers over stdio — there's no HTTP request to report on (boundary)",
+    async () => {
+      const result = await callMcpToolOnServer("demo", serverConfig, {}, "demo_whoami", {});
+      expect(result.isError).toBeFalsy();
+      expect(JSON.stringify(result.content)).toContain("No auth-shaped headers");
+    },
+  );
 
   itWhenBuilt(
     "calling demo_create then demo_search proves a real round trip mutates real state (normal)",

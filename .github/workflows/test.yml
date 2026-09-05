@@ -80,10 +80,20 @@ jobs:
         # packages/client imports @atlasagents/shared's build output; test:e2e
         # only builds packages/client itself, so this must run first.
         run: npm run build -w @atlasagents/shared
+      - name: Build the example MCP server
+        # examples/mcp-server is outside the root workspace (see the
+        # mcp-server-example job above), so nothing else in this job builds
+        # it — but _Test_/system/mcpStdioServer.e2e.test.ts and
+        # mcpHttpServer.e2e.test.ts spawn examples/mcp-server/dist/*.js as a
+        # real subprocess. Without this step those tests silently skip.
+        working-directory: examples/mcp-server
+        run: npm install && npm run build
       - name: Install test suite dependencies
         working-directory: _Test_
         run: npm install
       - name: System (E2E) tests
         # Builds packages/client itself, so system tests never silently skip in CI.
+        env:
+          CI: true
         working-directory: _Test_
         run: npm run test:e2e
