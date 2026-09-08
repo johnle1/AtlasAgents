@@ -157,9 +157,28 @@ Deploy/
 .claude/
 .cursor/
 
-# atlas-server runtime data (self-signed TLS key/cert + encrypted
-# password/session data), generated wherever atlas-server is launched from.
-# Anchored to packages/ specifically so this can never match the tracked
-# source directory packages/server/src/server/tls/.
+# atlas-server runtime data: self-signed TLS keypair plus encrypted server
+# password, provider secrets, and MCP tool cache. These roots resolve from
+# process.cwd() (server/tls/certificateStore.ts, setup/installUserDataDefaults.ts),
+# so they land in whichever directory the server was launched from — not just
+# packages/. Rules below must therefore not assume a single launch point.
+
+# Unanchored is safe: no tracked path has a "user-data" segment, and packaged
+# defaults live in packages/server/default-data/, not here.
+user-data/
+
+# tls/ must NOT be unanchored — it would swallow the tracked source dirs
+# packages/server/src/server/tls/ and packages/client/src/connection/tls/.
+# Anchor the realistic launch roots...
+/tls/
 /packages/tls/
-/packages/user-data/
+/packages/server/tls/
+
+# ...and match key material by extension as the real backstop, so a keypair
+# written from any other cwd is still caught. No .pem/.key/.crt/.p12/.pfx file
+# is tracked in this repo. Use `git add -f` for a deliberate test fixture.
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
